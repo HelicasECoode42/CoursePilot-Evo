@@ -18,4 +18,4 @@ Vue 3 Web 接受学生已修课程与目标；**System 2** Python Planning Agent
 6. [五人分工和子 TRD](docs/05-team-and-sub-trds.md)、[学习仓库](docs/08-learning-repos.md)
 7. [项目编码 Agent 约定](AGENTS.md)、[五人 GitHub 协作约定](docs/12-github-collaboration.md)及[Mermaid 图源](docs/diagrams/README.md)
 
-原 v0.1 讨论稿保留在 `docs/archive/`，八周安排已失效。`data/raw/` 的原始工作簿和插件副本只作本地输入并被 Git 忽略。**计划建立五人协作的私有 GitHub 仓库；当前凭据失效，远程尚未创建**。PhysicalRSI/GDPevo 仅作设计参考，不是本项目已复现或已达成的结果。
+原 v0.1 讨论稿保留在 `docs/archive/`，八周安排已失效。`data/raw/` 的原始工作簿和插件副本只作本地输入并被 Git 忽略。**私有 GitHub 仓库已创建并推送：[HelicasECoode42/CoursePilot-Evo](https://github.com/HelicasECoode42/CoursePilot-Evo)**；四位成员待提供用户名后邀请。PhysicalRSI/GDPevo 仅作设计参考，不是本项目已复现或已达成的结果。

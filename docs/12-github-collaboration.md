@@ -1,10 +1,10 @@
 # 五人 GitHub 协作约定
 
-> 2026-09-29。**私有远程仓库尚未创建**：本机 `gh` 保存的 GitHub 登录令牌已失效，GitHub 创建页也要求重新登录。不要把本文件当作已经开仓、已邀请成员或已启用保护规则的证明。
+> 2026-09-29。私有仓库 [HelicasECoode42/CoursePilot-Evo](https://github.com/HelicasECoode42/CoursePilot-Evo) **已创建并推送 `main`**。四位成员尚待提供 GitHub 用户名并邀请；分支保护规则尚未启用。
 
 ## 建仓方案
 
-仓库建议名 `CoursePilot-Evo`，归用户本人账号、**Private**。从当前独立 CoursePilot 项目推送；不关联 DOVideo 上游仓库。推送前检查 `git status`、`git remote -v`、`git ls-files`，确保 `data/raw/` 的原始 `.xls`、第三方 UserScript、教务 Cookie/Token、学号成绩和模型密钥未被跟踪。GitHub 登录恢复后先创建私有仓库、推送 `main`，再由用户提供四名成员的 GitHub 用户名邀请协作；成员接受邀请后才有访问权限。
+仓库名 `CoursePilot-Evo`，归 `HelicasECoode42` 账号，**Private**，由独立 CoursePilot 本地项目创建，与 DOVideo 上游仓库无关。已核对 `git ls-files`：`data/raw/` 的原始 `.xls`、第三方 UserScript、教务 Cookie/Token、学号成绩和模型密钥未被跟踪。用户提供四名成员的 GitHub 用户名后发邀请；他们接受邀请后才有访问权限。
 
 ## 五周最小工作流
 
