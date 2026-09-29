@@ -1,88 +1,65 @@
-# Java 落地方案：教学计划导入、SQL 与小型规则引擎
+# Java 落地方案：自动导入、SQL 与确定性规则
 
-> 2026-09-29 决策补充。当前只有 `.xls` 原件与静态插件代码；**无法登录选课页验证班次响应**。下文是 A/B 成员的实施方案，不是已实现功能。
+> 2026-09-29 设计稿。当前只有原始 `.xls` 和插件源码；CoursePilot 尚未实现导入，也无法实测选课页。目标是**已知模板自动校验并发布，异常自动阻断**，不要求每次导入人工审批。
 
-## 1. 三类信息不要混成一张“课程表”
+## 1. 三类数据的来源
 
-| 信息 | 当前可靠来源 | 入库对象 | 首版能做什么 |
-| --- | --- | --- | --- |
-| 培养要求、课程及建议学期 | 用户提供的 2024 级 `.xls`；选定路径人工复核 | `CurriculumSnapshot / Course / CurriculumCourse / RequirementRule` | 查缺学分、必修、选修类别、来源说明 |
-| 本学期某教师的某教学班及具体上课时间 | 当前**没有可实测的真实快照**；只可从脚本推断字段 | `OfferingSnapshot / CourseOffering / Meeting` | 先用明确标为 `SYNTHETIC` 的测试数据验证时间解析与冲突算法；不能推荐为真实开课 |
-| 某门课/教师的主观评价 | [选课小本本](https://course-rate.icu/) 的公开页面 | 首版仅 `ExternalReviewLink`（URL、课程号、教师名、查看日期） | 在推荐卡片给学生可点开的参考链接；不当培养规则或本学期开课事实 |
-
-我只读查看了该网站的首页和一门课程页：页面展示课程号、教师、评价标签/评论，并有同名插件安装入口；查看到的页面**没有可核验的当学期教学班时间**。网站页脚标注 `CC-BY-NC-ND`，因此首版不批量抓取、复制或改写评论入数据库，若以后要利用内容需单独核实授权与可用接口。课程名可能合并多个课程号，同一教师也可能教多个班；`课程名 + 教师名` 不能作为可信主键。
+| 信息 | 当前来源 | 首版边界 |
+| --- | --- | --- |
+| 培养要求、课程、学分、建议学期 | 用户提供的 2024 级 `.xls` | 选一条计算机路径，编译为带单元格来源的不可变快照 |
+| 本学期教学班、教师、上课时间 | 当前没有可实测的真实快照；插件仅提供静态字段线索 | 标为 `SYNTHETIC` 的 fixture 只验证时间解析/冲突算法；真实开课回答 UNKNOWN |
+| 课程/教师主观评价 | [选课小本本](https://course-rate.icu/) 的公开页面 | 只存外部链接，不把评论当作培养规则或本学期班次事实 |
 
 ```mermaid
 flowchart LR
-  XLS[2024级教学计划 xls] --> STAGE[Java POI staging + 异常清单]
-  STAGE --> REVIEW[人工审核一条培养路径]
-  REVIEW --> SQL[(MySQL: 课程 / 培养规则 / 来源版本)]
-  DEMO[明确标记 SYNTHETIC 的班次 fixture] --> SQL
-  WEB[选课小本本公开页] --> LINK[仅保存外部评价链接]
-  LINK --> SQL
-  SQL --> RULE[Java typed Rule Evaluators]
-  RULE --> TOOL[查询 / 要求核对 / 计划验证 Tool API]
-  TOOL --> AGENT[AI 理解目标与解释结果]
+  XLS[2024 级教学计划 xls] --> P[POI 解析 + 路径模板]
+  P --> C[受控规则编译]
+  C --> V{自动校验门槛}
+  V -->|全部通过| S[原子发布不可变快照]
+  V -->|未知/不一致| I[ImportIssue + 阻断发布]
+  S --> DB[(MySQL 课程/规则/来源/版本)]
+  I --> U[相关事实 UNKNOWN]
+  DB --> E[Java typed Rule Evaluators]
+  E --> API[查询/要求核对/计划验证 Tool API]
+  API --> A[Planning Agent]
 ```
 
-## 2. A 怎么导入 `.xls`：先 staging，后发布快照
+## 2. A 实现“教学计划编译器”，不是数据录入员
 
-**第 1 步：选一个路径。** 先定计算机科学与技术非直招或直招之一，显式配置其三张 sheet 名。原文件 24 张表，不能按“名字相似”混合。`计科学1/计科学2/计科3` 的表型不同；表 2 还有左右两组课程。把 `sourceFileSha256, cohortYear, majorCode, trackCode, importerVersion` 合成 `curriculumSnapshotId`。
+**路径与读取。** 首版显式选择一条计算机科学与技术培养路径，配置其三张 sheet 和左右列组。原文件有 24 张表，不能按相似名称混读。Java 21 + Apache POI `WorkbookFactory`/`DataFormatter` 保留课程号前导零，为每条结果记录 `rawText, sheetName, rowIndex, columnIndex`。分别处理表头、合并单元格、空行、小计和左右并列表。`sourceFileSha256 + cohortYear + majorCode + trackCode + importerVersion` 标识快照。
 
-**第 2 步：逐格读原值。** Java 21 + Apache POI `WorkbookFactory` 打开 `.xls`，`DataFormatter` 读课程编号，保留 `009...` 前导零。每条 draft 同时保存 `rawText, sheetName, rowIndex, columnIndex`。表头、小计、合并单元格、空行与左右并列列组分别处理，不以某一列非空就断言是一门课。
+**受控编译。** 学分、课程号、建议学期以及已明确定义的文字格式可转换为 `CourseDraft`、`CurriculumCourseDraft`、`RequirementDraft`。`08305011~012`、`8+4`、三选一、全英语等写法只有在模板配置中定义精确含义、配黄金样例后才能编译成 typed rule。未知写法输出 `ImportIssue`；不能让 AI 猜测含义后自动写入 hard rule。
 
-**第 3 步：只解析确定内容。** 生成 `CourseDraft`、`CurriculumCourseDraft`、`RequirementDraft`。学分数值、课程号、建议学期可自动入草稿；`08305011~012`、`8+4`、三选一、全英语要求、文字备注、缺学分等进入 `ImportIssue`。不要让 AI 自动批准这些规则。
+**自动发布门槛。** 必须同时通过：路径/sheet/表头指纹匹配；必需列和课程号有效；没有静默覆盖的重复代码；学分与可核对的小计/总计一致；每条 hard rule 有支持的 `ruleType` 和来源坐标；课程数相对基线的差异在明确配置内；黄金样例与导入回归测试通过。全部通过才在数据库事务中发布；任一失败则拒绝发布并给出带单元格坐标的异常报告，受影响事实返回 UNKNOWN。首个模板基线需与原件做**一次**独立核对；之后同模板日常重导无需人工逐条审核。模板变化、新规则或难以解析的备注，由开发者补映射、样例、测试与代码审查后才进入下一版。
 
-**第 4 步：人工审核并发布。** 用一张审核表显示原单元格、机器提取值、处理决定与审核人。每种表型至少抽查 5 行，关键学分/总计独立核对；`APPROVED` 才可用于 Java 规则。已发布快照不可就地改；修正规则产生新 `importerVersion`/快照，旧评测继续指向旧版。相同 hash + 路径 + 版本重复导入必须幂等。
+**版本与接口。** 已发布快照不可就地改；相同 `fileHash + path + importerVersion` 重导幂等。解析器修正升版本，保留旧快照和差异报告。建议 `POST /api/v1/curriculum-imports` 返回 `PUBLISHED | REJECTED`、`snapshotId?`、`issues[]`、`diff`；`GET /api/v1/curriculum-snapshots/{id}` 返回来源。五周可先做 CLI + JSON 异常报告，再接 Spring Boot API。人工点“批准”不能绕过自动门槛。
 
-建议接口：`POST /api/v1/curriculum-imports/preview` 返回 draft 与异常；`POST /api/v1/curriculum-imports/{id}/publish` 只发布人工审核项；`GET /api/v1/curriculum-snapshots/{id}` 可追溯来源。五周内也可先用命令行 preview + 人工维护审核 JSON，待 B 的 API 成熟后再做页面审核器。
+## 3. SQL 存事实与版本，Java 计算规则
 
-## 3. SQL 存事实和版本；Java 计算规则
+建议 MySQL 8 + Flyway。最小表：`curriculum_snapshot(id,file_sha256,cohort_year,major_code,track_code,importer_version,status,published_at)`；`course(course_code,name)`；`curriculum_course(snapshot_id,course_code,category,credits,suggested_term,source_sheet,source_row,source_col)`；`requirement_rule(snapshot_id,rule_type,params_json,source_ref,compile_status)`；`import_issue(import_id,source_ref,issue_code,severity,raw_text)`；`completed_course(attempt_id,session_id,course_code,recognized_credits,evidence_status)`；`offering_snapshot(id,source_type,term_xnm,term_xqm,captured_at,adapter_version)`；`course_offering(snapshot_id,class_id,course_code,teacher_text,credits,capacity,parse_status)`；`meeting(offering_snapshot_id,class_id,seq,day,section_start,section_end,weeks_json,raw_text)`；`external_review_link(course_code,teacher_key,url,match_status)`。
 
-建议 MySQL 8 + Flyway。最小表关系如下，字段名是**设计草案**，不要求 A/B 第一天写齐所有表：
+课程代码用字符串；不同培养路径可给同一课程不同类别和计入方式；不同教师/教学班必须独立标识。`params_json` 只接收白名单字段，经 Java 类型校验，不执行任意 SQL/脚本/模型表达式。SQL 负责查事实、关联、来源与事务；纯 Java Service 负责计算，便于 JUnit 对照。
 
-| 表 | 关键字段 / 主键 | 作用 |
-| --- | --- | --- |
-| `curriculum_snapshot` | `id, file_sha256, cohort_year, major_code, track_code, importer_version, review_status` | 一个年级/专业/招录路径的审核版本 |
-| `course` | `course_code`（字符串）, `name` | 课程目录；名称可变，代码不转数字 |
-| `curriculum_course` | `id, snapshot_id, course_code, category, credits, suggested_term, source_sheet, source_row, source_col`；来源坐标建唯一约束 | 课程在某路径的归属、学分和原表证据；重复课程号先列异常，不静默覆盖 |
-| `requirement_rule` | `rule_id, snapshot_id, rule_type, params_json, source_ref, review_status` | 经过人工确认的 typed 培养规则；原文一并保存 |
-| `completed_course` | `attempt_id, session_id, course_code, recognized_credits, evidence_status` | 保留重修/多次记录，Java 只计入经认定的有效学分；不等于教务成绩真源 |
-| `offering_snapshot` | `id, source_type, term_xnm, term_xqm, captured_at, adapter_version` | 班次版本；首版仅 `SYNTHETIC` 测试快照 |
-| `course_offering` | `snapshot_id + class_id`, `course_code, teacher_text, credits, capacity, parse_status` | 教学班，不能用教师名或课程名作主键 |
-| `meeting` | `offering_snapshot_id + class_id + seq`, `day, section_start, section_end, weeks_json, raw_text` | 上课时间；解析失败保留原文并标未知 |
-| `external_review_link` | `course_code + teacher_key + url` | 跳转到外部评价，`teacher_key` 匹配状态可为 `UNVERIFIED` |
+## 4. B 实现小型 typed evaluator
 
-`requirement_rule.params_json` 只存受控字段，由 `rule_type` 对应的 Java 类校验；不要把任意 SQL 或 AI 生成的表达式放进去执行。SQL 负责查数据、版本、路径和关联；规则计算在纯 Java Service 中完成，方便 JUnit 对照。对同一课程不同培养路径，`curriculum_course` 可以有不同类别/计入方式；对同一课程不同老师，`course_offering` 和外部评价引用分开保存。
-
-## 4. B 怎么写规则引擎：少量 typed evaluator
-
-首版只实现能人工对照的 3–4 类，不引入 Drools 或“任意自然语言规则引擎”：
-
-| `rule_type` | 参数例子 | Java 算法 | 缺什么就 `UNKNOWN` |
+| 类型 | 参数 | 算法 | UNKNOWN 条件 |
 | --- | --- | --- | --- |
-| `REQUIRED_COURSE` | `courseCode` | 已修集合包含该代码且认定有效 | 已修记录不完整/代码认定不明 |
-| `MIN_CATEGORY_CREDITS` | `category, minimumCredits` | 已修、已认定、属该路径该类别的学分求和，与门槛比较 | 类别或学分待审核；学生未声明已修记录完整 |
-| `ONE_OF` | `courseCodes, minCount` | 集合命中数量/学分 | 组合编号未人工拆解 |
-| `FULL_ENGLISH_MIN_COUNT`（可选） | `minCount` | 仅用有来源且经审核的课程英语标记计数 | `.xls` 有要求文本但课程标记/已修证据不足 |
+| `REQUIRED_COURSE` | `courseCode` | 已认定有效的已修集合是否包含课程 | 已修清单不完整/代码认定不明 |
+| `MIN_CATEGORY_CREDITS` | `category, minimumCredits` | 路径类别内有效学分求和并比较门槛 | 类别或学分未通过导入门槛；已修不完整 |
+| `ONE_OF` | `courseCodes, minCount` | 集合命中数 | 组合编号无法按受控模板拆解 |
+| `FULL_ENGLISH_MIN_COUNT`（可选） | `minCount` | 有来源的英语课程标记计数 | 标记或已修证据不足 |
 
-统一接口可写为 `RuleEvaluator.evaluate(RequirementRule rule, CompletedTranscript transcript, CurriculumSnapshot snapshot) -> RuleResult`；`RuleResult.status` 为 `SATISFIED | NOT_SATISFIED | UNKNOWN`，并带 `required/actual/gap/sourceRefs/reasons`。只有学生明确声明已修清单完整、对应学分与规则均已审核，才能把不足判为 `NOT_SATISFIED`；资料不足时给 `UNKNOWN`，不能算 0 学分。`PlanVerifier` 在此基础上检查重复修读、跨路径课程和用户 hard condition。偏好如“课表别太碎”独立计算，不改变硬规则状态。
+`RuleEvaluator.evaluate(rule, transcript, snapshot) -> RuleResult` 返回 `SATISFIED | NOT_SATISFIED | UNKNOWN` 与 `required/actual/gap/sourceRefs/reasons`。只有已修清单明确完整、对应规则和学分通过导入门槛，才可判“不满足”；资料缺失不能当 0 学分。`PlanVerifier` 再检查重复修读、跨路径和硬偏好；软偏好指标另算。Agent 只解释 Java 结果，不自行计算或宣布硬事实。
 
-例如人工审核 `计科学1!F45` 后，规则记录可写成 `MIN_CATEGORY_CREDITS`、`{"category":"专业选修","minimumCredits":24}`。若学生声明已修清单完整，Java 查询该路径已认定的专业选修学分为 18，就返回 `NOT_SATISFIED, gap=6, sourceRef=计科学1!F45`；清单不完整则返回 `UNKNOWN`。AI 只把这个结果解释给学生，不重新计算 24−18。
+## 5. 上课时间和浏览器插件
 
-## 5. 上课时间怎么解析和测试
+本机插件匹配 `https://jwxt.shu.edu.cn/jwglxt/xsxk/*`，`@grant none`，改写 `window.jQuery.post` 观察选课页响应。**只有用户能访问匹配页面、页面确实发出相应请求并返回数据时**，插件才可能读到教学班；现在未实测，不能把它称作稳定官方 API。原脚本还含 `initXz(); yd.click()`，不可原样当只读采集器。以后若得到合法样例，独立开发只读 Browser Adapter，由浏览器利用当前登录态导出最小 JSON；后端不模拟登录、不保存 Cookie/Token。详见[浏览器适配说明](09-browser-adapter.md)。
 
-从插件源码只能知道它尝试解析连续周、单双周、离散周，**无法证明真实页面有哪些其他格式**。A/B 先用显式标记的模拟样例，例如 `星期三第3-4节{1-16周(单)}`，转成 `Meeting(day=3, sections={3,4}, weeks={1,3,...,15})`。两班冲突是 `(星期、节次、周次)` 集合有交集；同一天同节但单双周不同不冲突。未知格式保存 `rawText`、`parseStatus=UNKNOWN_TIME_FORMAT`，Java 返回 `UNKNOWN`，不得输出“无冲突”。
+首版用明确标为 `SYNTHETIC` 的样例，例如 `星期三第3-4节{1-16周(单)}`，归一成 `Meeting(day, sections, weeks)`。两个教学班在星期、节次、周次三维同时相交才冲突。未知格式保留原文并返回 `UNKNOWN_TIME_FORMAT`，不能判“无冲突”。这验证算法，不证明当期开课。
 
-这一步验证的是**解析器与冲突算法**，不是学校当前开课数据。真实 CourseOffering 导入、`classId`/教师映射和周五空课承诺均等到可授权访问选课页并取得样例后再做。届时使用 [浏览器快照契约](09-browser-adapter.md)；Spring Boot 不登录教务系统，也不持有 Cookie/Token。
+## 6. 五周验收
 
-## 6. AI 到底负责什么
-
-AI 可以读学生问题，抽取“数学必须上”为 hard condition、“周五最好空”为 soft preference；可以读 Java 返回的**少量结构化事实**，解释缺口、比较建议和提出澄清。导入阶段 AI 可辅助把复杂备注**起草**为候选规则，必须由人对照原表批准后才入 `requirement_rule`。运行时不把整份 `.xls` 或所有评论塞给模型，也不允许模型自己算学分、宣布规则满足或把模拟课表说成真实开课。学分、课程归属和毕业要求用 SQL + Java typed rules，不用 RAG 检索片段作为这些硬事实的判定器。
-
-## 7. 五周最小验收顺序
-
-1. W1：A 选路径、解析 `.xls` 到 preview/异常清单；B 冻结 SQL 表和 3 类规则 DTO；课程/教师评价只留链接。班次来源状态记 `UNVERIFIED_NO_ACCESS`。
-2. W2：A 人工审核并发布一个真实培养快照；B 完成 SQL 导入、要求核对、来源追踪和 JUnit 对照。
-3. W3：B 用模拟班次完成时间解析/冲突测试；C/E 接 Java Tool，界面明确显示“模拟数据/真实数据不可用”。
-4. W4–5：Benchmark 把真实培养核对和模拟冲突测试分开统计；任何老师演示都能指出哪些结论来自 `.xls`，哪些只是算法样例。真实网页快照获得后才安排独立验证，不阻塞五周核心闭环。
+1. W1：A 固定路径与模板，产出 preview/异常/黄金样例；B 冻结 SQL、DTO、规则类型。真实班次状态 `UNVERIFIED_NO_ACCESS`。
+2. W2：A 交自动校验、失败阻断、幂等和原子发布；首个模板基线一次独立核对；B 交 SQL、核对和 JUnit 对照。
+3. W3：B 用模拟班次验证时间解析与冲突；C/E 集成并清楚显示真实/模拟/未知。
+4. W4-5：Benchmark 分开统计真实培养规则任务与模拟时间算法任务，保留失败例和版本。真实选课页样例出现后单独验证，不阻塞五周主线。
