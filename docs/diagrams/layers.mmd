@@ -1,10 +1,11 @@
 flowchart TB
-  UI[学生与教师演示界面] --> AG[Python Planning Agent]
-  AG --> API[版本化 Tool API]
-  API --> JAVA[Java Spring Boot: Environment / Truth / Verifier]
-  JAVA --> DATA[(培养方案 班次快照 已修记录 来源)]
-  AG --> TRACE[Trace 与任务结果]
+  UI[Vue Web 工作台] --> AG[Python FastAPI Planning Agent]
+  AG --> API[版本化 HTTP Tool API]
+  API --> JAVA[Java Spring Boot: 课程环境与 Verifier]
+  JAVA --> DATA[(MySQL: 课程 规则 来源 已修样例)]
+  XLS[2024级教学计划 xls] --> JAVA
+  AG --> TRACE[JSONL Trace 与固定任务]
   JAVA --> TRACE
-  TRACE --> EVO[Python Benchmark / Weakness Miner / Evolver]
+  TRACE --> EVO[Python Benchmark / Evolver]
   EVO --> PROMOTE[候选 Harness 晋级或回滚]
   PROMOTE --> AG

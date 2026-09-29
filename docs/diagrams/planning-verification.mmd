@@ -1,17 +1,18 @@
 sequenceDiagram
   autonumber
   actor Student as 学生
-  participant Agent as Planning Agent
-  participant Tools as Java Tool API
-  participant Verifier as Java Verifier
-  Student->>Agent: 目标与偏好
-  Agent->>Tools: 查询要求 课程 班次
-  Tools-->>Agent: 带来源的事实和未知项
-  Agent->>Agent: 形成候选方案
-  Agent->>Verifier: validatePlan(plan, snapshotId)
-  Verifier-->>Agent: 硬错误 未知项 偏好分项 依据
-  alt 有硬错误
-    Agent->>Agent: 修正或请求放宽条件
-    Agent->>Verifier: 再次核验
+  participant Web as Vue 网页
+  participant Agent as FastAPI Planning Agent
+  participant Java as Spring Boot Tool API
+  Student->>Web: 选路径 录已修课 输入目标
+  Web->>Agent: POST planning
+  Agent->>Java: 查询课程与培养要求
+  Java-->>Agent: 学分缺口 来源 未知项
+  Agent->>Agent: 提出建议课程
+  Agent->>Java: validateRecommendation
+  Java-->>Agent: 合法课程 硬错误 未知班次
+  alt 候选有硬错误
+    Agent->>Agent: 修正一次或澄清
   end
-  Agent-->>Student: 核验后方案 取舍 来源
+  Agent-->>Web: 已核验 建议 未知 来源
+  Web-->>Student: 分区展示结果

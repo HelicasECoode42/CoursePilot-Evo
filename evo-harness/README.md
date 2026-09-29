@@ -1,3 +1,3 @@
-# Benchmark 与 Harness 自进化
+# Benchmark 与自进化执行器（待实现）
 
-待实现。负责固定任务、Trace、失败归因、白名单修改、留出集验证和晋级/回滚。不得修改 Java Verifier、题目答案、模型或预算。
+技术栈：Python、pytest、JSONL 和 Git 内容 hash。负责固定任务、失败聚类、最小候选文本 diff、复评、晋级或回滚。首版不做通用平台。见 `docs/trd/e-benchmark-rsi.md`。

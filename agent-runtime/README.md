@@ -1,3 +1,3 @@
-# Planning Agent
+# Planning Agent（待实现）
 
-待实现。负责自然语言目标理解、必要澄清、Java 工具调用、候选方案、核验失败后的修正与有依据的解释。硬事实只来自 Java Tool API。
+技术栈：Python 3.11+、FastAPI、Pydantic、httpx 与一个 OpenAI-compatible 模型客户端。网页只请求此服务；服务通过 Java Tool API 获取硬事实。见 `docs/trd/d-agent.md`。

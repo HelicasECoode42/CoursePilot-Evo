@@ -1,11 +1,11 @@
 flowchart LR
-  S[全组: 数据与契约冻结] --> A[A: 导入与来源]
-  S --> B[B: 规则与 Verifier]
-  S --> C[C: API Trace 页面]
-  A --> B
-  B --> D[D: Planning Agent]
-  C --> D
-  B --> E[E: Benchmark 与 RSI]
-  C --> E
-  D --> E
-  E --> I[全组: 集成验收]
+  S[第1周: 路径与契约冻结] --> A[A: POI 导入]
+  S --> E0[E: 人工任务标签]
+  A --> B[B: Java 核对]
+  B --> C[C: Tool API]
+  C --> D[D: Planning Agent]
+  C --> W[C: Vue Web]
+  D --> E[E: Benchmark 与 RSI]
+  E0 --> E
+  E --> I[第5周: 演示与报告]
+  W --> I

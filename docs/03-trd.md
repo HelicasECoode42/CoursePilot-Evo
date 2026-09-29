@@ -1,61 +1,65 @@
-# 总体 TRD v0.1｜CoursePilot-Evo
+# 总体 TRD v0.2｜五周最小实现
 
-状态：设计待评审。本文定义可并行开发的边界，具体字段在第 1 周用真实数据样本冻结。详细对象、状态、版本和 Trace 见[统一规范](04-infrastructure-workflow.md)。
+本文件确定技术栈、进程、数据模型和接口。尚未实现；第 1 周用真实样本冻结 v1 契约。细节见[工作流规范](04-infrastructure-workflow.md)与[五份子 TRD](05-team-and-sub-trds.md)。
 
-## 1. 部署与依赖方向
+## 1. 技术栈定案
 
-- `web`：输入、方案/来源对比、评测结果展示。
-- `java-environment`（Java 21 + Spring Boot）：数据导入、领域模型、Tool API、Verifier、记录存储；MySQL 为建议存储，课程要求可调整。
-- `agent-runtime`（Python）：Planning Agent、模型适配器、工具客户端；只消费公开 Tool API。
-- `evo-harness`（Python）：Benchmark、Trace 采集、弱点归因、Evolver、晋级/回滚；只能读取 Java Verifier 结果，不能修改它。
-
-依赖方向：Web → API；Planning Agent → Java Tool API；Harness → Agent Runner / Verifier API。Java 不依赖 Python Agent 或模型输出。评测留出集由测试负责人封存，Evolver 只读训练失败轨迹。
-
-## 2. Java 领域与工具
-
-核心对象：`Course`（课程代码、名称、类别、学分）、`Offering`（课程、班次、学期、周次/节次）、`Requirement`（规则类型、门槛、适用培养方案、来源）、`CompletedCourse`（学生、课程、成绩/学分、状态）、`Preference`（类型、权重、硬/软）、`Plan`（班次集合、快照 ID）。缺失值必须显式 `UNKNOWN`，不能用空字符串冒充通过。
-
-拟定工具：
-
-| 工具 | 输入 | 输出及验证责任 |
+| 组件 | 建议技术 | 为什么选它，五周内做什么 |
 | --- | --- | --- |
-| `GET /v1/courses` | 快照、筛选条件 | 课程及来源，不捏造未导入班次 |
-| `POST /v1/requirements/audit` | 培养方案 ID、已修记录引用 | 满足项、缺口、未知项、规则依据 |
-| `POST /v1/offerings/conflicts` | 快照、班次 ID 列表 | 冲突对与周次/节次证据 |
-| `POST /v1/plans/validate` | 快照、Plan、硬条件 | 硬错误、未知项、软偏好分项、`verifierResultId` |
-| `GET /v1/snapshots/{id}` | 快照 ID | 数据来源、学期、版本、校验和 |
+| 培养计划导入 | Java 21、Apache POI `WorkbookFactory`/`DataFormatter` | 原始文件是二进制 `.xls`；保留前导零、三种表型、来源坐标 |
+| 真值与 API | Spring Boot、Spring Web、Bean Validation、JUnit 5 | 把规则核对封成 typed HTTP 工具，可独立测试 |
+| 存储 | MySQL 8 + Spring Data JPA + Flyway（Docker Compose） | 存快照、课程、规则、已修样例和核验结果；迁移可重复 |
+| Agent 服务 | Python 3.11+、FastAPI、Pydantic、httpx、一个 OpenAI-compatible 模型客户端 | 单 Agent 有界工具循环，Python 通过 HTTP 调 Java；不引入多 Agent 框架 |
+| 页面 | Vue 3 + Vite + 原生 Fetch | 单页展示；浏览器只请求 Python API，Python 代理 Java 工具 |
+| Benchmark/RSI | Python、pytest、JSONL/JSON、Git 内容 hash | 固定任务、逐条评分、候选 Prompt diff、晋级/回滚；不另起数据库 |
 
-所有请求带 `requestId`、`schemaVersion`；所有响应带 `snapshotId` 和 `provenance[]`。错误以机器可读 `code` 返回，不让 Agent 从 HTTP 文本猜测。若需登录，学生记录只按授权用户可读。接口入参要有长度、ID、类别校验。
+建议本地端口：Web `5173`、Agent `8000`、Java `8080`、MySQL `3306`。端口只是开发约定，配置可改。前端**不直接调用模型**；模型密钥只在 Python 服务环境变量中。Java 不导入 Python 代码，Python 不读 MySQL 表，只用 Java Tool API。
 
-## 3. Planning Agent
+## 2. 最小目录和数据模型
 
-输入为用户目标、受限的已修记录引用和数据快照。Agent 从语言中抽取“必须上数学”之类硬条件与“尽量空周五”之类软偏好；无法确认课程或规则时调用工具。生成候选方案后必须 `validatePlan`，有硬错误则修正或请用户决定放宽；达到固定修正次数上限时返回已知问题，不能假装完成。最终说明引用 `verifierResultId`、规则/班次来源和未知项。
+- `java-environment/`: `importer/`, `domain/`, `rule/`, `api/`, `persistence/`, `src/test/`。
+- `agent-runtime/`: `app.py`, `planner.py`, `tools.py`, `schemas.py`, `harness/`。
+- `web/`: Vue 单页及 API client。现目录 `web/` 尚未创建。
+- `benchmark/`: `cases/`, `labels/`, `runner.py`, `scorer.py`, `runs/`；留出集标签不能给 Evolver。
+- `evo-harness/`: `miner.py`, `evolver.py`, `promotion.py`，只写 Harness 白名单。
 
-模型提示词、Skill、工具描述按 `harnessVersion` 固定，推理模型、温度、预算、工具集合在同一评测批次固定。不要把已修记录原文、密钥或完整 Trace 输入给 Evolver。
+MySQL 核心表：`source_snapshot(id, file_sha256, major, track, reviewed, imported_at)`；`course(code, title, credits, category, suggested_term, source_sheet, source_row, snapshot_id)`；`requirement(id, type, target, expression, review_status, source_sheet, source_row, snapshot_id)`；`completed_course(session_id, course_code, recognized_credits)`；`verification_result(id, snapshot_id, status, violations_json, unknowns_json, provenance_json)`。组合课程编号和文字备注先保存 `raw_value` 与审核状态，不强拆成伪单课。
 
-## 4. Benchmark 与自进化
+## 3. 版本化接口（草案）
 
-```mermaid
-flowchart LR
-  BASE[稳定 Harness] --> RUN[训练任务]
-  RUN --> TRACE[Trace 与 Java 分数]
-  TRACE --> MINE[弱点聚类]
-  MINE --> EDIT[最小修改 Prompt Skill Tool 描述]
-  EDIT --> CAND[候选版本]
-  CAND --> HELD[回归与封存留出集]
-  HELD --> GATE{硬错误零增长且留出集无退化?}
-  GATE -->|是| PROMOTE[晋级]
-  GATE -->|否| ROLLBACK[回滚]
+| 接口 | 调用者 | 结果 |
+| --- | --- | --- |
+| `GET /api/v1/snapshots` | Python/Web 经代理 | 已导入且人工核对的路径与文件版本 |
+| `GET /api/v1/courses?snapshotId=...` | Python | 课程目录、类别、学分、建议学期和来源 |
+| `POST /api/v1/requirements/audit` | Python | 已满足、缺口、未知项和规则依据 |
+| `POST /api/v1/recommendations/validate` | Python | 建议课程代码是否存在/同路径、学分与已修重复；班次字段缺失时 `UNKNOWN` |
+| `POST /api/v1/planning`（FastAPI） | Web | `taskId`、结构化答复、`verifierResultId`、引用与未知项 |
+
+请求封套含 `schemaVersion, requestId, snapshotId`。Java 响应含 `status: OK|UNKNOWN|INVALID_INPUT|SNAPSHOT_MISMATCH|ERROR`、`data`、`provenance[]`、`warnings[]`。示例：
+
+```json
+{
+  "schemaVersion":"1.0","requestId":"demo-001","snapshotId":"sha256:...",
+  "status":"UNKNOWN","data":{"missingCredits":4},
+  "provenance":[{"sheet":"计科学1","row":45,"field":"专业选修学分"}],
+  "warnings":["缺少当学期班次快照，无法校验时间冲突"]
+}
 ```
 
-任务分为训练、开发、留出三组，覆盖正常规划、含糊偏好、规则冲突、无班次数据、主观评价引用和恶意/矛盾输入。题目含数据快照 ID、用户表达、人工标注的关键事实与验收断言；留出集不提供给 Evolver。固定种子和模型版本，重复运行时记录方差。
+`UNKNOWN` 与 Java 500 错误分开处理。最终答复区分 `verifiedFacts[]`、`recommendations[]`、`unknowns[]`。任何学分差额要有 `requirementId`/来源；没有核验依据的 Agent 句子只能标建议。
 
-评分先以 Java 硬错误和规则核对为门槛，再看任务完成、引用完整度与偏好。弱点归因按错误码、工具缺失、解释遗漏聚类。Evolver 输出**最小 diff**和修改理由，只能改白名单目录里的提示词/Skill/工具说明。候选重新跑回归和留出集；硬错误增加直接回滚，留出集成功率下降也回滚。晋级记录版本 hash、任务集 hash、模型配置、分数和批准原因。人工可一键回滚到上个稳定版本。
+## 4. Agent 的实际运行算法
 
-## 5. 数据与存储建议
+1. Pydantic 解析用户输入，检查路径、已修课、目标。歧义影响规则时先澄清。
+2. 最多 4 次 Tool 调用（计划值）：查目录/要求、核对已修、验证建议；工具返回保存 Trace。
+3. LLM 只能根据工具结果提出至多 3 条建议课程；建议必须交 Java 验证。没有班次时，不输出可行课表。
+4. 若验证失败，最多一次自动修正；仍失败则返回问题与可选操作。最终答复附 `verifierResultId` 与来源。
+5. 模型/工具超时后返回结构化错误，不把缺失数据当正常值。
 
-关系数据：`snapshot`、`course`、`offering`、`requirement`、`completed_course`、`task`、`trace_event`、`verifier_result`、`harness_version`、`benchmark_run`。大文本/原始文件放对象或本地文件存储，用内容 hash 引用；数据库保存元数据。开发时可先用文件快照，不能因技术栈简化而丢版本与来源。个人成绩记录和模型密钥不得放公开示例。
+## 5. 评测与受控进化
 
-## 6. 关键验证
+数据源 hash、Java verifier commit、模型配置、Harness 内容 hash、Benchmark 集合 hash 一起写 `run-manifest.json`。Trace 只保存模型输入摘要、工具调用和输出引用、错误码、耗时，不保存完整思维链。Evolver 只可改 `harness/prompts/` 与 `harness/tool-descriptions/`，先用训练失败 Trace 生成小 diff，之后跑训练/开发/封存留出。任何硬错误增加或留出成功例退化都回滚；晋级/回滚决定写审计文件。具体案例与算分见[Benchmark 协议](07-benchmark-protocol.md)。
 
-Java 规则使用小而人工可核对的样例验证：重叠周次、同节次不同周、课程别名、重复修读、未知学分等。Agent 集成至少覆盖一次核验失败后修正、一次正确澄清、一次数据缺失说明。Harness 验证包含“候选进步可晋级”和“硬错误或留出集退化必回滚”。指标在运行后填写，不预设提升百分比。
+## 6. 五周集成策略
+
+第一周冻结真实字段与 API v1；第二周 Java 工具可被 curl 调通；第三周网页经 Python 调 Java 跑通一条完整路径；第四周形成基线与坏例；第五周一次真实候选修改/复评/回滚演示。每周都留可运行的主分支，避免五人到最后才合并。

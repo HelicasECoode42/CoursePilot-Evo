@@ -1,64 +1,53 @@
-# 统一基础设施与工作流规范 v0.1
+# 五人共同遵守的基础设施与工作流契约 v0.2
 
-本文件是五人共用的集成契约草案；第 1 周结合真实数据冻结 v1。修改契约需记录字段变化、迁移方法和受影响模块，不在私有模块内各自定义“课程”“方案”或“成功”。
+这是**开发前的统一规范**，不是已存在的系统实现。第 1 周用真实 `.xls` 样本和一条假数据链路冻结 v1；子 TRD 不得自行改同名字段。
 
-## 1. 共同标识和版本
+## 1. 三种版本，不能混用
 
-| 标识 | 含义 | 要求 |
-| --- | --- | --- |
-| `snapshotId` | 同一学期的培养规则、班次和来源快照 | 每次 Tool 调用与 Benchmark 任务必须固定 |
-| `schemaVersion` | API/Trace 结构版本 | 破坏性更改升大版本；客户端拒绝未知必需字段 |
-| `taskId` / `traceId` | 一次用户规划与其轨迹 | 不复用；日志、结果、评分可关联 |
-| `harnessVersion` | Prompt、Skill、Tool 描述和工作流配置的内容 hash | Agent 每次运行固定；禁止中途热改 |
-| `verifierVersion` | Java 规则和核验器版本 | 评测前冻结；与 Harness 版本分别记录 |
-| `benchmarkSetVersion` | 任务集与标准答案的 hash | 训练与留出集分别记录，留出答案隔离 |
+- `snapshotId`：原始 `.xls` SHA-256 + 培养路径 + 导入规则版本。所有课程、要求、核验结果绑定同一个快照；换文件不覆盖旧记录。
+- `schemaVersion`：Tool API、Trace、Benchmark JSON 的字段版本。破坏性变更升版本，并给 Web/Python/Java 同时改适配。
+- `harnessVersion`：Python Prompt、工具说明和工作流配置的内容 hash。一次运行开始后固定；`verifierVersion` 与 `benchmarkSetVersion` 另外记录，Evolver 无权修改它们。
 
-记录来源时至少有 `sourceType`、`sourceId`、`term`、`capturedAt`、`pageOrRow?`、`confidence/verificationStatus`。`confidence` 不能替代人工确认。所有学分、周次、节次计算须在 Java 中使用同一规范化表示。
+## 2. Java Tool 边界
 
-## 2. 工作流状态
+输入使用课程代码字符串，不转数字；来源记录至少 `sheet, row, column, sourceFileHash, track`。响应封套固定 `schemaVersion, requestId, snapshotId, status, data, provenance[], warnings[]`。`status=UNKNOWN` 表示资料不足，`ERROR` 表示服务失败；都不能在 Agent 侧转成“通过”。
 
-| 状态 | 进入条件 | 退出条件 |
-| --- | --- | --- |
-| `created` | 接受用户目标和快照 | 输入校验完成 |
-| `clarifying` | 关键歧义影响硬条件或数据选择 | 用户补充或取消 |
-| `planning` | 查证与候选生成中 | 候选提交核验 |
-| `verifying` | Java Verifier 正在处理候选 | 通过、返回错误或未知 |
-| `revising` | 有可修正错误 | 重新核验或向用户解释限制 |
-| `completed` | 最终答复与核验引用已持久化 | 终态 |
-| `failed` | 系统错误或修正预算耗尽 | 可由用户重新发起新 task |
+`AuditResult`：`satisfied[]`、`gaps[]`、`unknowns[]`。`RecommendationValidation`：`validCourses[]`、`violations[]`、`unknownChecks[]`、`verifierResultId`。`valid=true` 只表示所有**已启用且有数据**的硬检查通过，页面仍显示未检查的班次/余量未知，不使用“课表可行”文案。
 
-模型不得直接设置状态；Orchestrator 根据工具结果转移。一次 task 至多两次自动修正是首版预算建议，实际值在契约冻结时定。未知数据不能被当作验证通过。
+## 3. 一次规划的状态
 
-## 3. Tool API 响应封套
-
-```json
-{
-  "schemaVersion": "1.0",
-  "requestId": "req-example",
-  "snapshotId": "term-example-v1",
-  "status": "OK",
-  "data": {},
-  "provenance": [{"sourceType": "curriculum_excel", "sourceId": "file-hash", "pageOrRow": "sheet1:12"}],
-  "warnings": []
-}
+```mermaid
+stateDiagram-v2
+  [*] --> created: 接收目标
+  created --> clarifying: 关键歧义
+  created --> tooling: 输入完整
+  clarifying --> tooling: 用户补充
+  tooling --> verifying: 已得到候选
+  verifying --> revising: 硬错误且剩余一次修正
+  revising --> verifying: 重新验证
+  verifying --> completed: 答复和来源落地
+  tooling --> failed: 服务错误
+  verifying --> failed: 服务错误
+  completed --> [*]
+  failed --> [*]
 ```
 
-`status` 为 `OK | UNKNOWN | INVALID_INPUT | SNAPSHOT_MISMATCH | NOT_FOUND | INTERNAL_ERROR`。`UNKNOWN` 是业务数据缺失，不是系统异常。`PlanValidation` 中分别列 `hardViolations[]`、`unknownChecks[]`、`softScores[]`；每项有 `ruleId`、`message`、`evidenceRefs[]`。仅 `hardViolations` 为空**且**所有必需检查已知时才可标 `valid=true`。
+Python orchestrator 依据 Java 响应推进状态；LLM 只提出文本或候选动作，不能自己宣布 `completed`。五周版先用一次同步 `POST /api/v1/planning` 返回最终结果和 `taskId`，网页显示加载状态。若后续请求确实超过可接受延迟，再引入队列/SSE；不为假想并发提前加 MQ。
 
-## 4. Trace 事件规范
+## 4. Trace v1
 
-每条事件包含 `schemaVersion, traceId, taskId, seq, timestamp, stage, actor, eventType, inputRefIds[], outputRefIds[], toolName?, durationMs?, errorCode?, snapshotId, harnessVersion, verifierVersion`。按 `taskId + seq` 保序；重试另起 attempt 并保留前次事件。事件类型建议：`USER_INPUT`、`CONSTRAINT_EXTRACTED`、`TOOL_CALLED`、`TOOL_RETURNED`、`CANDIDATE_PROPOSED`、`VERIFICATION_RETURNED`、`CLARIFICATION_REQUESTED`、`FINAL_DELIVERED`、`ERROR`。原始学生记录和完整模型思考不进入公开 Trace；只保存必要输入引用与脱敏摘要。
+每个事件含 `taskId, traceId, seq, timestamp, stage, eventType, snapshotId, harnessVersion, verifierVersion, toolName?, inputDigest?, outputRef?, durationMs?, errorCode?`。建议事件：`USER_INPUT`、`CONSTRAINT_EXTRACTED`、`TOOL_CALLED`、`TOOL_RETURNED`、`CANDIDATE_PROPOSED`、`VERIFIER_RETURNED`、`CLARIFICATION_REQUESTED`、`FINAL_DELIVERED`、`ERROR`。Python 写 JSONL，序号单调；Java 返回 `verifierResultId` 供关联。隐藏密钥、私人已修记录全文、模型完整思维链；可重放所需输入用脱敏 fixture 和 hash。
 
-## 5. Benchmark 与晋级门槛
+## 5. 共同错误码
 
-1. 用固定 `snapshotId` 跑基线 Harness，保存 Trace、Java 核验结果、任务成功与成本。
-2. Weakness Miner 只读训练轨迹，输出可复现的失败簇、证据 `traceId[]` 和候选修改点。
-3. Evolver 只可改 `harness/prompts/`、`harness/skills/`、`harness/tool-descriptions/`；产出 diff、理由及预期影响。
-4. 先跑训练回归，再跑封存留出集。任意硬违规增加、规则核对退化或留出任务成功率下降均不晋级；其余改善也须记录成本变化。
-5. 晋级采用原子版本指针，保留上一个稳定版本；回滚只切指针，不覆盖历史 Trace。人工可以拒绝任何候选。
+`PATH_NOT_REVIEWED`（路径未审核）、`COURSE_NOT_FOUND`、`COMPOSITE_CODE_UNRESOLVED`、`RULE_UNKNOWN`、`OFFERING_UNAVAILABLE`、`SNAPSHOT_MISMATCH`、`MODEL_TIMEOUT`、`TOOL_UNAVAILABLE`。每项定义用户文案和是否可重试。`OFFERING_UNAVAILABLE` 出现时，任何时间冲突或“周五空课”的判断都必须是未知。
 
-评测任务数（原 v0.1 计划约 30–40）是容量估计，不是已做数量。分组比例、重复次数和阈值在样本核验后固定，不能看留出结果后再调门槛。
+## 6. 交接和变更流程
 
-## 6. 五人统一交付门槛
+1. A 交 `snapshotId`、字段字典、异常清单和人工审核规则；B 不直接解析 Excel。
+2. B 交 Java DTO/OpenAPI 样例及核验测试；C 只包装其服务为 API，不复制规则逻辑。
+3. C 提供固定的本地 URL 与错误封套；D 用 `httpx` 调用，不读 Java 数据库。
+4. D 交 Trace 样例与最终答复 schema；E 用同一 Agent Runner 跑固定任务，不另写一份“评测专用 Agent”。
+5. 第 1 周全组一起确认 API v1；此后更改字段先改此文件/示例，再改 Java/Python/Web 的测试与实现。每周至少一条从网页到 Java 的集成演示。
 
-每个模块提交：输入输出样例、错误/未知案例、数据来源、接口版本、最小验证记录和下一模块使用说明。每周至少一次共享集成演示。子 TRD 使用本文件的对象和错误码，不另造同名格式。
+完成线：在本地新环境按 README 启动，导入同一文件两次不重复课程；固定请求得到相同规则结果；Tool/Trace schema 可被相邻模块消费。模型随机性另由 Benchmark 记录，不要求自然语言逐字一致。

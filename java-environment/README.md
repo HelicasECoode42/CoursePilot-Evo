@@ -1,3 +1,3 @@
-# Java Environment / Truth / Verifier
+# Java Environment / Truth / Verifier（待实现）
 
-待实现。预定包含数据导入、领域对象、Tool API、培养要求核对、冲突检查、方案核验及来源记录。以 `docs/04-infrastructure-workflow.md` 为共同契约；实际包结构由 B/C 的子 TRD 确认。
+技术栈：Java 21、Spring Boot、Apache POI、Spring Data JPA、MySQL 8/Flyway、JUnit 5。负责培养计划 `.xls` 导入、课程/要求模型、要求核对与建议课程核验、版本化 Tool API；缺班次时间时返回 `UNKNOWN`。按 `docs/trd/a-data.md`、`b-verifier.md`、`c-platform-web.md` 实施。
