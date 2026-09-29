@@ -1,11 +1,11 @@
-# 学习仓库：每人只读与自己模块相关的部分
+# 学习仓库与资料：按模块最小阅读
 
-| 成员 | 官方仓库 | 建议先看的内容与用途 |
+| 成员 | 一手学习资料 | 先学会的具体动作 |
 | --- | --- | --- |
-| A | [Apache POI](https://github.com/apache/poi)、[Spring 文件上传](https://github.com/spring-guides/gs-uploading-files) | HSSF/WorkbookFactory 读取旧 `.xls`、文件上传边界；重点保留课程编号前导零 |
-| B | [Spring PetClinic](https://github.com/spring-projects/spring-petclinic)、[Spring REST Guide](https://github.com/spring-guides/gs-rest-service) | 领域服务与 API 分层、DTO/测试写法；不照搬业务规则 |
-| C | [Spring Data JPA Guide](https://github.com/spring-guides/gs-accessing-data-jpa)、[create-vue](https://github.com/vuejs/create-vue) | MySQL 持久化和 Vue/Vite 单页；只做本项目需要的最小页面 |
-| D | [FastAPI](https://github.com/fastapi/fastapi)、[pytest](https://github.com/pytest-dev/pytest) | Pydantic 请求/响应、错误处理、假 Tool 测试；先写单 Agent 有界循环 |
-| E | [promptfoo](https://github.com/promptfoo/promptfoo) | 任务断言、逐例结果、回归比较；自进化白名单/晋级逻辑仍由本项目自行实现 |
+| A 数据 | [Apache POI](https://github.com/apache/poi)、[MDN Web APIs](https://developer.mozilla.org/en-US/docs/Web/API)、[JSON Schema](https://json-schema.org/learn/getting-started-step-by-step) | `WorkbookFactory/DataFormatter` 读旧 `.xls`；浏览器 Blob 导出；字段 Schema 校验。只分析原脚本，不直接运行其自动点击逻辑 |
+| B Java | [Spring REST Guide](https://github.com/spring-guides/gs-rest-service)、[Spring Data JPA Guide](https://github.com/spring-guides/gs-accessing-data-jpa)、[Spring PetClinic](https://github.com/spring-projects/spring-petclinic) | DTO/Service/Repository 分层、JUnit、不可变快照与 UNKNOWN 错误封套 |
+| C Agent | [FastAPI](https://github.com/fastapi/fastapi)、[Pydantic](https://github.com/pydantic/pydantic)、[httpx](https://github.com/encode/httpx) | 一个有界 Runner、typed 请求/响应、Java Tool 超时处理与 Harness 装载 |
+| D 评测 | [GDPevo](https://github.com/Prism-Shadow/GDPevo)、[promptfoo](https://github.com/promptfoo/promptfoo)、[pytest](https://github.com/pytest-dev/pytest) | task group / train-test 分离、逐例断言、失败 Trace、候选回归和 lineage；独立实现本项目门槛 |
+| E Web | [Vue 指南](https://vuejs.org/guide/quick-start.html)、[create-vue](https://github.com/vuejs/create-vue)、[Vite](https://github.com/vitejs/vite) | 单页表单、状态与错误展示、JSON 上传预览、版本/来源卡片 |
 
-阅读顺序：先看各子 TRD 的输入输出，再找官方仓库的最小示例；不需要从头读完大仓库。参考代码只用于学习和设计，功能完成情况仍以本项目测试/演示为准。
+设计背景：[PhysicalRSI 项目页](https://mmlab.hk/research/PhysicalRSI) 供学习 System 1/2 与经验沉淀；[GDPevo](https://github.com/Prism-Shadow/GDPevo) 供学习 task-group 评测。**仅借鉴方法，不复现其代码、指标或结论。**先读自己子 TRD 的输入输出，再去官方仓库找最小示例，不必通读大项目。

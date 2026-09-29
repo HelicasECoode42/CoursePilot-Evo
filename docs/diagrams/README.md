@@ -1,8 +1,9 @@
-# 可编辑架构与流程图
+# 可编辑的 Mermaid 架构图
 
-这些 `.mmd` 文件是 Mermaid 源图，可在支持 Mermaid 的 Markdown 查看器中预览和导出 SVG。老师版嵌入分层图与规划流程图，内部版使用自进化和协作依赖图。
+图源可直接用 Mermaid 查看器预览并导出 SVG；它们描述**设计中的流程**，不代表代码已经接通。
 
-- [技术分层](layers.mmd)
-- [学业规划与 Java 核验](planning-verification.mmd)
-- [Harness 自进化与晋级](evolution-loop.mmd)
-- [五人协作依赖](team-dependencies.mmd)
+- [System 1 / System 2 总体分层与 RSI 旁路](layers.mmd)
+- [浏览器侧班次采集与标准化时序](browser-capture.mmd)
+- [多轮 RSI 晋级/回滚](evolution-loop.mmd)
+- [单次学业规划与 Java 核验](planning-verification.mmd)
+- [五人模块依赖](team-dependencies.mmd)

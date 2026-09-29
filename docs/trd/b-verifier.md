@@ -1,21 +1,16 @@
-# 子 TRD B｜Java 规则核对与 Verifier（12 人日）
+# 子 TRD B｜Java Course Environment / Truth / Verifier（12 人日）
 
-**目标：**让学分、路径、已修记录和建议课程的硬事实由 Java 计算；无法确认的规则显式 `UNKNOWN`。不做班次排课求解器。
+**输入：**A 的两个规范化快照和审核状态、全组 Tool API/错误封套。**所有权：**`java-environment/.../domain/`, `rule/`, `api/`, `persistence/`, `db/migration/` 与 JUnit；A 的 importer 代码由 A 负责。B 是 System 1 负责人，Java 不承担复杂自然语言推理。
 
-## 技术与文件
+## 要回答的问题与实现顺序
 
-Java 21 纯函数规则类 + Spring Service，JUnit 5 参数化测试。建议负责 `java-environment/.../rule/RequirementAuditor.java`、`RecommendationVerifier.java`、`domain/Requirement.java`、`dto/AuditResult.java`、对应测试。读取 A 提供的已审核快照与 C 的 repository 接口，不读 Excel 原始单元格。
+1. **数据如何不可混用？** Spring Boot + Spring Data JPA/MySQL + Flyway 保存 `CurriculumSnapshot`, `OfferingSnapshot`, `Course`, `CourseOffering`, `Requirement`, `SourceRef`；课程号字符串化。导入班次时校验 JSON Schema、学期、重复 classId、来源与时间解析状态，新快照不覆盖旧快照。
+2. **哪些规则可计算？** 纯 Java 规则类计算必修/类别学分/人工审核的文字要求；对已修课程去重，未审核/学分认定不明返回 UNKNOWN。`checkConflict` 用 day×section×week 集合交叉；缺班次或解析失败返回 UNKNOWN。`validatePlan` 检查课程存在、培养路径、重复修读、学分/时间 hard condition。`scorePreference` 计算可定义的周五占用、空档等指标，不能让 soft score 掩盖硬错误。
+3. **Agent 怎样获取真值？** Spring Web + Bean Validation 暴露 `courses`, `requirements/audit`, `offerings`, `plans/validate`, `preferences/score`；所有响应带两个快照 ID、SourceRef、`verifierResultId` 和 UNKNOWN/错误码。Java 的 Benchmark 客观评分接口或适配器与业务 Verifier 复用同一纯函数，不能用 Agent 答案当真值。
+4. **如何防止快照失效误判？** 学期不一致 `TERM_MISMATCH`，采集过旧 `SNAPSHOT_STALE`；阈值由全组 W1 固定。没有班次时仍能做培养要求核对，但不出“无冲突”结论。
 
-## 做法
+## 交付与验收
 
-1. 定义支持的最小规则类型：课程必修、类别最低学分、实践三选一；每类记录 `ruleId, track, target, sourceRef, reviewStatus`。文字规则若尚未人工转写或缺证据，返回 `UNKNOWN`。
-2. 对已修记录先去重，再按课程代码映射到当前快照。课程不在路径、学分认定不明、复合编号未拆分时生成问题，不暗自计入已修。
-3. `auditRequirements(snapshotId, completedCourses)` 返回 `satisfied[]/gaps[]/unknowns[]`，每项有要求值、已确认值、差额和 `sourceRef`。
-4. `validateRecommendation(snapshotId, proposedCodes, completedCourses)` 检查课程存在、路径正确、重复修读与已启用的规则。没有班次时间时追加 `OFFERING_UNAVAILABLE`，不声称“无时间冲突”。
-5. 给 C/D 稳定 DTO 和一组成功、硬错误、未知样例。
+交 OpenAPI/DTO 示例、Flyway migration、JUnit 5 参数化用例和虚构 fixture。与原 `.xls` 人工对照至少 10 个要求样例；冲突测试覆盖单双周、离散周、边界节次、两门不重叠、未知时间。`UNKNOWN` 不得转成 `valid=true`。B 的 API 与 C/D/E 共用冻结合同，变更先改[共享契约](../04-infrastructure-workflow.md)。
 
-## 验收
-
-B 与 E 用 `.xls` 独立人工核对至少 10 个规则样例；JUnit 覆盖临界学分、重复课、跨路径、三选一、缺失成绩、组合编号与无班次。任何 `UNKNOWN` 在最终 DTO 中可见。规则代码不调用 LLM，Agent 文本不能覆盖 Java 数值。
-
-**学习入口：**[Spring REST Guide](https://github.com/spring-guides/gs-rest-service) 的 DTO/API；[Spring PetClinic](https://github.com/spring-projects/spring-petclinic) 的领域服务与测试组织。只借结构，不照搬宠物业务。
+**依赖：**A 交标准对象；C 用 HTTP 不读库；D 独立保管答案与评分器。**学习入口：**[Spring REST Guide](https://github.com/spring-guides/gs-rest-service)、[Spring Data JPA Guide](https://github.com/spring-guides/gs-accessing-data-jpa)、[Spring PetClinic](https://github.com/spring-projects/spring-petclinic) 的服务与测试组织。

@@ -1,29 +1,31 @@
-# 五人分工与子 TRD：从哪里开始写代码
+# 五人分工与后续子 TRD 任务委派（五周）
 
-成员 A–E 是占位名，实际姓名由组内填写。五周总计划约 **54 人日**。先读[数据核查](06-workbook-audit.md)、[总体 TRD](03-trd.md)和[共同契约](04-infrastructure-workflow.md)，再领取下面一份子 TRD；它们已经写到技术栈、文件、步骤和验收，不是只给模块名称。
+先读[老师版](01-teacher-project-plan.md)、[总体 TRD](03-trd.md)、[共享契约](04-infrastructure-workflow.md)、[数据入口](09-browser-adapter.md)和[Benchmark](07-benchmark-protocol.md)。**第一周全组冻结两个快照 ID、CourseOffering JSON、Tool API、Trace、run manifest 后**，再按下表领个人任务。成员 A–E 是占位名，实际姓名组内填写。预计 55 人日是计划工时。
 
-| 成员 | 读哪份子 TRD | 技术栈 | 第一次交给下一人的东西 | 人日 |
-| --- | --- | --- | --- | ---: |
-| A 数据 | [A：`.xls` 导入与来源](trd/a-data.md) | Java 21、Apache POI、MySQL/Flyway、JUnit | 一份已核对的 `snapshotId`、课程表、异常清单 | 10 |
-| B 规则 | [B：培养要求与 Verifier](trd/b-verifier.md) | 纯 Java 规则类、Spring Service、JUnit 5 | `auditRequirements`、`validateRecommendation` DTO 与用例 | 12 |
-| C 平台/网页 | [C：Tool API 与 Vue 页面](trd/c-platform-web.md) | Spring Web、Validation、MySQL、Vue 3/Vite | 可从浏览器调用的一条 API 链路 | 12 |
-| D Agent | [D：Python Planning Agent](trd/d-agent.md) | Python、FastAPI、Pydantic、httpx、LLM client | 可解释答复和逐步 Trace | 10 |
-| E 评测 | [E：Benchmark 与 RSI](trd/e-benchmark-rsi.md) | Python、pytest、JSONL、Git hash | 基线、候选 diff、晋级/回滚记录 | 10 |
+| 人 | 子 TRD / 技术栈 | 所有权与首次交付 | 人日 |
+| --- | --- | --- | ---: |
+| A | [数据适配](trd/a-data.md)：Java POI + 浏览器 JS + JSON Schema | `.xls` 解析器、只读 Browser Adapter、标准 CourseOffering fixture/异常清单 | 12 |
+| B | [Java Environment/Verifier](trd/b-verifier.md)：Spring Boot/JPA/Flyway/JUnit | 课程/班次/要求模型、typed Tool API、确定性核验与评分 | 12 |
+| C | [Planning Agent](trd/c-agent.md)：Python/FastAPI/Pydantic/httpx | 同一 Agent Runner、GoalIntent、Harness State、脱敏 Trace | 10 |
+| D | [Benchmark/RSI](trd/d-benchmark-rsi.md)：Python/pytest/JSONL | 四组任务、隔离评分、跨 Case Miner、候选/晋级/回滚 | 11 |
+| E | [Web/会话/集成](trd/e-web-integration.md)：Vue 3/Vite/Fetch | 单页、快照导入入口、事实/未知/版本可视化、端到端演示 | 10 |
 
-**依赖顺序：**A 的真实字段 → B 的规则 → C 的 Tool API → D 的 Agent → E 的评测。C 的网页可在 B/D 未完成时用固定 fixture 并行开发；E 的任务标注与数据审核可从第 1 周并行开始。每周五用同一 `snapshotId` 跑一条全链路，发现契约冲突当周修改。
+工作量依据：A 同时承担 Excel 三类表与不稳定的浏览器数据入口，给 12 人日；B 有核心 Java 规则和两个快照，给 12；D 需人工标注与双轮版本流程，给 11；C/E 分别聚焦 Agent 与页面/联调。A/B 的 Java DTO、C/D 的 Runner 和 D/E 的 Trace 展示必须共用契约，不能复制规则或另造对象。
 
 ```mermaid
 flowchart LR
-  S[第1周: 选定路径与冻结契约] --> A[A: POI 导入]
-  S --> E0[E: 人工标签]
-  A --> B[B: Java 核对]
-  B --> C[C: API]
-  C --> D[D: Agent]
-  C --> W[C: Web 单页]
-  D --> E[E: Benchmark/RSI]
-  E0 --> E
-  W --> DEMO[第5周演示]
-  E --> DEMO
+  F[全组 W1: 冻结 Schema / Tool API / Trace / 版本] --> A[A 数据入口]
+  F --> B[B Java 真值]
+  F --> C[C Agent]
+  F --> D[D Benchmark/RSI]
+  F --> E[E Web/集成]
+  A --> B
+  B --> C
+  B --> D
+  C --> D
+  C --> E
+  D --> E
+  E --> DEMO[W5 演示/报告]
 ```
 
-不需要把任务书“发送给 AI 代理”才能算委派；成员领用文件后再按其接口写代码。接口要改，先更改共同契约，再通知相邻模块。五周内不开始独立小程序或通用 Agent 平台。
+每份子 TRD 写明要回答的问题、文件所有权、输入输出、验收和依赖。W1 用虚构 fixture 并行开发；W2 A/B 先交可核对快照与 Tool；W3 C/E 联通；W4 D 跑基线；W5 全组运行双轮候选。接口变更先改共享契约和样例，再同步各模块，实际班次入口不可用时保留明确的 UNKNOWN 降级。远程 GitHub 仓库暂不创建。

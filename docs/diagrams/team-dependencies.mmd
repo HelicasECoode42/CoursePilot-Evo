@@ -1,11 +1,14 @@
 flowchart LR
-  S[第1周: 路径与契约冻结] --> A[A: POI 导入]
-  S --> E0[E: 人工任务标签]
-  A --> B[B: Java 核对]
-  B --> C[C: Tool API]
-  C --> D[D: Planning Agent]
-  C --> W[C: Vue Web]
-  D --> E[E: Benchmark 与 RSI]
-  E0 --> E
-  E --> I[第5周: 演示与报告]
-  W --> I
+  FREEZE[全组: 第1周冻结 schema / API / Trace / 快照语义] --> A[A: xls + Browser Adapter + 规范化]
+  FREEZE --> B[B: Java Environment / Verifier]
+  FREEZE --> C[C: Planning Agent / Harness State]
+  FREEZE --> D[D: Benchmark / RSI / promotion]
+  FREEZE --> E[E: Vue Web / 会话 / 集成]
+  A --> B
+  B --> C
+  C --> D
+  B --> D
+  C --> E
+  A --> E
+  D --> E
+  E --> DEMO[五周集成演示与报告]

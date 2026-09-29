@@ -1,19 +1,21 @@
 # CoursePilot-Evo｜五周课程项目
 
-状态：**方案与仓库骨架**。尚无可运行的 Java/Python Agent、页面或 Benchmark 结果。以用户提供的 2024 级教学计划 `.xls` 为真实培养计划来源，先做可核验的学业要求分析，再做有来源的课程建议与受控 Harness 自进化。
+**当前状态：文档、数据源副本和仓库骨架；尚无可运行的 CoursePilot Java/Python/Web 或 Benchmark 结果。**目标是在一条经审核的 2024 级培养路径上，建立可核验的学业规划 Agent，并实验将重复有效的推理沉淀为可复用的 Harness 资产。
 
 ## 一句话架构
 
-学生在 **Vue 3 + Vite 网页**输入已修课程与目标；Python/FastAPI Planning Agent 查询 Java 21/Spring Boot 的课程与培养规则工具；Java 返回确定性核验结果与来源；Python 保存 Trace、运行 Benchmark，并只对 Prompt/Skill/工具说明提出候选修改。五周内**做响应式网页，不做小程序**。当前教学计划没有班次时间，课表冲突和周五空课不作为首版已知能力。
+Vue 3 Web 接受学生已修课程与目标；**System 2** Python Planning Agent 解释目标并调 typed Tool；**System 1** Java/Spring Boot 用培养计划和可选的本学期班次快照计算课程、学分、要求、冲突和计划合法性；Python Benchmark/RSI 保存 Trace，按隔离 held-out 结果晋级或回滚 `AGENTS.md/skills/tool_policy/context_policy`。Java Tool API、基模和预算在同轮比较中固定。首版**网页，不做小程序或自动选课**。
 
-## 按顺序读
+用户提供的 `.xls` 是培养计划真源，本机 `选课插件v0.6.js` 为浏览器侧班次数据结构线索。后者尚未接入 CoursePilot，第一周要验证字段、登录态和稳定性；原脚本不直接运行作只读采集器。班次不可用时，冲突/周五空课结论为 UNKNOWN。
 
-1. [老师提交版五周安排](docs/01-teacher-project-plan.md)
-2. [数据实查：24 张表与字段边界](docs/06-workbook-audit.md)
-3. [内部 PRD](docs/02-prd.md) 与 [总体 TRD](docs/03-trd.md)
-4. [基础设施/工作流契约](docs/04-infrastructure-workflow.md)
-5. [Benchmark 操作方案](docs/07-benchmark-protocol.md)
-6. [五人子 TRD 索引](docs/05-team-and-sub-trds.md) 与 [学习仓库](docs/08-learning-repos.md)
-7. [AGENTS.md](AGENTS.md)：给后续编码 Agent 的入口
+## 推荐阅读顺序
 
-原 v0.1 讨论稿归档于 `docs/archive/`，其八周安排已失效。`data/raw/` 的原始工作簿只作本地输入，不进入 Git。各文档把目标与已实现状态分开书写；GitHub 远程尚未创建。
+1. [老师提交版：五周项目安排](docs/01-teacher-project-plan.md)
+2. [真实教学计划核查](docs/06-workbook-audit.md)与[浏览器班次入口/JSON Schema](docs/09-browser-adapter.md)
+3. [内部 PRD](docs/02-prd.md)、[总体 TRD](docs/03-trd.md)
+4. [统一基础设施与工作流契约](docs/04-infrastructure-workflow.md)
+5. [四组 Benchmark 与多轮 RSI 协议](docs/07-benchmark-protocol.md)
+6. [五人分工和子 TRD](docs/05-team-and-sub-trds.md)、[学习仓库](docs/08-learning-repos.md)
+7. [项目编码 Agent 约定](AGENTS.md)及[Mermaid 图源](docs/diagrams/README.md)
+
+原 v0.1 讨论稿保留在 `docs/archive/`，八周安排已失效。`data/raw/` 的原始工作簿和插件副本只作本地输入并被 Git 忽略。**没有创建 GitHub 远程仓库**。PhysicalRSI/GDPevo 仅作设计参考，不是本项目已复现或已达成的结果。

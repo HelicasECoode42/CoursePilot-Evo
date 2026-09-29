@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0",
+  "source": {
+    "kind": "BROWSER_SNAPSHOT",
+    "pageOrigin": "https://jwxt.shu.edu.cn",
+    "capturedAt": "2026-09-29T10:00:00+08:00",
+    "adapterVersion": "planned-1"
+  },
+  "term": {"xnm": "2026", "xqm": "3"},
+  "offerings": [
+    {
+      "courseCode": "DEMO001",
+      "classId": "DEMO-JXB-1",
+      "credits": 3,
+      "capacity": 60,
+      "teacherText": "示例教师",
+      "meetingTextRaw": "星期三第3-4节{1-16周(单)}",
+      "meetings": [
+        {"dayOfWeek": 3, "sectionStart": 3, "sectionEnd": 4, "weeks": [1, 3, 5, 7, 9, 11, 13, 15]}
+      ],
+      "parseStatus": "PARSED",
+      "sourceEndpoint": "zzxkyzb_cxZzxkYzbChoosedDisplay"
+    }
+  ]
+}

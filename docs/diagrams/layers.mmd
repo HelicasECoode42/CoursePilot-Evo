@@ -1,11 +1,21 @@
 flowchart TB
-  UI[Vue Web 工作台] --> AG[Python FastAPI Planning Agent]
-  AG --> API[版本化 HTTP Tool API]
-  API --> JAVA[Java Spring Boot: 课程环境与 Verifier]
-  JAVA --> DATA[(MySQL: 课程 规则 来源 已修样例)]
-  XLS[2024级教学计划 xls] --> JAVA
-  AG --> TRACE[JSONL Trace 与固定任务]
-  JAVA --> TRACE
-  TRACE --> EVO[Python Benchmark / Evolver]
-  EVO --> PROMOTE[候选 Harness 晋级或回滚]
-  PROMOTE --> AG
+  STUDENT[Student] --> UI[Vue Web UI]
+  UI --> S2[System 2: Python Planning Agent]
+  HS[Harness State: AGENTS.md / Skills / Tool Policy / Context Policy] --> S2
+  S2 --> TOOL[Typed Java Tool API v1]
+  TOOL --> S1[System 1: Spring Boot Course Environment / Truth / Verifier]
+  XLS[2024级培养计划 xls] --> S1
+  BA[Browser Adapter: 只读班次快照] --> S1
+  S1 --> DB[(课程 / 规则 / 班次快照 / provenance)]
+  S1 --> SCORE[客观评分]
+  S2 --> BENCH[Evolution Benchmark]
+  BENCH --> TRACE[Trace + Score + Token + Latency]
+  SCORE --> TRACE
+  TRACE --> MINER[跨 Case Failure Miner]
+  MINER --> EVOLVER[Evolver: 最小 Harness Patch]
+  EVOLVER --> CAND[Candidate vN+1]
+  CAND --> HOLD[隔离的 Held-out Evaluation]
+  HOLD --> GATE{严格提升且无硬指标退化?}
+  GATE -->|是| PROMOTE[Promote / lineage]
+  GATE -->|否| ROLLBACK[Rollback / 保留审计]
+  PROMOTE --> HS

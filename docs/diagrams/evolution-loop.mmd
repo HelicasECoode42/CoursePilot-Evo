@@ -1,12 +1,13 @@
 flowchart LR
-  BASE[稳定 Harness vN] --> RUN[跑训练任务]
-  RUN --> TRACE[Trace 与 Java 分数]
-  TRACE --> MINE[Weakness Miner 聚类失败]
-  MINE --> EDIT[Evolver 最小修改 Prompt Skill Tool 描述]
-  EDIT --> CAND[候选 vN+1]
-  CAND --> REG[训练回归]
-  REG --> HELD[封存留出集复评]
-  HELD --> GATE{硬错误零增长且留出集无退化?}
-  GATE -->|是| PROMOTE[晋级 稳定版本指针]
-  GATE -->|否| ROLLBACK[回滚并留记录]
-  PROMOTE --> BASE
+  V0[稳定 Target Agent vN] --> EV[Evolution cases: 同组多题]
+  EV --> TR[Trace / Score / Token / Tools / Latency]
+  TR --> HYP[跨 Case failure hypothesis + 证据]
+  HYP --> PATCH[Evolver: 单次有限 Harness patch]
+  PATCH --> CAND[Candidate vN+1 + state snapshot]
+  CAND --> EVREG[Evolution regression]
+  EVREG --> HOLD[隔离 held-out evaluation]
+  HOLD --> GATE{客观分数严格提升且硬错误零新增且留出不退化?}
+  GATE -->|通过| PROMOTE[Promote + lineage]
+  GATE -->|拒绝| ROLLBACK[Rollback + 原因]
+  PROMOTE --> V0
+  ROLLBACK --> V0

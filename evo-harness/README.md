@@ -1,3 +1,3 @@
-# Benchmark 与自进化执行器（待实现）
+# Benchmark / RSI 执行器（待实现）
 
-技术栈：Python、pytest、JSONL 和 Git 内容 hash。负责固定任务、失败聚类、最小候选文本 diff、复评、晋级或回滚。首版不做通用平台。见 `docs/trd/e-benchmark-rsi.md`。
+Python、pytest、JSONL：运行 evolution cases、按多条 Trace 找共同失败、对 Harness 白名单生成最小 Patch、隔离 held-out 评测、Promote/Rollback，并保存 v0→v1→v2 的 Snapshot/lineage。未严格提升或 held-out 退化就回滚；不能声称已经节省 Token。详见 `../docs/trd/d-benchmark-rsi.md`。

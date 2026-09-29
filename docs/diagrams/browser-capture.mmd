@@ -1,0 +1,17 @@
+sequenceDiagram
+  autonumber
+  actor Student as 学生
+  participant JW as 官方选课页 / 已登录浏览器
+  participant BA as 只读 Browser Adapter
+  participant Web as CoursePilot Web
+  participant Java as Java Course Environment
+  Student->>JW: 自行打开当学期页面
+  JW-->>BA: 页面原有响应（观察三类查询）
+  Student->>BA: 主动导出快照
+  BA->>BA: 标准化 CourseOffering / 去个人字段
+  BA-->>Student: JSON 文件
+  Student->>Web: 上传并预览
+  Web->>Java: import offering snapshot
+  Java->>Java: 校验 schema / 学期 / 周次 / 来源
+  Java-->>Web: offeringSnapshotId + warnings
+  Web-->>Student: 显示采集时间与可用范围
