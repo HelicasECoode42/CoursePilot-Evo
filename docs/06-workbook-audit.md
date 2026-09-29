@@ -29,4 +29,4 @@
 
 ## 与浏览器侧班次来源的关系
 
-本页结论仅针对 `.xls`：它没有班次时间。用户本机另有 `选课插件v0.6.js`，其代码可观察上大选课页的班次响应，因而**班次入口已有可验证线索**，并非来源完全未知；但 CoursePilot 尚未接入，也未在本人页面验证字段与稳定性。第 1 周按[浏览器适配设计](09-browser-adapter.md)审核后，才能把经验证的 `offeringSnapshotId` 与此处 `curriculumSnapshotId` 共同用于时间冲突判定。未通过时继续返回 `OFFERING_UNAVAILABLE`。
+本页结论仅针对 `.xls`：它没有班次时间。用户本机另有 `选课插件v0.6.js`，其代码可观察上大选课页的班次响应，因而**班次入口已有可验证线索**，并非来源完全未知；但 CoursePilot 尚未接入，也未在本人页面验证字段与稳定性。目前无法进入选课页实测，[浏览器适配设计](09-browser-adapter.md)仅为静态推断。五周首版用 `SYNTHETIC` fixture 测冲突算法；真实请求仍返回 `OFFERING_UNAVAILABLE`。SQL/规则落地见[实施方案](10-java-import-and-rules.md)。

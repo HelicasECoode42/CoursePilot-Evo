@@ -4,13 +4,13 @@
 
 | 人 | 子 TRD / 技术栈 | 所有权与首次交付 | 人日 |
 | --- | --- | --- | ---: |
-| A | [数据适配](trd/a-data.md)：Java POI + 浏览器 JS + JSON Schema | `.xls` 解析器、只读 Browser Adapter、标准 CourseOffering fixture/异常清单 | 12 |
+| A | [数据适配](trd/a-data.md)：Java POI + JSON Schema + 插件静态核查 | `.xls` staging/审核发布、模拟 CourseOffering fixture/异常清单 | 12 |
 | B | [Java Environment/Verifier](trd/b-verifier.md)：Spring Boot/JPA/Flyway/JUnit | 课程/班次/要求模型、typed Tool API、确定性核验与评分 | 12 |
 | C | [Planning Agent](trd/c-agent.md)：Python/FastAPI/Pydantic/httpx | 同一 Agent Runner、GoalIntent、Harness State、脱敏 Trace | 10 |
 | D | [Benchmark/RSI](trd/d-benchmark-rsi.md)：Python/pytest/JSONL | 四组任务、隔离评分、跨 Case Miner、候选/晋级/回滚 | 11 |
 | E | [Web/会话/集成](trd/e-web-integration.md)：Vue 3/Vite/Fetch | 单页、快照导入入口、事实/未知/版本可视化、端到端演示 | 10 |
 
-工作量依据：A 同时承担 Excel 三类表与不稳定的浏览器数据入口，给 12 人日；B 有核心 Java 规则和两个快照，给 12；D 需人工标注与双轮版本流程，给 11；C/E 分别聚焦 Agent 与页面/联调。A/B 的 Java DTO、C/D 的 Runner 和 D/E 的 Trace 展示必须共用契约，不能复制规则或另造对象。
+工作量依据：A 承担 Excel 三类表、人工审核和班次字段的静态契约，给 12 人日；B 有核心 Java 规则和两个快照，给 12；D 需人工标注与双轮版本流程，给 11；C/E 分别聚焦 Agent 与页面/联调。A/B 的 Java DTO、C/D 的 Runner 和 D/E 的 Trace 展示必须共用契约，不能复制规则或另造对象。
 
 ```mermaid
 flowchart LR
@@ -28,4 +28,4 @@ flowchart LR
   E --> DEMO[W5 演示/报告]
 ```
 
-每份子 TRD 写明要回答的问题、文件所有权、输入输出、验收和依赖。W1 用虚构 fixture 并行开发；W2 A/B 先交可核对快照与 Tool；W3 C/E 联通；W4 D 跑基线；W5 全组运行双轮候选。接口变更先改共享契约和样例，再同步各模块，实际班次入口不可用时保留明确的 UNKNOWN 降级。远程 GitHub 仓库暂不创建。
+每份子 TRD 写明要回答的问题、文件所有权、输入输出、验收和依赖。W1 用虚构 fixture 并行开发；W2 A/B 先交真实培养快照、模拟班次 fixture 与 Tool；W3 C/E 联通；W4 D 跑基线；W5 全组运行双轮候选。接口变更先改共享契约和样例，再同步各模块，实际班次入口不可用时保留明确的 UNKNOWN 降级。远程 GitHub 仓库暂不创建。

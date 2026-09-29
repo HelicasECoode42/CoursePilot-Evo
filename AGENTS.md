@@ -1,12 +1,12 @@
 # CoursePilot-Evo：给后续编码 Agent 的项目约定
 
-当前只有方案、原始数据本地副本和目录骨架；**不要把设计写成已实现**。先读 `README.md`、`docs/06-workbook-audit.md`、`docs/09-browser-adapter.md`、`docs/03-trd.md`、`docs/04-infrastructure-workflow.md`、`docs/07-benchmark-protocol.md`，再读负责模块的 `docs/trd/*.md`。根目录的本文件是开发约定，**不是**可由 Evolver 修改的运行 Harness；运行 Harness 的白名单在 `agent-runtime/harness/`。
+当前只有方案、原始数据本地副本和目录骨架；**不要把设计写成已实现**。先读 `README.md`、`docs/06-workbook-audit.md`、`docs/09-browser-adapter.md`、`docs/10-java-import-and-rules.md`、`docs/03-trd.md`、`docs/04-infrastructure-workflow.md`、`docs/07-benchmark-protocol.md`，再读负责模块的 `docs/trd/*.md`。根目录的本文件是开发约定，**不是**可由 Evolver 修改的运行 Harness；运行 Harness 的白名单在 `agent-runtime/harness/`。
 
 ## 真值与权限边界
 
 - `data/raw/以此为准，计算机2024级教学计划表20250306.xls` 是培养计划原始来源；24 张表含多路径。选定并人工审核一个路径，保留 `sourceFileHash/sheet/row/column`。`.xls` 没有班次时间。
-- `data/raw/选课插件v0.6.js` 是第三方脚本副本，仅供只读研究。它观察教务页面响应，但原代码含自动点击页面按钮与疑似索引错误，**不可原样运行/复制为 CoursePilot 的只读 Adapter**。不要调用学校接口、模拟登录或保存 Cookie/Token；第一周在授权情形人工核验。详见 `docs/09-browser-adapter.md`。
-- System 1 Java 对课程、学分、规则、冲突、计划合法性与来源负责；System 2 Python 对自然语言目标、规划和解释负责。Java 不做复杂自然语言推理，Agent 不自行宣布硬事实。班次快照未验证或时间解析未知时返回 UNKNOWN。
+- `data/raw/选课插件v0.6.js` 是第三方脚本副本，仅供只读研究。它观察教务页面响应，但原代码含自动点击页面按钮与疑似索引错误，**不可原样运行/复制为 CoursePilot 的只读 Adapter**。不要调用学校接口、模拟登录或保存 Cookie/Token；当前无法访问选课页，真实快照验证延期，首版只做静态分析和模拟 fixture。详见 `docs/09-browser-adapter.md`。
+- System 1 Java 对课程、学分、规则、冲突、计划合法性与来源负责；System 2 Python 对自然语言目标、规划和解释负责。Java 不做复杂自然语言推理，Agent 不自行宣布硬事实。真实班次快照未验证或时间解析未知时返回 UNKNOWN；模拟班次仅用于算法测试，不能展示成真实开课。
 - 页面是 Vue 3 Web，五周不做小程序；学生在官方系统自行选课，项目无提交选课写操作。
 
 ## 开发顺序与共享契约

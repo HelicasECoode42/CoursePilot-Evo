@@ -6,12 +6,12 @@
 
 | 层 | 技术 | 本项目要实现的最小职责 |
 | --- | --- | --- |
-| Browser Adapter | 独立只读 UserScript/浏览器 JS、JSON Schema | 仅观察当前登录页面已取得的查询响应；用户主动导出脱敏班次快照。原插件不直接作为实现 |
+| Browser Adapter（后续） | 独立只读 UserScript/浏览器 JS、JSON Schema | 当前仅静态核查原插件；无法实测选课页，真实采集延后 |
 | System 1 / Data | Java 21、Apache POI、Spring Boot、Spring Web、Bean Validation | `.xls` 导入、CourseOffering 快照校验、Course/Offering/Requirement 模型和 typed Tool API |
 | System 1 / Truth | Java 规则类、JUnit 5、Spring Data JPA、MySQL 8、Flyway | 学分/要求/时间冲突/合法性/偏好指标和客观评分；全部绑定快照与来源 |
 | System 2 | Python 3.11+、FastAPI、Pydantic、httpx、OpenAI-compatible 客户端 | 一个有界 Planning Agent；理解目标、调用工具、修正、澄清、解释 |
 | Harness / RSI | Python、pytest、JSONL、hashlib、不可变快照 | AGENTS.md/skills/tool_policy/context_policy，Trace、失败归因、候选最小 patch、多轮晋级/回滚 |
-| Web | Vue 3、Vite、Fetch | 路径/已修/目标录入，班次快照上传，事实/建议/未知/版本展示 |
+| Web | Vue 3、Vite、Fetch | 路径/已修/目标录入，模拟班次导入演示，事实/建议/未知/版本展示 |
 
 本地建议端口：Web 5173、Python 8000、Java 8080、MySQL 3306，可配置。浏览器不直接调用模型；Python 不读 MySQL，Java 不调用 LLM。除导入接口外，Web 调 Python，由 Python 调 Java Tool。课程时间可用性由 Java 返回状态决定。
 
@@ -24,7 +24,8 @@ flowchart TB
   PY --> API[typed Tool API]
   API --> J[System 1: Java Environment / Truth / Verifier]
   X[培养计划 xls] --> J
-  B[浏览器只读 CourseOffering JSON] --> J
+  B[未来: 浏览器只读 CourseOffering JSON] --> J
+  F[首版: SYNTHETIC 班次 fixture] --> J
   J --> DB[(课程/要求/班次快照和来源)]
   PY --> BENCH[Benchmark / Trace]
   J --> BENCH
@@ -37,9 +38,11 @@ flowchart TB
 
 ## 2. 统一领域对象和存储
 
+A 的 Excel staging/人工审核、SQL 表与 B 的 typed rule evaluators 详见[Java 实施方案](10-java-import-and-rules.md)。选课小本本仅作为外部课程/教师评价链接；不当作开课时间或培养规则真值。
+
 **先定义 DTO，不让成员独立创造同名对象。** `CurriculumSnapshot` = 文件 SHA + 培养路径 + 导入规则版本；`OfferingSnapshot` = 规范化 JSON 内容 SHA + `xnm/xqm` + adapterVersion + capturedAt；`SourceRef` = `kind, snapshotId, sheet?, row?, endpoint?, capturedAt?`。`Course` 按课程代码和路径归属；`CourseOffering` 按 `term + courseCode + classId` 标识，包含 credits/capacity/teacher、原始上课时间、解析后 `Meeting[]` 与 `parseStatus`。`Requirement` 带原文、规则表达式和 `reviewStatus`。`CompletedCourse` 用虚构/经授权输入。`Plan` 指向课程/班次并记录 hard/soft constraints。
 
-数据库拟建 `curriculum_snapshot, course, requirement, offering_snapshot, course_offering, meeting, completed_course, verification_result`。先做一条路径与一学期快照；未审核路径不可混算。班次快照是可选输入，不覆盖培养快照。原始脚本/真实响应、学号与 Cookie 不入数据库。MySQL 用于可重复导入和工具查询；评测 Trace/版本/报告以本地 JSONL/manifest 保存，避免五周里扩展不必要的表。
+数据库拟建 `curriculum_snapshot, course, curriculum_course, requirement_rule, offering_snapshot, course_offering, meeting, completed_course, external_review_link, verification_result`。先做一条审核路径；班次仅用 `SYNTHETIC` fixture 验证算法，真实快照当前不可得。未审核路径不可混算，班次快照不覆盖培养快照。原始脚本/真实响应、学号与 Cookie 不入数据库。MySQL 用于可重复导入和工具查询；评测 Trace/版本/报告以本地 JSONL/manifest 保存，避免五周里扩展不必要的表。
 
 ## 3. Tool API v1 草案
 
@@ -68,4 +71,4 @@ RSI Runner：稳定 Agent vN→Evolution Benchmark→Trace→跨至少两例的�
 
 ## 5. 五周集成与退化路径
 
-W1 冻结共享结构并验证 Browser Adapter；W2 Java 规则和数据导入；W3 Web→Python→Java 闭环；W4 任务组基线；W5 多轮候选与演示。班次数据若未通过验证，`offerings` 和时间类规则返回 UNKNOWN，其他培养要求核对继续可演示。若模型额度不足，保留真实 Java 核验与评测设计，如实报告未完成的自进化。每周以固定 fixture 运行一条端到端场景；新字段先改共享契约，再改 DTO/测试/页面。
+W1 冻结共享结构并静态核查插件；W2 Java 规则和真实 `.xls` 数据导入；W3 Web→Python→Java 闭环；W4 任务组基线；W5 多轮候选与演示。真实班次数据尚未验证，产品模式下 `offerings` 和时间类规则返回 UNKNOWN，其他培养要求核对继续可演示。若模型额度不足，保留真实 Java 核验与评测设计，如实报告未完成的自进化。每周以固定 fixture 运行一条端到端场景；新字段先改共享契约，再改 DTO/测试/页面。

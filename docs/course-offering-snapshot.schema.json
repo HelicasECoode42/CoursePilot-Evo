@@ -11,11 +11,15 @@
       "type": "object", "additionalProperties": false,
       "required": ["kind", "pageOrigin", "capturedAt", "adapterVersion"],
       "properties": {
-        "kind": {"const": "BROWSER_SNAPSHOT"},
-        "pageOrigin": {"const": "https://jwxt.shu.edu.cn"},
+        "kind": {"enum": ["BROWSER_SNAPSHOT", "SYNTHETIC"]},
+        "pageOrigin": {"type": ["string", "null"]},
         "capturedAt": {"type": "string", "format": "date-time"},
         "adapterVersion": {"type": "string", "minLength": 1}
-      }
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "BROWSER_SNAPSHOT"}}}, "then": {"properties": {"pageOrigin": {"const": "https://jwxt.shu.edu.cn"}}}},
+        {"if": {"properties": {"kind": {"const": "SYNTHETIC"}}}, "then": {"properties": {"pageOrigin": {"type": "null"}}}}
+      ]
     },
     "term": {
       "type": "object", "additionalProperties": false,
@@ -51,7 +55,7 @@
             }
           },
           "parseStatus": {"enum": ["PARSED", "UNKNOWN_TIME_FORMAT", "NO_TIME"]},
-          "sourceEndpoint": {"enum": ["zzxkyzb_cxZzxkYzbChoosedDisplay", "zzxkyzbjk_cxJxbWithKchZzxkYzb"]}
+          "sourceEndpoint": {"enum": ["zzxkyzb_cxZzxkYzbChoosedDisplay", "zzxkyzbjk_cxJxbWithKchZzxkYzb", "SYNTHETIC_FIXTURE"]}
         }
       }
     }

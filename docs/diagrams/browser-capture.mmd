@@ -5,6 +5,7 @@ sequenceDiagram
   participant BA as 只读 Browser Adapter
   participant Web as CoursePilot Web
   participant Java as Java Course Environment
+  Note over Student,Java: 未来流程；当前无法访问选课页实测
   Student->>JW: 自行打开当学期页面
   JW-->>BA: 页面原有响应（观察三类查询）
   Student->>BA: 主动导出快照

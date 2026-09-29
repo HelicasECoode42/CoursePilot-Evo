@@ -1,6 +1,6 @@
 # 共同基础设施、对象与工作流契约 v0.3
 
-状态：**开发前契约草案**，第 1 周以真实 `.xls` 与经授权的班次样例冻结 v1。此文件是五人共用的接口真源；个人子 TRD 不得自行改变字段。问题先在这里记录决议，再改 Java/Python/Web DTO 和示例。
+状态：**开发前契约草案**，第 1 周以真实 `.xls` 与明确标记 `SYNTHETIC` 的班次 fixture 冻结 v1；目前没有经授权的真实班次样例。此文件是五人共用的接口真源；个人子 TRD 不得自行改变字段。问题先在这里记录决议，再改 Java/Python/Web DTO 和示例。
 
 ## 1. 快照、版本与拥有者
 
@@ -61,14 +61,14 @@ D 保管 `benchmark/evolution/` 与隔离的 `benchmark/held-out/`。Evolver 的
 
 ## 5. 共同错误码与数据新鲜度
 
-`PATH_NOT_REVIEWED`, `COURSE_NOT_FOUND`, `COMPOSITE_CODE_UNRESOLVED`, `RULE_UNKNOWN`, `OFFERING_UNAVAILABLE`, `UNKNOWN_TIME_FORMAT`, `UNMATCHED_COURSE`, `TERM_MISMATCH`, `SNAPSHOT_STALE`, `SNAPSHOT_MISMATCH`, `MODEL_TIMEOUT`, `TOOL_UNAVAILABLE`。每个码要有用户文案、是否可重试和 Trace 映射。班次采集时间超过本次演示声明的新鲜度阈值时标 `SNAPSHOT_STALE`；阈值在第一周约定，不能无依据说“实时”。
+`PATH_NOT_REVIEWED`, `COURSE_NOT_FOUND`, `COMPOSITE_CODE_UNRESOLVED`, `RULE_UNKNOWN`, `OFFERING_UNAVAILABLE`, `UNKNOWN_TIME_FORMAT`, `UNMATCHED_COURSE`, `TERM_MISMATCH`, `SNAPSHOT_STALE`, `SNAPSHOT_MISMATCH`, `MODEL_TIMEOUT`, `TOOL_UNAVAILABLE`。每个码要有用户文案、是否可重试和 Trace 映射。未来真实班次采集时间超过声明的新鲜度阈值时标 `SNAPSHOT_STALE`；当前没有可实测快照，不能无依据说“实时”。
 
 ## 6. 模块交接与变更次序
 
-1. **全组先冻结** JSON Schema、两个快照 ID、Tool API、Trace、评分 manifest、错误码和本地端口。用一个虚构 CourseOffering fixture 做端到端合同测试。
+1. **全组先冻结** JSON Schema、两个快照 ID、Tool API、Trace、评分 manifest、错误码和本地端口。用一个明确标记 `SYNTHETIC` 的 CourseOffering fixture 做端到端合同测试；真实班次入口状态为 `UNVERIFIED_NO_ACCESS`。
 2. A 交导入器、字段映射、异常/隐私清单、人工对照快照；B 消费标准对象，不再解析浏览器页面。
 3. B 交 Java DTO/OpenAPI、规则单测和 `UNKNOWN` 示例；C 只通过 HTTP 工具取得真值，不读数据库或自行计算学分。
 4. C 交唯一 `planner.run(case)`、Agent State/Trace；D 复用同一 Runner，不做评测专用 Agent。D 交逐例结果、hypothesis、patch、lineage；E 只展示结果，不重算评分。
 5. E 用假 DTO 先做页面，在 W3 接真服务。新字段先更新本文件与示例，再由相邻模块同步代码、测试和页面；每周至少跑一条 Web→Python→Java 全链路。
 
-完成线：相同文件重复导入幂等，固定 Java 请求给同一规则结果；有/无班次两条路径都不误报冲突；Agent 硬事实附 `verifierResultId/SourceRef`；D 能重放同一输入并追溯模型/Harness/快照；E 显示状态和版本。这里列的是验收标准，不代表已经通过。
+完成线：相同文件重复导入幂等，固定 Java 请求给同一规则结果；模拟班次/无真实班次两条测试路径都不误报冲突；Agent 硬事实附 `verifierResultId/SourceRef`；D 能重放同一输入并追溯模型/Harness/快照；E 显示状态和版本。这里列的是验收标准，不代表已经通过。

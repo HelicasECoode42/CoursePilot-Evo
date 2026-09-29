@@ -5,7 +5,8 @@ flowchart TB
   S2 --> TOOL[Typed Java Tool API v1]
   TOOL --> S1[System 1: Spring Boot Course Environment / Truth / Verifier]
   XLS[2024级培养计划 xls] --> S1
-  BA[Browser Adapter: 只读班次快照] --> S1
+  BA[未来 Browser Adapter: 只读班次快照] --> S1
+  FIX[首版: SYNTHETIC 班次 fixture] --> S1
   S1 --> DB[(课程 / 规则 / 班次快照 / provenance)]
   S1 --> SCORE[客观评分]
   S2 --> BENCH[Evolution Benchmark]

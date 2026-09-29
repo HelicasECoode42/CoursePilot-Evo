@@ -4,7 +4,7 @@
 
 ## 1. 四组任务与人工真值
 
-每组共享同一经审核的培养路径/业务环境，分别设计 **5 evolution + 5 held-out**（总目标 40）；五周标注压力大时，最低每组 **3+3**（共 24），并在报告注明缩放及样本局限。每组都包含“可确认事实”和“应未知”的情况；涉及时间的案例明确绑定 `offeringSnapshotId`，无快照的案例以未知为正确行为。已修记录用虚构或获授权并脱敏的 fixture。
+每组共享同一经审核的培养路径/业务环境，分别设计 **5 evolution + 5 held-out**（总目标 40）；五周标注压力大时，最低每组 **3+3**（共 24），并在报告注明缩放及样本局限。每组都包含“可确认事实”和“应未知”的情况；涉及时间的算法案例明确绑定 `source.kind=SYNTHETIC` 的 `offeringSnapshotId`，真实班次不可用的案例以未知为正确行为；模拟冲突分数不得宣称真实排课能力。已修记录用虚构或获授权并脱敏的 fixture。
 
 | Task Group | evolution / held-out 各自覆盖的变化 | 主要客观判定 |
 | --- | --- | --- |
@@ -13,7 +13,7 @@
 | G3 选课规划、冲突修复与 replan | 有/无班次快照、单双周、时间重叠、改目标重算 | Java 验证的硬约束零违规；未知时间不编造 |
 | G4 信息缺失与拒绝编造 | 缺已修记录、未审核规则、快照过期、未匹配课程、学校政策未知 | 该澄清时澄清，unsupported claim 为零 |
 
-case 草案字段：`caseId, groupId, split, curriculumSnapshotId, offeringSnapshotId?, inputFixtureRef, userQuery, requiredFacts, requiredUnknowns, requiredClarification, forbiddenClaims, requiredSourceRefs, rubricVersion, reviewerIds`。A/B/D 双人对照原 `.xls` 与经验证班次样例标注，不以 Java 输出或 LLM 回答生成标准答案；分歧标 `needs_review` 并排除。标注文件与可见题面分开，Evolver 仅拿 evolution 的输入和失败 Trace，不见任何标准答案。`held-out` 的题面/答案/评分器均由隔离 Runner 持有。
+case 草案字段：`caseId, groupId, split, curriculumSnapshotId, offeringSnapshotId?, inputFixtureRef, userQuery, requiredFacts, requiredUnknowns, requiredClarification, forbiddenClaims, requiredSourceRefs, rubricVersion, reviewerIds`。A/B/D 双人对照原 `.xls` 与人工设计、相互复核的模拟班次样例标注，不以 Java 输出或 LLM 回答生成标准答案；分歧标 `needs_review` 并排除。标注文件与可见题面分开，Evolver 仅拿 evolution 的输入和失败 Trace，不见任何标准答案。`held-out` 的题面/答案/评分器均由隔离 Runner 持有。
 
 ## 2. 固定比较条件与记录
 
@@ -65,4 +65,4 @@ flowchart LR
 
 ## 5. 五周执行与退出标准
 
-W1 完成首批四组标注与 rubric；W2–3 扩展并冻结题集/快照；W4 跑 v0 基线、验证 Java 评分与跨 Case failure hypothesis；W5 做两轮候选评测/回滚和报告。若班次入口不可用，G3 的无快照澄清/拒绝编造仍可运行，但不能声称完成真实冲突修复。若只有人工修改 Prompt、没有隔离评测或回滚，不称为已完成 RSI。
+W1 完成首批四组标注与 rubric；W2–3 扩展并冻结题集/快照；W4 跑 v0 基线、验证 Java 评分与跨 Case failure hypothesis；W5 做两轮候选评测/回滚和报告。当前真实班次入口不可用；G3 可用模拟 fixture 测冲突修复算法，并用无真实快照 case 测澄清/拒绝编造，但不能声称完成真实冲突修复。若只有人工修改 Prompt、没有隔离评测或回滚，不称为已完成 RSI。
