@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+data/private/
+data/raw/
+*.xlsx
+*.xls
+*.pdf
+__pycache__/
+.venv/
+target/
+node_modules/
+dist/
+*.log

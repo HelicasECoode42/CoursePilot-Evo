@@ -1,0 +1,12 @@
+flowchart LR
+  BASE[稳定 Harness vN] --> RUN[跑训练任务]
+  RUN --> TRACE[Trace 与 Java 分数]
+  TRACE --> MINE[Weakness Miner 聚类失败]
+  MINE --> EDIT[Evolver 最小修改 Prompt Skill Tool 描述]
+  EDIT --> CAND[候选 vN+1]
+  CAND --> REG[训练回归]
+  REG --> HELD[封存留出集复评]
+  HELD --> GATE{硬错误零增长且留出集无退化?}
+  GATE -->|是| PROMOTE[晋级 稳定版本指针]
+  GATE -->|否| ROLLBACK[回滚并留记录]
+  PROMOTE --> BASE
