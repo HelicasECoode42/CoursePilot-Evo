@@ -4,9 +4,9 @@
 
 ## 要回答的问题与实现顺序
 
-1. **学生怎么输入？** Vue 单页提供路径选择、已修课程编辑、自然语言目标和本地匿名 session；用 Fetch 调 Python `POST /api/v1/planning`。手机浏览器可用。录入真实学生成绩前需另做账号/隐私设计，课程演示用虚构/授权数据。
+1. **学生怎么输入？** Vue 单页提供路径选择、已修课程编辑、Java 算出的必修/学分缺口、目标提示卡片、自由输入和本地匿名 session；用 Fetch 调 Python `POST /api/v1/planning`。手机浏览器可用。录入真实学生成绩前需另做账号/隐私设计，课程演示用虚构/授权数据。
 2. **班次快照怎么进来？** 首版仅导入清楚标记 `SYNTHETIC` 的测试 JSON，页面显著展示“模拟班次，非真实开课”；未来才接 A 的只读 Adapter，由用户主动导出并预览真实快照。不要求学生把 Cookie/Token 粘贴进页面，不触发官方系统写操作。
-3. **怎样清楚显示可信度？** 结果按已核验、建议、未知、系统错误四区展示；SourceRef、`curriculumSnapshotId/offeringSnapshotId`、班次新鲜度、`parseStatus` 可查看。`OFFERING_UNAVAILABLE/SNAPSHOT_STALE` 时不得出现绿色“无冲突”。重规划保留上轮目标和 Trace 链接。
+3. **怎样清楚显示可信度？** 结果按已核验、建议、未知、系统错误四区展示；SourceRef、`curriculumSnapshotId/offeringSnapshotId`、班次新鲜度、`parseStatus` 可查看。P1 评价卡片附来源和“主观/历史/未匹配”标记；没有真实班次时不得让用户误以为正在选择本学期的教师或班次。`OFFERING_UNAVAILABLE/SNAPSHOT_STALE` 时不得出现绿色“无冲突”。重规划保留上轮目标和 Trace 链接。
 4. **版本如何可见？** 展示当前稳定 `harnessVersion` 与 Benchmark 的候选晋级/回滚摘要；给老师演示 v0/v1/v2 lineage、质量和 Token/工具次数对照图，但不在页面自行重算评分。Trace 只展示脱敏事件和 Tool 引用。
 
 ## 交付与验收

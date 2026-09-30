@@ -4,9 +4,9 @@
 
 ## 要回答的问题与实现顺序
 
-1. **怎样理解目标？** Python 3.11+、FastAPI、Pydantic、httpx、OpenAI-compatible client。提取 `GoalIntent` 的 hard conditions、soft preferences、课程目标和 `needsClarification`；“必须/最好”不混淆，歧义影响硬判断时先问。
-2. **怎样调用 Java？** 按 tool_policy 查询要求/课程/班次，模型最多提出 3 个候选，调用 `plans/validate`；硬错误最多修正一次。没有 `offeringSnapshotId` 或 Java 返回 UNKNOWN 时，不生成确定性无冲突结论。固定模型、温度、token/tool budget 并写 run manifest。
-3. **怎样将昂贵分析变可复用策略？** `AGENTS.md` 写角色/边界；`skills/` 存可检验的领域步骤（例如先核路径再算缺口）；`tool_policy.yaml` 规定何时查哪种 Tool；`context_policy.yaml` 限制传给模型的字段/Trace 片段。D 的 Evolver 只能按白名单提出候选；C 维护 schema 和运行装载器，不人工偷改候选对比条件。
+1. **怎样理解目标？** Python 3.11+、FastAPI、Pydantic、httpx、OpenAI-compatible client。页面提示与自由输入统一进入 `PlanningRequest`；提取 `GoalIntent` 的 hard conditions、soft preferences、兴趣方向、学分目标和 `needsClarification`，保留每条约束的原话。“必须/最好”不混淆，“高分”是高学分还是成绩倾向必须澄清；未回答的偏好不能自动补全。
+2. **怎样调用 Java？** 按 tool_policy 查询要求/课程/班次，P1 可查询少量带来源的评价摘要；历史评价不能证明当期授课或“容易高分”。模型最多提出 3 个候选，调用 `plans/validate`；硬错误最多修正一次。没有 `offeringSnapshotId` 或 Java 返回 UNKNOWN 时，不生成确定性无冲突结论。固定模型、温度、token/tool budget 并写 run manifest。
+3. **怎样将昂贵分析变可复用策略？** `AGENTS.md` 写角色/边界；`skills/` 存可检验的领域步骤（例如先核路径再算缺口、何时问兴趣）；`tool_policy.yaml` 规定何时查哪种 Tool；`context_policy.yaml` 限制传给模型的字段、评价摘录和 Trace 片段。D 的 Evolver 只能按白名单提出候选；C 维护 schema 和运行装载器，不人工偷改候选对比条件。
 4. **怎样给学生解释？** `PlanningAnswer` 分 verifiedFacts/recommendations/unknowns/clarification，硬事实引用 SourceRef 或 verifierResultId；服务故障与业务未知分开。生成脱敏 Trace、Agent State 和 token 用量；不可记录私有思维链或教务凭据。
 
 ## 交付与验收

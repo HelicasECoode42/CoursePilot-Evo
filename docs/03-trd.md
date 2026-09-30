@@ -1,4 +1,4 @@
-# 总体 TRD v0.3｜System 1 / System 2 与五周实现
+# 总体 TRD v0.4｜System 1 / System 2 与五周实现
 
 状态：设计稿；CoursePilot 目前只有文档/骨架，无可运行 Agent/Java 服务。先冻结[共享契约](04-infrastructure-workflow.md)，再按[五人子 TRD](05-team-and-sub-trds.md)并行。原始 `.xls` 的字段边界见[数据核查](06-workbook-audit.md)，浏览器侧班次入口见[适配说明](09-browser-adapter.md)。
 
@@ -13,7 +13,7 @@
 | Harness / RSI | Python、pytest、JSONL、hashlib、不可变快照 | AGENTS.md/skills/tool_policy/context_policy，Trace、失败归因、候选最小 patch、多轮晋级/回滚 |
 | Web | Vue 3、Vite、Fetch | 路径/已修/目标录入，模拟班次导入演示，事实/建议/未知/版本展示 |
 
-本地建议端口：Web 5173、Python 8000、Java 8080、MySQL 3306，可配置。浏览器不直接调用模型；Python 不读 MySQL，Java 不调用 LLM。除导入接口外，Web 调 Python，由 Python 调 Java Tool。课程时间可用性由 Java 返回状态决定。
+本地建议端口：Web 5173、Python 8000、Java 8080、MySQL 3306，可配置。浏览器不直接调用模型；Python 不读 MySQL，Java 不调用 LLM。除导入接口外，Web 调 Python，由 Python 调 Java Tool。课程时间可用性由 Java 返回状态决定。老师反馈后的引导式交互、评价导入与数据供给见[场景与 Harness 实施说明](13-guided-planning-and-harness.md)。
 
 **参考与自研边界：**从 PhysicalRSI 借鉴 System 1/2 与“经验固化成可继承软件资产”的思想，从 GDPevo 借鉴同业务环境的 task-group 与 evolution/held-out 分离。CoursePilot 自己要实现的是教学计划/班次双快照、Java 课程真值工具、学业规划 Agent、四组自建任务、隔离晋级规则和 Web 演示；不复现两项研究的任务、代码、论文结果或性能数字。
 
@@ -42,7 +42,7 @@ A 的 Excel 模板编译/自动校验、SQL 表与 B 的 typed rule evaluators �
 
 **先定义 DTO，不让成员独立创造同名对象。** `CurriculumSnapshot` = 文件 SHA + 培养路径 + 导入规则版本；`OfferingSnapshot` = 规范化 JSON 内容 SHA + `xnm/xqm` + adapterVersion + capturedAt；`SourceRef` = `kind, snapshotId, sheet?, row?, endpoint?, capturedAt?`。`Course` 按课程代码和路径归属；`CourseOffering` 按 `term + courseCode + classId` 标识，包含 credits/capacity/teacher、原始上课时间、解析后 `Meeting[]` 与 `parseStatus`。`Requirement` 带原文、规则表达式和 `compileStatus`。`CompletedCourse` 用虚构/经授权输入。`Plan` 指向课程/班次并记录 hard/soft constraints。
 
-数据库拟建 `curriculum_snapshot, course, curriculum_course, requirement_rule, offering_snapshot, course_offering, meeting, completed_course, external_review_link, verification_result`。先做一条已通过自动门槛的路径；班次仅用 `SYNTHETIC` fixture 验证算法，真实快照当前不可得。未发布路径不可混算，班次快照不覆盖培养快照。原始脚本/真实响应、学号与 Cookie 不入数据库。MySQL 用于可重复导入和工具查询；评测 Trace/版本/报告以本地 JSONL/manifest 保存，避免五周里扩展不必要的表。
+数据库拟建 `curriculum_snapshot, course, curriculum_course, requirement_rule, offering_snapshot, course_offering, meeting, completed_course, external_review_link, review_note, verification_result`。先做一条已通过自动门槛的路径；班次仅用 `SYNTHETIC` fixture 验证算法，真实快照当前不可得。未发布路径不可混算，班次快照不覆盖培养快照。原始脚本/真实响应、学号与 Cookie 不入数据库。MySQL 用于可重复导入和工具查询；评测 Trace/版本/报告以本地 JSONL/manifest 保存，避免五周里扩展不必要的表。
 
 ## 3. Tool API v1 草案
 
@@ -50,8 +50,9 @@ A 的 Excel 模板编译/自动校验、SQL 表与 B 的 typed rule evaluators �
 
 | API | 输入重点 | 输出重点 |
 | --- | --- | --- |
-| `GET /api/v1/curriculum-snapshots` | 路径 | 已审核路径、文件 hash、版本 |
+| `GET /api/v1/curriculum-snapshots` | 路径 | 已发布路径、文件 hash、版本 |
 | `GET /api/v1/courses` | curriculumSnapshotId、代码/类别 | Course 与 SourceRef |
+| `GET /api/v1/reviews/search`（P1） | courseCode、teacherKey?、limit | 带来源的少量评价摘要/外链与匹配状态；不证明当期授课 |
 | `POST /api/v1/offering-snapshots/import` | CourseOfferingSnapshot JSON | offeringSnapshotId、校验结果、拒绝行与警告 |
 | `GET /api/v1/offerings` | 双快照、学期、课程代码 | 规范化班次和采集时间 |
 | `POST /api/v1/requirements/audit` | 培养快照、已修记录 | satisfied/gaps/unknowns 与来源 |
@@ -63,11 +64,11 @@ Java Tool API **冻结期间**不得由 Evolver 修改。Java 可以实现 `scor
 
 ## 4. 一次规划和一次演化
 
-Planning Runner：Pydantic 校验→LLM 抽取 hard/soft/歧义→按 tool_policy 查询 Java→提出候选→Java `plans/validate`→必要时最多一次修正或澄清→最终答复。建议最大 4 次工具调用和一次修正，实际预算第一周固定并写入 manifest。模型文本不可覆盖 Java 学分或冲突结论；`parseStatus != PARSED` 时冲突/周五条件未知。
+Planning Runner：Pydantic 校验→LLM 从页面提示和自由输入抽取 hard/soft/兴趣/歧义→按 tool_policy 查询 Java 的要求、课程及可用评价/班次→提出 2–3 个课程候选→Java `plans/validate`→必要时最多一次修正或澄清→最终答复。建议最大 4 次工具调用和一次修正，实际预算第一周固定并写入 manifest。模型文本不可覆盖 Java 学分或冲突结论；`parseStatus != PARSED` 时冲突/周五条件未知。
 
 RSI Runner：稳定 Agent vN→Evolution Benchmark→Trace→跨至少两例的失败假设→Evolver 对白名单 Harness State 产生一次有限 patch→Candidate vN+1→Evolution 回归+隔离 Held-out→客观门槛判定→Promote/Rollback→下一轮基于稳定 vN+1。必须能记录 v0→v1→v2 的版本 lineage；如果候选失败，分支保留为 rejected，稳定指针不前进。允许 patch 的首版范围只有 `AGENTS.md`、`skills/`、`tool_policy`、`context_policy`；Java/API/评分器/答案/模型配置均冻结。将验证稳定的做法进一步实现为 Java 工具是未来人工工程迭代，不属于首版自动 patch。
 
-每次运行的 `run-manifest.json` 记录数据/Benchmark/Java API/Verifier/模型/Harness 版本、温度、token budget；Trace 保存 token、工具次数、总耗时和来源，详见[Benchmark 协议](07-benchmark-protocol.md)。检验的是“重用策略后减少推理成本且 held-out 不退化”，不能因为多思考使分数略升就称为效率提高。
+课程、学分和规则由 Java 按需查询 MySQL，以短 JSON + SourceRef 给 Agent，不把全库塞进 Prompt。评价摘要是带来源的主观文本，首版按 courseCode/teacherKey 检索少量片段；没有足量授权文本和检索评测时不建向量 RAG。每次运行的 `run-manifest.json` 记录数据/Benchmark/Java API/Verifier/模型/Harness 版本、温度、token budget；Trace 保存 token、工具次数、总耗时和来源，详见[Benchmark 协议](07-benchmark-protocol.md)。检验的是“重用策略后减少推理成本且 held-out 不退化”，不能因为多思考使分数略升就称为效率提高。
 
 ## 5. 五周集成与退化路径
 

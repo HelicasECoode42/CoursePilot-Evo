@@ -1,6 +1,6 @@
 # CoursePilot-Evo：给后续编码 Agent 的项目约定
 
-当前只有方案、原始数据本地副本和目录骨架；**不要把设计写成已实现**。先读 `README.md`、`docs/06-workbook-audit.md`、`docs/09-browser-adapter.md`、`docs/10-java-import-and-rules.md`、`docs/03-trd.md`、`docs/04-infrastructure-workflow.md`、`docs/07-benchmark-protocol.md`，再读负责模块的 `docs/trd/*.md`。根目录的本文件是开发约定，**不是**可由 Evolver 修改的运行 Harness；运行 Harness 的白名单在 `agent-runtime/harness/`。
+当前只有方案、原始数据本地副本和目录骨架；**不要把设计写成已实现**。先读 `README.md`、`docs/13-guided-planning-and-harness.md`、`docs/06-workbook-audit.md`、`docs/09-browser-adapter.md`、`docs/10-java-import-and-rules.md`、`docs/03-trd.md`、`docs/04-infrastructure-workflow.md`、`docs/07-benchmark-protocol.md`，再读负责模块的 `docs/trd/*.md`。根目录的本文件是开发约定，**不是**可由 Evolver 修改的运行 Harness；运行 Harness 的白名单在 `agent-runtime/harness/`。
 
 ## 真值与权限边界
 

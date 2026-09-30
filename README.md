@@ -10,9 +10,9 @@ Vue 3 Web 接受学生已修课程与目标；**System 2** Python Planning Agent
 
 ## 推荐阅读顺序
 
-1. [今天可提交的项目设定字段](docs/11-project-setting-submission.md)、[项目设定 PDF](docs/CoursePilot-Evo-项目设定提交版.pdf)与[老师版五周项目安排](docs/01-teacher-project-plan.md)
+1. [项目设定文字稿](docs/11-project-setting-submission.md)与[老师版五周项目安排](docs/01-teacher-project-plan.md)
 2. [真实教学计划核查](docs/06-workbook-audit.md)与[浏览器班次入口/JSON Schema](docs/09-browser-adapter.md)
-3. [内部 PRD](docs/02-prd.md)、[总体 TRD](docs/03-trd.md)与[Java 导入/SQL/规则实施方案](docs/10-java-import-and-rules.md)
+3. [老师反馈后的引导式规划、数据供给和 Harness 场景](docs/13-guided-planning-and-harness.md)、[内部 PRD](docs/02-prd.md)、[总体 TRD](docs/03-trd.md)与[Java 导入/SQL/规则实施方案](docs/10-java-import-and-rules.md)
 4. [统一基础设施与工作流契约](docs/04-infrastructure-workflow.md)
 5. [四组 Benchmark 与多轮 RSI 协议](docs/07-benchmark-protocol.md)
 6. [五人分工和子 TRD](docs/05-team-and-sub-trds.md)、[学习仓库](docs/08-learning-repos.md)

@@ -6,7 +6,6 @@ data/raw/
 *.xlsx
 *.xls
 *.pdf
-!docs/CoursePilot-Evo-项目设定提交版.pdf
 __pycache__/
 .venv/
 target/

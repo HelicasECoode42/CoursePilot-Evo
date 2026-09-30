@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 培养要求、课程、学分、建议学期 | 用户提供的 2024 级 `.xls` | 选一条计算机路径，编译为带单元格来源的不可变快照 |
 | 本学期教学班、教师、上课时间 | 当前没有可实测的真实快照；插件仅提供静态字段线索 | 标为 `SYNTHETIC` 的 fixture 只验证时间解析/冲突算法；真实开课回答 UNKNOWN |
-| 课程/教师主观评价 | [选课小本本](https://course-rate.icu/) 的公开页面 | 只存外部链接，不把评论当作培养规则或本学期班次事实 |
+| 课程/教师主观评价 | [选课小本本](https://course-rate.icu/) 的公开页面 | P0 只存外部链接；P1 可导入少量有权使用的评价摘要并记录来源/匹配状态。评论不当作培养规则或本学期班次事实 |
 
 ```mermaid
 flowchart LR
@@ -36,7 +36,7 @@ flowchart LR
 
 ## 3. SQL 存事实与版本，Java 计算规则
 
-建议 MySQL 8 + Flyway。最小表：`curriculum_snapshot(id,file_sha256,cohort_year,major_code,track_code,importer_version,status,published_at)`；`course(course_code,name)`；`curriculum_course(snapshot_id,course_code,category,credits,suggested_term,source_sheet,source_row,source_col)`；`requirement_rule(snapshot_id,rule_type,params_json,source_ref,compile_status)`；`import_issue(import_id,source_ref,issue_code,severity,raw_text)`；`completed_course(attempt_id,session_id,course_code,recognized_credits,evidence_status)`；`offering_snapshot(id,source_type,term_xnm,term_xqm,captured_at,adapter_version)`；`course_offering(snapshot_id,class_id,course_code,teacher_text,credits,capacity,parse_status)`；`meeting(offering_snapshot_id,class_id,seq,day,section_start,section_end,weeks_json,raw_text)`；`external_review_link(course_code,teacher_key,url,match_status)`。
+建议 MySQL 8 + Flyway。最小表：`curriculum_snapshot(id,file_sha256,cohort_year,major_code,track_code,importer_version,status,published_at)`；`course(course_code,name)`；`curriculum_course(snapshot_id,course_code,category,credits,suggested_term,source_sheet,source_row,source_col)`；`requirement_rule(snapshot_id,rule_type,params_json,source_ref,compile_status)`；`import_issue(import_id,source_ref,issue_code,severity,raw_text)`；`completed_course(attempt_id,session_id,course_code,recognized_credits,evidence_status)`；`offering_snapshot(id,source_type,term_xnm,term_xqm,captured_at,adapter_version)`；`course_offering(snapshot_id,class_id,course_code,teacher_text,credits,capacity,parse_status)`；`meeting(offering_snapshot_id,class_id,seq,day,section_start,section_end,weeks_json,raw_text)`；`external_review_link(course_code,teacher_key,url,match_status)`；P1 `review_note(review_note_id,course_code,teacher_key,source_type,source_url,import_batch_id,text_excerpt,match_status)`。
 
 课程代码用字符串；不同培养路径可给同一课程不同类别和计入方式；不同教师/教学班必须独立标识。`params_json` 只接收白名单字段，经 Java 类型校验，不执行任意 SQL/脚本/模型表达式。SQL 负责查事实、关联、来源与事务；纯 Java Service 负责计算，便于 JUnit 对照。
 

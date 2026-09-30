@@ -11,8 +11,10 @@ Excel 导入按解析 → 受控规则编译 → 自动门槛校验 → 原子�
 3. **如何安全采集？** 真实 Adapter 暂不作为五周首版交付；以后编写独立无自动点击、无提交请求的 Adapter，只观察页面已取得的数据，由用户显式导出最小化 JSON；不传 Cookie/Token，不保留完整原始响应。直接 POST localhost 仅在本地浏览器限制和 Origin 校验通过后作为可选方案。
 4. **如何规范化？** 映射 `kch_id→courseCode`、`jxb_id→classId`、`jxbxf→credits`、`jxbrs→capacity`、`jsxx→teacherText`、`sksj→meetingTextRaw/meetings`，`xnm/xqm` 必填。单双周、连续/离散周解析失败标 `UNKNOWN_TIME_FORMAT`，不当无冲突。给 B 可重复的虚构 fixture、真实但脱敏且获授权的对照记录和字段异常表。
 
+5. **评价摘要如何导入？（P1）** 按[共享契约](../04-infrastructure-workflow.md)定义少量 CSV/JSON `ReviewNote`，保留来源、导入批次、课程代码、可选教师标识和匹配状态。只收经授权或虚构的演示摘要；无法可靠匹配时标 `UNVERIFIED`，不抓取第三方评论正文，不推断当期授课。
+
 ## 交付与验收
 
-交 `CurriculumSnapshotDraft`、通过自动门槛的 `CurriculumSnapshot`、失败时的 `ImportIssue`/差异报告、标记 `SYNTHETIC` 的 `CourseOfferingSnapshot` JSON 和来源字段字典；真实班次状态固定 `UNVERIFIED_NO_ACCESS`。测试至少覆盖 `.xls` 三种表型、前导零、重复行、学分总计不一致、未知备注阻断发布、重导幂等与版本升级，以及 5 种周次写法、混学期拒绝、缺课程号拒绝、未解析时间 UNKNOWN。首个模板做一次独立基线对照；其后已知模板可无人工介入自动发布，不符合门槛时必须自动拒绝。用人工构造并双人复核的样例测试冲突/不冲突，不声称和官方页面对照。若页面不可稳定合法采集，保留只读分析与 fixture，不编造已接入。
+交 `CurriculumSnapshotDraft`、通过自动门槛的 `CurriculumSnapshot`、失败时的 `ImportIssue`/差异报告、标记 `SYNTHETIC` 的 `CourseOfferingSnapshot` JSON 和来源字段字典；P1 再交少量有来源的评价摘要导入样例；真实班次状态固定 `UNVERIFIED_NO_ACCESS`。测试至少覆盖 `.xls` 三种表型、前导零、重复行、学分总计不一致、未知备注阻断发布、重导幂等与版本升级，以及 5 种周次写法、混学期拒绝、缺课程号拒绝、未解析时间 UNKNOWN。首个模板做一次独立基线对照；其后已知模板可无人工介入自动发布，不符合门槛时必须自动拒绝。用人工构造并双人复核的样例测试冲突/不冲突，不声称和官方页面对照。若页面不可稳定合法采集，保留只读分析与 fixture，不编造已接入。
 
 **依赖：**B 提供导入端点和存储契约；E 提供本地上传 UI。A 不改 Java Verifier 或前端结果文案。**学习入口：**[Apache POI](https://github.com/apache/poi) 的 HSSF/SS；[MDN Web APIs](https://developer.mozilla.org/en-US/docs/Web/API) 的 Blob/下载与浏览器安全模型；[JSON Schema](https://json-schema.org/learn/getting-started-step-by-step) 的结构校验。

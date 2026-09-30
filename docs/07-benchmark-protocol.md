@@ -9,9 +9,9 @@
 | Task Group | evolution / held-out 各自覆盖的变化 | 主要客观判定 |
 | --- | --- | --- |
 | G1 培养要求核对 | 类别学分、必修、文字规则、组合编号、跨路径 | 缺口/已满足项与人工标签一致，SourceRef 正确 |
-| G2 hard/soft 偏好理解 | “必须”“最好”、冲突偏好、模糊目标、约束优先级 | hard/soft 结构化抽取，歧义时澄清 |
+| G2 hard/soft 偏好理解 | 页面提示与自由输入混合、“必须/最好”、“高分”歧义、兴趣不明、约束优先级 | hard/soft 结构化抽取，关键歧义时澄清且不补造默认偏好 |
 | G3 选课规划、冲突修复与 replan | 有/无班次快照、单双周、时间重叠、改目标重算 | Java 验证的硬约束零违规；未知时间不编造 |
-| G4 信息缺失与拒绝编造 | 缺已修记录、未审核规则、快照过期、未匹配课程、学校政策未知 | 该澄清时澄清，unsupported claim 为零 |
+| G4 信息缺失与拒绝编造 | 缺已修记录、未发布规则、快照过期、未匹配课程、仅有历史教师评价、学校政策未知 | 该澄清时澄清，不把评价当当期授课或客观高分，unsupported claim 为零 |
 
 case 草案字段：`caseId, groupId, split, curriculumSnapshotId, offeringSnapshotId?, inputFixtureRef, userQuery, requiredFacts, requiredUnknowns, requiredClarification, forbiddenClaims, requiredSourceRefs, rubricVersion, reviewerIds`。A/B/D 双人对照原 `.xls` 与人工设计、相互复核的模拟班次样例标注，不以 Java 输出或 LLM 回答生成标准答案；分歧标 `needs_review` 并排除。标注文件与可见题面分开，Evolver 仅拿 evolution 的输入和失败 Trace，不见任何标准答案。`held-out` 的题面/答案/评分器均由隔离 Runner 持有。
 
@@ -57,6 +57,7 @@ flowchart LR
 
 1. Target Agent vN 在 evolution cases 运行。Failure Miner **只看训练 Trace**，将多例相同失败整理为 `hypothesisId, caseIds>=2, pattern, likelyCause, proposedPatch, expectedMetric`。单例失误不得触发自动 patch。
 2. Evolver 只得到假设、必要的脱敏 Trace 片段和白名单文件：`agent-runtime/harness/AGENTS.md`, `skills/`, `tool_policy.yaml`, `context_policy.yaml`。一次仅修改一个可解释策略，保存 diff 和内容 hash；如发现需把策略下沉为 Java 确定性工具，列为人工工程任务，**本轮不自动改 Java**。
+   例如 v0 在两个不同案例中把“周五最好空”当成硬条件，Failure Miner 才能提出“hard/soft 误分”假设；候选只改澄清 Skill 或 Tool Policy。下一轮若重复把历史教师评价写成当期授课事实，再修改 Context Policy 并独立评测。单纯预先写一套 Skill、没有 Trace 驱动的假设、候选和回滚，不算已完成演化。
 3. Candidate 以同配置跑 evolution 回归；独立 Runner 才能读取 held-out 题面/标签并评分。Evolver 不可修改或读取 Evaluator、Benchmark 标准答案、held-out test、Java API、模型配置/预算。隔离方式见[共享契约](04-infrastructure-workflow.md)。
 4. 晋级规则采用**严格的客观改进**：四组等权 held-out task score 高于父版本；或 task score 完全持平且总 Token 平均降低至少 5%（同时平均工具调用不增加）。两种情况均要求每组 held-out score 不下降、任何原通过 case 不变失败、硬违规和 unsupported claim 不增加、clarification correctness 不下降。数据不足/Token 缺失时不得用效率分支晋级。未满足即 rollback，并保留候选、Trace 和拒绝理由。主观推荐评分不能替代上述门槛。
 5. 晋级后稳定指针指向 vN+1，下一轮必须基于此版本重新采集 evolution Trace；至少设计/实现能运行 v0→v1→v2 两次独立候选决策。若第一轮失败，可在 v0 上提出新候选，但不能把 rejected 分支叫 v1。报告区分“机制支持两轮”与“实际成功晋级两次”。
