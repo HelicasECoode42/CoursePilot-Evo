@@ -11,7 +11,8 @@ Excel 导入按解析 → 受控规则编译 → 自动门槛校验 → 原子�
 3. **如何安全采集？** 真实 Adapter 暂不作为五周首版交付；以后编写独立无自动点击、无提交请求的 Adapter，只观察页面已取得的数据，由用户显式导出最小化 JSON；不传 Cookie/Token，不保留完整原始响应。直接 POST localhost 仅在本地浏览器限制和 Origin 校验通过后作为可选方案。
 4. **如何规范化？** 映射 `kch_id→courseCode`、`jxb_id→classId`、`jxbxf→credits`、`jxbrs→capacity`、`jsxx→teacherText`、`sksj→meetingTextRaw/meetings`，`xnm/xqm` 必填。单双周、连续/离散周解析失败标 `UNKNOWN_TIME_FORMAT`，不当无冲突。给 B 可重复的虚构 fixture、真实但脱敏且获授权的对照记录和字段异常表。
 
-5. **评价摘要如何导入？（P1）** 按[共享契约](../04-infrastructure-workflow.md)定义少量 CSV/JSON `ReviewNote`，保留来源、导入批次、课程代码、可选教师标识和匹配状态。只收经授权或虚构的演示摘要；无法可靠匹配时标 `UNVERIFIED`，不抓取第三方评论正文，不推断当期授课。
+5. **岗位标签如何保持可核查？（P1）** 人工维护 2–3 个岗位方向的少量 `CareerCourseTag(role, skill, courseCode, sourceRef)` 种子，逐条关联已发布课程；无映射不推断。它是探索提示，不是就业资格保证。
+6. **评价摘要如何导入？（P1）** 按[共享契约](../04-infrastructure-workflow.md)定义少量 CSV/JSON `ReviewNote`，保留来源、导入批次、课程代码、可选教师标识和匹配状态。只收经授权或虚构的演示摘要；无法可靠匹配时标 `UNVERIFIED`，不抓取第三方评论正文，不推断当期授课。
 
 ## 交付与验收
 

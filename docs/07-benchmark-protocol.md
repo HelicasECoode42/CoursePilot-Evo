@@ -9,9 +9,9 @@
 | Task Group | evolution / held-out 各自覆盖的变化 | 主要客观判定 |
 | --- | --- | --- |
 | G1 培养要求核对 | 类别学分、必修、文字规则、组合编号、跨路径 | 缺口/已满足项与人工标签一致，SourceRef 正确 |
-| G2 hard/soft 偏好理解 | 页面提示与自由输入混合、“必须/最好”、“高分”歧义、兴趣不明、约束优先级 | hard/soft 结构化抽取，关键歧义时澄清且不补造默认偏好 |
+| G2 hard/soft 偏好理解 | 页面提示与自由输入混合、“必须/最好”、“高分”歧义、岗位目标、签到偏好、兴趣不明、约束优先级 | hard/soft 结构化抽取，关键歧义时澄清且不补造默认偏好 |
 | G3 选课规划、冲突修复与 replan | 有/无班次快照、单双周、时间重叠、改目标重算 | Java 验证的硬约束零违规；未知时间不编造 |
-| G4 信息缺失与拒绝编造 | 缺已修记录、未发布规则、快照过期、未匹配课程、仅有历史教师评价、学校政策未知 | 该澄清时澄清，不把评价当当期授课或客观高分，unsupported claim 为零 |
+| G4 信息缺失与拒绝编造 | 缺/不完整已修记录、缺岗位映射、只有主观签到评价、未发布规则、快照过期、未匹配课程、仅有历史教师评价、学校政策未知 | 该澄清时澄清，不把评价当当期授课或客观高分，unsupported claim 为零 |
 
 case 草案字段：`caseId, groupId, split, curriculumSnapshotId, offeringSnapshotId?, inputFixtureRef, userQuery, requiredFacts, requiredUnknowns, requiredClarification, forbiddenClaims, requiredSourceRefs, rubricVersion, reviewerIds`。A/B/D 双人对照原 `.xls` 与人工设计、相互复核的模拟班次样例标注，不以 Java 输出或 LLM 回答生成标准答案；分歧标 `needs_review` 并排除。标注文件与可见题面分开，Evolver 仅拿 evolution 的输入和失败 Trace，不见任何标准答案。`held-out` 的题面/答案/评分器均由隔离 Runner 持有。
 

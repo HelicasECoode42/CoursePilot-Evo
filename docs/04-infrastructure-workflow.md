@@ -14,7 +14,7 @@
 | `benchmarkSetVersion` / `evaluatorVersion` | D 的题目/标签/评分器 hash | Evolver 不可读答案，也不可改评分器 |
 | `modelConfigId` | C/D 固定 base model、temperature、token budget、工具上限 | 同一次 vN/vN+1 对比不得变化 |
 
-`SourceRef` 最少包含 `kind: CURRICULUM|OFFERING, snapshotId, sheet?, row?, column?, endpoint?, capturedAt?`。`Course`、`CourseOffering`、`Meeting`、`Requirement`、`CompletedCourse`、`Plan` 的字段见[总体 TRD](03-trd.md)与[JSON Schema](course-offering-snapshot.schema.json)。培养快照与班次快照不可用一个 `snapshotId` 混称。课程代码、班次 ID、学年学期均为字符串，保留前导零；同学期 `courseCode+classId` 唯一。
+`SourceRef` 最少包含 `kind: CURRICULUM|OFFERING|REVIEW|CURATED_TAG, snapshotId?, sheet?, row?, column?, endpoint?, sourceUrl?, capturedAt?`。培养规则硬事实必须引用 `CURRICULUM` 或 `OFFERING`；评价和岗位标签分别用 `REVIEW`、`CURATED_TAG`，不得冒充学校真值。`Course`、`CourseOffering`、`Meeting`、`Requirement`、`CompletedCourse`、`Plan` 的字段见[总体 TRD](03-trd.md)与[JSON Schema](course-offering-snapshot.schema.json)。培养快照与班次快照不可用一个 `snapshotId` 混称。课程代码、班次 ID、学年学期均为字符串，保留前导零；同学期 `courseCode+classId` 唯一。
 
 ## 2. API 封套与状态
 
@@ -35,7 +35,9 @@ Java 请求至少含 `schemaVersion, requestId, curriculumSnapshotId`，涉及�
 
 ## 3. 引导式规划输入与评价证据
 
-`PlanningRequest` 由 E 的页面提交，至少含 `schemaVersion, sessionId, curriculumSnapshotId, completedCourses[], transcriptComplete, promptText, selectedGoalChips[], previousPlanId?`；`offeringSnapshotId?` 只有经验证的真实快照或显式演示模式可填。C 从页面提示与自由输入整理 `GoalIntent`：`hardConstraints[], softPreferences[], interestTags[], creditGoal?, teacherPreference?, questionToClarify?`。每条约束带 `sourceText` 和 `confidence`；不能把页面没有收集到的偏好伪装为学生已确认。涉及“高分”等歧义时先确认含义。
+`PlanningRequest` 由 E 的页面提交，至少含 `schemaVersion, sessionId, curriculumSnapshotId, completedCourses[], transcriptComplete, promptText, selectedGoalChips[], previousPlanId?`；`offeringSnapshotId?` 只有经验证的真实快照或显式演示模式可填。C 从页面提示与自由输入整理 `GoalIntent`：`hardConstraints[], softPreferences[], interestTags[], careerTargets[], creditGoal?, attendancePreference?, teacherPreference?, questionToClarify?`。每条约束带 `sourceText` 和 `confidence`；不能把页面没有收集到的偏好伪装为学生已确认。涉及“高分”等歧义时先确认含义。`completedCourses[]` 与 `transcriptComplete` 是用户声明，Java 对照培养快照计算学分；清单不完整时缺口只能标估算/UNKNOWN。兴趣、岗位和签到偏好也都保留 `source=USER_DECLARED|PROPOSED` 与确认时间，模型提取结果未确认时不得升为硬条件。
+
+`CareerCourseTag(role, skill, courseCode, sourceRef)` 是少量人工策划的岗位方向映射，首版只覆盖 2–3 个方向；B 通过只读课程查询返回标签与来源，C 不自行发明岗位要求或承诺就业。签到频率若只有评价来源，只能作为软偏好的主观线索。
 
 `ReviewNote` 最少包含 `reviewNoteId, courseCode, teacherKey?, sourceType, sourceUrl?, importBatchId, textExcerpt, tags[], matchStatus`，其中 `sourceType=USER_IMPORT|EXTERNAL_LINK|SYNTHETIC`，`matchStatus=VERIFIED_COURSE|UNVERIFIED`。评价只作为主观证据；`UNVERIFIED` 不得关联到某个当前教学班。B 的 `GET /api/v1/reviews/search`（P1）按课程/教师返回有限条摘录和来源，不提供大段全文或声称“高分保证”。A 管少量 CSV/JSON 导入和来源格式，B 管存储/查询，E 管展示，C 管上下文选择。
 

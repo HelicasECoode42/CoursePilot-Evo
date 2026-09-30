@@ -4,11 +4,11 @@
 
 | 人 | 子 TRD / 技术栈 | 所有权与首次交付 | 人日 |
 | --- | --- | --- | ---: |
-| A | [数据适配](trd/a-data.md)：Java POI + JSON Schema + 插件静态核查 | `.xls` 模板编译/自动校验/原子发布、模拟班次 fixture；P1 少量评价摘要导入格式 | 12 |
-| B | [Java Environment/Verifier](trd/b-verifier.md)：Spring Boot/JPA/Flyway/JUnit | 课程/班次/要求模型、typed Tool API、确定性核验；P1 评价摘要查询 | 12 |
-| C | [Planning Agent](trd/c-agent.md)：Python/FastAPI/Pydantic/httpx | 同一 Agent Runner、引导式 GoalIntent、澄清策略、Harness State、脱敏 Trace | 10 |
+| A | [数据适配](trd/a-data.md)：Java POI + JSON Schema + 插件静态核查 | `.xls` 模板编译/自动校验/原子发布、模拟班次 fixture；P1 少量评价摘要与岗位标签种子格式 | 12 |
+| B | [Java Environment/Verifier](trd/b-verifier.md)：Spring Boot/JPA/Flyway/JUnit | 课程/班次/要求模型、typed Tool API、确定性核验；P1 评价摘要/岗位标签查询 | 12 |
+| C | [Planning Agent](trd/c-agent.md)：Python/FastAPI/Pydantic/httpx | 同一 Agent Runner、引导式 GoalIntent、画像确认与澄清策略、Harness State、脱敏 Trace | 10 |
 | D | [Benchmark/RSI](trd/d-benchmark-rsi.md)：Python/pytest/JSONL | 四组任务、隔离评分、跨 Case Miner、候选/晋级/回滚 | 11 |
-| E | [Web/会话/集成](trd/e-web-integration.md)：Vue 3/Vite/Fetch | 引导式问题、必修/学分缺口、事实/未知/版本与评价来源可视化、端到端演示 | 10 |
+| E | [Web/会话/集成](trd/e-web-integration.md)：Vue 3/Vite/Fetch | 引导式问题、可编辑画像、必修/学分缺口、事实/未知/版本与评价来源可视化、端到端演示 | 10 |
 
 工作量依据：A 承担 Excel 三类表的解析器、黄金样例、自动校验/异常阻断及班次字段的静态契约，给 12 人日；B 有核心 Java 规则和两个快照，给 12；D 需人工标注与双轮版本流程，给 11；C/E 分别聚焦 Agent 与页面/联调。A/B 的 Java DTO、C/D 的 Runner 和 D/E 的 Trace 展示必须共用契约，不能复制规则或另造对象。
 

@@ -40,9 +40,9 @@ flowchart TB
 
 A 的 Excel 模板编译/自动校验、SQL 表与 B 的 typed rule evaluators 详见[Java 实施方案](10-java-import-and-rules.md)。选课小本本仅作为外部课程/教师评价链接；不当作开课时间或培养规则真值。
 
-**先定义 DTO，不让成员独立创造同名对象。** `CurriculumSnapshot` = 文件 SHA + 培养路径 + 导入规则版本；`OfferingSnapshot` = 规范化 JSON 内容 SHA + `xnm/xqm` + adapterVersion + capturedAt；`SourceRef` = `kind, snapshotId, sheet?, row?, endpoint?, capturedAt?`。`Course` 按课程代码和路径归属；`CourseOffering` 按 `term + courseCode + classId` 标识，包含 credits/capacity/teacher、原始上课时间、解析后 `Meeting[]` 与 `parseStatus`。`Requirement` 带原文、规则表达式和 `compileStatus`。`CompletedCourse` 用虚构/经授权输入。`Plan` 指向课程/班次并记录 hard/soft constraints。
+**先定义 DTO，不让成员独立创造同名对象。** `CurriculumSnapshot` = 文件 SHA + 培养路径 + 导入规则版本；`OfferingSnapshot` = 规范化 JSON 内容 SHA + `xnm/xqm` + adapterVersion + capturedAt；`SourceRef` = `kind, snapshotId?, sheet?, row?, endpoint?, sourceUrl?, capturedAt?`，其中培养/班次硬事实与评价/人工岗位标签的 `kind` 分开。`Course` 按课程代码和路径归属；`CareerCourseTag` 是少量人工策划的岗位-能力-课程映射，必须有来源，不当作学校官方要求；`CourseOffering` 按 `term + courseCode + classId` 标识，包含 credits/capacity/teacher、原始上课时间、解析后 `Meeting[]` 与 `parseStatus`。`Requirement` 带原文、规则表达式和 `compileStatus`。`CompletedCourse` 用虚构/经授权输入。`Plan` 指向课程/班次并记录 hard/soft constraints。
 
-数据库拟建 `curriculum_snapshot, course, curriculum_course, requirement_rule, offering_snapshot, course_offering, meeting, completed_course, external_review_link, review_note, verification_result`。先做一条已通过自动门槛的路径；班次仅用 `SYNTHETIC` fixture 验证算法，真实快照当前不可得。未发布路径不可混算，班次快照不覆盖培养快照。原始脚本/真实响应、学号与 Cookie 不入数据库。MySQL 用于可重复导入和工具查询；评测 Trace/版本/报告以本地 JSONL/manifest 保存，避免五周里扩展不必要的表。
+数据库拟建 `curriculum_snapshot, course, curriculum_course, requirement_rule, offering_snapshot, course_offering, meeting, completed_course, external_review_link, review_note, career_course_tag, verification_result`。先做一条已通过自动门槛的路径；班次仅用 `SYNTHETIC` fixture 验证算法，真实快照当前不可得。未发布路径不可混算，班次快照不覆盖培养快照。原始脚本/真实响应、学号与 Cookie 不入数据库。MySQL 用于可重复导入和工具查询；评测 Trace/版本/报告以本地 JSONL/manifest 保存，避免五周里扩展不必要的表。
 
 ## 3. Tool API v1 草案
 
@@ -51,7 +51,7 @@ A 的 Excel 模板编译/自动校验、SQL 表与 B 的 typed rule evaluators �
 | API | 输入重点 | 输出重点 |
 | --- | --- | --- |
 | `GET /api/v1/curriculum-snapshots` | 路径 | 已发布路径、文件 hash、版本 |
-| `GET /api/v1/courses` | curriculumSnapshotId、代码/类别 | Course 与 SourceRef |
+| `GET /api/v1/courses` | curriculumSnapshotId、代码/类别 | Course、可选岗位能力标签与 SourceRef |
 | `GET /api/v1/reviews/search`（P1） | courseCode、teacherKey?、limit | 带来源的少量评价摘要/外链与匹配状态；不证明当期授课 |
 | `POST /api/v1/offering-snapshots/import` | CourseOfferingSnapshot JSON | offeringSnapshotId、校验结果、拒绝行与警告 |
 | `GET /api/v1/offerings` | 双快照、学期、课程代码 | 规范化班次和采集时间 |
