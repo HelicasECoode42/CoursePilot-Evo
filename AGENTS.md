@@ -16,4 +16,4 @@
 3. C 的生产规划与 D 的评测必须用同一个 Runner。模型、temperature、token budget、工具上限、Java Tool API 和评分器在版本比较中冻结。
 4. D 的 Evolver 只见 evolution 输入与脱敏失败 Trace，不得读 Evaluator、标准答案或 held-out 题目/标签。每个 patch 至少有两个不同 case 的共同失败假设，仅修改 `agent-runtime/harness/AGENTS.md`, `skills/`, `tool_policy.yaml`, `context_policy.yaml`。保存 Snapshot/Trace/Score/Token/Latency/Tool Calls/lineage；候选不满足客观门槛就回滚。
 5. 多轮机制至少覆盖 v0→v1→v2 的两次候选决策；实际未成功晋级时要保留 rejected 分支并如实报告。Token 降低且 held-out 不降质是待验证目标，不预填结果。
-6. 对每项完成工作记录测试命令、输出与限制。模型密钥、学号、成绩、教务凭据、完整原始响应不进 Git/Trace；只用虚构或经授权且脱敏的测试数据。私有 GitHub 仓库 `HelicasECoode42/CoursePilot-Evo` 已创建；仍不得提交原始数据和密钥。成员邀请与分支约定见 `docs/12-github-collaboration.md`。
+6. 对每项完成工作记录测试命令、输出与限制。模型密钥、学号、成绩、教务凭据、完整原始响应不进 Git/Trace；只用虚构或经授权且脱敏的测试数据。GitHub 仓库 `HelicasECoode42/CoursePilot-Evo` 已创建，当前为公开；仍不得提交原始数据和密钥。成员邀请与分支约定见 `docs/12-github-collaboration.md`。
