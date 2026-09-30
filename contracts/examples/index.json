@@ -1,0 +1,42 @@
+[
+  {
+    "file": "planning-request.json",
+    "definition": "PlanningRequest",
+    "valid": true
+  },
+  {
+    "file": "verification-unknown.json",
+    "definition": "PlanValidation",
+    "valid": true
+  },
+  {
+    "file": "trace-event.json",
+    "definition": "TraceEvent",
+    "valid": true
+  },
+  {
+    "file": "run-manifest.json",
+    "definition": "RunManifest",
+    "valid": true
+  },
+  {
+    "file": "meeting-odd.json",
+    "definition": "Meeting",
+    "valid": true
+  },
+  {
+    "file": "invalid-meeting-empty.json",
+    "definition": "Meeting",
+    "valid": false
+  },
+  {
+    "file": "invalid-client-owner.json",
+    "definition": "PlanningRequest",
+    "valid": false
+  },
+  {
+    "file": "invalid-valid-with-unknown.json",
+    "definition": "PlanValidation",
+    "valid": false
+  }
+]

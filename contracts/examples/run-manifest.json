@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.0",
+  "runId": "run:demo",
+  "benchmarkSetVersion": "set:demo",
+  "evaluatorVersion": "eval:demo",
+  "curriculumSnapshotId": "curr:demo",
+  "offeringSnapshotId": null,
+  "javaToolApiVersion": "api:v1",
+  "verifierVersion": "verifier:v1",
+  "harnessVersion": "harness:v0",
+  "parentVersion": null,
+  "modelId": "DEPLOYMENT_MODEL_PLACEHOLDER",
+  "temperature": 0,
+  "maxInputTokens": 8000,
+  "maxOutputTokens": 2000,
+  "maxToolCalls": 6,
+  "maxModelCalls": 3,
+  "deadlineMs": 45000,
+  "repeatCount": 1,
+  "seed": null,
+  "createdAt": "2026-09-30T09:00:00+08:00"
+}

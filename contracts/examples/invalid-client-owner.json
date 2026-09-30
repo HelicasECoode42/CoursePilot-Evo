@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "1.0",
+  "curriculumSnapshotId": "curr:demo",
+  "offeringSnapshotId": null,
+  "academicRecordId": "record:demo",
+  "mode": "REAL",
+  "promptText": "周五最好空，想参考给分反馈。",
+  "intent": {
+    "motives": [
+      "GPA",
+      "LOW_ATTENDANCE"
+    ],
+    "priorityOrder": [
+      "GPA",
+      "LOW_ATTENDANCE"
+    ],
+    "hardConstraints": [],
+    "softPreferences": [
+      {
+        "dimension": "ATTENDANCE",
+        "value": "LOW",
+        "sourceText": "希望少签到"
+      }
+    ],
+    "pinnedTeacherCoursePairs": [],
+    "interestTags": [],
+    "careerDirectionIds": []
+  },
+  "previousPlanId": null,
+  "ownerId": "other-student"
+}

@@ -1,0 +1,15 @@
+{
+  "dayOfWeek": 3,
+  "sectionStart": 3,
+  "sectionEnd": 4,
+  "weeks": [
+    1,
+    3,
+    5,
+    7,
+    9,
+    11,
+    13,
+    15
+  ]
+}

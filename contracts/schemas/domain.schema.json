@@ -1,0 +1,2375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "SourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "CURRICULUM",
+            "OFFERING",
+            "REVIEW",
+            "CURATED_TAG",
+            "SYNTHETIC"
+          ]
+        },
+        "refId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "snapshotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "capturedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "refId",
+        "snapshotId",
+        "locator",
+        "capturedAt"
+      ]
+    },
+    "Issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "field": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "field",
+        "retryable"
+      ]
+    },
+    "Envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "requestId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "traceId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "OK",
+            "UNKNOWN",
+            "INVALID_INPUT",
+            "UNAUTHORIZED",
+            "FORBIDDEN",
+            "NOT_FOUND",
+            "CONFLICT",
+            "ERROR"
+          ]
+        },
+        "data": {},
+        "provenance": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SourceRef"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "requestId",
+        "traceId",
+        "status",
+        "data",
+        "provenance",
+        "issues"
+      ]
+    },
+    "CompletedCourse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "courseCode": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "earnedCredits": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "multipleOf": 0.01
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "PASSED",
+            "FAILED",
+            "IN_PROGRESS",
+            "UNKNOWN"
+          ]
+        },
+        "completedTerm": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "courseCode",
+        "earnedCredits",
+        "outcome",
+        "completedTerm"
+      ]
+    },
+    "AcademicRecordInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "curriculumSnapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "completedCourses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CompletedCourse"
+          },
+          "minItems": 0,
+          "maxItems": 500
+        },
+        "transcriptComplete": {
+          "type": "boolean"
+        },
+        "sourceKind": {
+          "type": "string",
+          "enum": [
+            "USER_IMPORT",
+            "SYNTHETIC"
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "curriculumSnapshotId",
+        "completedCourses",
+        "transcriptComplete",
+        "sourceKind"
+      ]
+    },
+    "AcademicRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "academicRecordId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "curriculumSnapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "completedCourses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CompletedCourse"
+          },
+          "minItems": 0,
+          "maxItems": 500
+        },
+        "transcriptComplete": {
+          "type": "boolean"
+        },
+        "sourceKind": {
+          "type": "string",
+          "enum": [
+            "USER_IMPORT",
+            "SYNTHETIC"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "academicRecordId",
+        "revision",
+        "curriculumSnapshotId",
+        "completedCourses",
+        "transcriptComplete",
+        "sourceKind",
+        "createdAt"
+      ]
+    },
+    "Constraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "BLOCK_DAY",
+            "BLOCK_SECTION",
+            "PIN_TEACHER_COURSE",
+            "PIN_COURSE",
+            "MAX_CREDITS"
+          ]
+        },
+        "courseCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "teacherKey": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dayOfWeek": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 7
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "section": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "multipleOf": 0.01
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "kind",
+        "courseCode",
+        "teacherKey",
+        "dayOfWeek",
+        "section",
+        "value",
+        "sourceText"
+      ]
+    },
+    "TeacherPreference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "courseCode": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "teacherKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "MUST",
+            "PREFER"
+          ]
+        }
+      },
+      "required": [
+        "courseCode",
+        "teacherKey",
+        "mode"
+      ]
+    },
+    "GoalIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "motives": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "GPA",
+              "LOW_WORKLOAD",
+              "LOW_ATTENDANCE",
+              "GOOD_REVIEWS",
+              "SPECIFIC_TEACHER",
+              "INTEREST",
+              "CAREER",
+              "POSTGRAD",
+              "CREDIT_PROGRESS",
+              "SCHEDULE"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 10
+        },
+        "priorityOrder": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "minItems": 0,
+          "maxItems": 10
+        },
+        "hardConstraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Constraint"
+          },
+          "minItems": 0,
+          "maxItems": 30
+        },
+        "softPreferences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "dimension": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "sourceText": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "dimension",
+              "value",
+              "sourceText"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 30
+        },
+        "pinnedTeacherCoursePairs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TeacherPreference"
+          },
+          "minItems": 0,
+          "maxItems": 20
+        },
+        "interestTags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "minItems": 0,
+          "maxItems": 20
+        },
+        "careerDirectionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "maxLength": 120
+          },
+          "minItems": 0,
+          "maxItems": 10
+        }
+      },
+      "required": [
+        "motives",
+        "priorityOrder",
+        "hardConstraints",
+        "softPreferences",
+        "pinnedTeacherCoursePairs",
+        "interestTags",
+        "careerDirectionIds"
+      ]
+    },
+    "PlanningRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "curriculumSnapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "offeringSnapshotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "academicRecordId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "REAL",
+            "SIMULATION"
+          ]
+        },
+        "promptText": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4000
+        },
+        "intent": {
+          "$ref": "#/$defs/GoalIntent"
+        },
+        "previousPlanId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "curriculumSnapshotId",
+        "offeringSnapshotId",
+        "academicRecordId",
+        "mode",
+        "promptText",
+        "intent",
+        "previousPlanId"
+      ]
+    },
+    "Meeting": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dayOfWeek": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7
+        },
+        "sectionStart": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "sectionEnd": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "weeks": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          },
+          "minItems": 1,
+          "maxItems": 60,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "dayOfWeek",
+        "sectionStart",
+        "sectionEnd",
+        "weeks"
+      ]
+    },
+    "CourseOffering": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "courseCode": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "classId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "teacherKey": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "teacherText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "credits": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "multipleOf": 0.01
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capacity": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meetingTextRaw": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "meetings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Meeting"
+          },
+          "minItems": 0,
+          "maxItems": 40
+        },
+        "parseStatus": {
+          "type": "string",
+          "enum": [
+            "PARSED",
+            "UNPARSED",
+            "INVALID"
+          ]
+        },
+        "sourceRefId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        }
+      },
+      "required": [
+        "courseCode",
+        "classId",
+        "teacherKey",
+        "teacherText",
+        "credits",
+        "capacity",
+        "meetingTextRaw",
+        "meetings",
+        "parseStatus",
+        "sourceRefId"
+      ]
+    },
+    "OfferingImport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "termId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "sourceKind": {
+          "type": "string",
+          "enum": [
+            "BROWSER_SNAPSHOT",
+            "SYNTHETIC"
+          ]
+        },
+        "capturedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "calendar": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "weeks": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60
+            },
+            "sectionsPerDay": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            }
+          },
+          "required": [
+            "weeks",
+            "sectionsPerDay"
+          ]
+        },
+        "offerings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CourseOffering"
+          },
+          "minItems": 1,
+          "maxItems": 2000
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "termId",
+        "sourceKind",
+        "capturedAt",
+        "calendar",
+        "offerings"
+      ]
+    },
+    "AuditRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "curriculumSnapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "academicRecordId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "curriculumSnapshotId",
+        "academicRecordId"
+      ]
+    },
+    "AuditItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requirementId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "courseCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "maxLength": 120
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "requiredCredits": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "multipleOf": 0.01
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "earnedCredits": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "multipleOf": 0.01
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gapCredits": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "multipleOf": 0.01
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "SATISFIED",
+            "UNSATISFIED",
+            "UNKNOWN"
+          ]
+        },
+        "sourceRefIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "maxLength": 120
+          },
+          "minItems": 1,
+          "maxItems": 20
+        }
+      },
+      "required": [
+        "requirementId",
+        "courseCodes",
+        "requiredCredits",
+        "earnedCredits",
+        "gapCredits",
+        "state",
+        "sourceRefIds"
+      ]
+    },
+    "AuditResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "curriculumSnapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "academicRecordId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "recordRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "transcriptComplete": {
+          "type": "boolean"
+        },
+        "requirements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AuditItem"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "suggestedCourseCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "maxLength": 120
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "unknowns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "curriculumSnapshotId",
+        "academicRecordId",
+        "recordRevision",
+        "transcriptComplete",
+        "requirements",
+        "suggestedCourseCodes",
+        "unknowns"
+      ]
+    },
+    "PlanItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "courseCode": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "teacherKey": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "classId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "courseCode",
+        "teacherKey",
+        "classId"
+      ]
+    },
+    "PlanValidationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "curriculumSnapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "offeringSnapshotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "academicRecordId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "REAL",
+            "SIMULATION"
+          ]
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanItem"
+          },
+          "minItems": 1,
+          "maxItems": 30
+        },
+        "hardConstraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Constraint"
+          },
+          "minItems": 0,
+          "maxItems": 30
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "curriculumSnapshotId",
+        "offeringSnapshotId",
+        "academicRecordId",
+        "mode",
+        "items",
+        "hardConstraints"
+      ]
+    },
+    "PlanValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verifierResultId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "VALID",
+            "INVALID",
+            "UNKNOWN"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "COURSE_ONLY",
+            "REAL_TIMETABLE",
+            "SIMULATION"
+          ]
+        },
+        "curriculumSnapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "offeringSnapshotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recordRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "unknownChecks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "performedChecks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "minItems": 0,
+          "maxItems": 40
+        },
+        "sourceRefIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "maxLength": 120
+          },
+          "minItems": 0,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "verifierResultId",
+        "verdict",
+        "scope",
+        "curriculumSnapshotId",
+        "offeringSnapshotId",
+        "recordRevision",
+        "violations",
+        "unknownChecks",
+        "performedChecks",
+        "sourceRefIds"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "VALID"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "violations": {
+                "maxItems": 0
+              },
+              "unknownChecks": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "enum": [
+                  "REAL_TIMETABLE",
+                  "SIMULATION"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "offeringSnapshotId": {
+                "$ref": "#/$defs/PlanValidation/properties/curriculumSnapshotId"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ReviewNote": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reviewNoteId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "courseCode": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "teacherKey": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "termId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceKind": {
+          "type": "string",
+          "enum": [
+            "OFFICIAL_SYLLABUS",
+            "USER_IMPORT",
+            "EXTERNAL_LINK",
+            "SYNTHETIC"
+          ]
+        },
+        "publishedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceUrl": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "excerpt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500
+        },
+        "dimensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "GRADING",
+              "ATTENDANCE",
+              "WORKLOAD",
+              "EXAM",
+              "GROUP_WORK",
+              "PRESENTATION",
+              "TEACHING",
+              "OVERALL"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 8
+        },
+        "matchStatus": {
+          "type": "string",
+          "enum": [
+            "COURSE_TEACHER_MATCHED",
+            "COURSE_ONLY",
+            "UNVERIFIED"
+          ]
+        },
+        "sourceRefId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        }
+      },
+      "required": [
+        "reviewNoteId",
+        "courseCode",
+        "teacherKey",
+        "termId",
+        "sourceKind",
+        "publishedAt",
+        "sourceUrl",
+        "excerpt",
+        "dimensions",
+        "matchStatus",
+        "sourceRefId"
+      ]
+    },
+    "ReviewImport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReviewNote"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "notes"
+      ]
+    },
+    "Question": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "questionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            },
+            "required": [
+              "value",
+              "label"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 12
+        },
+        "allowFreeText": {
+          "type": "boolean"
+        },
+        "requiredFor": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "minItems": 0,
+          "maxItems": 20
+        }
+      },
+      "required": [
+        "questionId",
+        "text",
+        "choices",
+        "allowFreeText",
+        "requiredFor"
+      ]
+    },
+    "Recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "planId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanItem"
+          },
+          "minItems": 1,
+          "maxItems": 30
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "reviewNoteIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "maxLength": 120
+          },
+          "minItems": 0,
+          "maxItems": 20
+        },
+        "verification": {
+          "$ref": "#/$defs/PlanValidation"
+        }
+      },
+      "required": [
+        "planId",
+        "items",
+        "explanation",
+        "reviewNoteIds",
+        "verification"
+      ]
+    },
+    "PlanningAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "traceId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "RECOMMENDATIONS",
+            "CLARIFY",
+            "UNABLE_TO_VERIFY"
+          ]
+        },
+        "academicAudit": {
+          "$ref": "#/$defs/AuditResult"
+        },
+        "recommendations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Recommendation"
+          },
+          "minItems": 0,
+          "maxItems": 3
+        },
+        "clarification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Question"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unknowns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "inputTokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "outputTokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "toolCalls": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6
+            },
+            "elapsedMs": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "inputTokens",
+            "outputTokens",
+            "toolCalls",
+            "elapsedMs"
+          ]
+        }
+      },
+      "required": [
+        "taskId",
+        "traceId",
+        "decision",
+        "academicAudit",
+        "recommendations",
+        "clarification",
+        "unknowns",
+        "usage"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "CLARIFY"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "clarification": {
+                "$ref": "#/$defs/Question"
+              },
+              "recommendations": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "SessionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "sessionToken": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 512
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "sessionId",
+        "sessionToken",
+        "expiresAt"
+      ]
+    },
+    "PreferenceScoreRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "verifierResultId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "preferences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "dimension": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "sourceText": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "dimension",
+              "value",
+              "sourceText"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 30
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "verifierResultId",
+        "preferences"
+      ]
+    },
+    "TraceEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "taskId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "traceId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "eventType": {
+          "type": "string",
+          "enum": [
+            "USER_INPUT",
+            "GOAL_EXTRACTED",
+            "TOOL_CALLED",
+            "TOOL_RETURNED",
+            "CANDIDATE_PROPOSED",
+            "VERIFIER_RETURNED",
+            "CLARIFICATION_REQUESTED",
+            "FINAL_DELIVERED",
+            "ERROR"
+          ]
+        },
+        "harnessVersion": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "curriculumSnapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "offeringSnapshotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toolName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inputDigest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outputRef": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "durationMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inputTokens": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outputTokens": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "errorCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "taskId",
+        "traceId",
+        "seq",
+        "timestamp",
+        "eventType",
+        "harnessVersion",
+        "curriculumSnapshotId",
+        "offeringSnapshotId",
+        "toolName",
+        "inputDigest",
+        "outputRef",
+        "durationMs",
+        "inputTokens",
+        "outputTokens",
+        "errorCode"
+      ]
+    },
+    "RunManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "runId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "benchmarkSetVersion": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "evaluatorVersion": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "curriculumSnapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "offeringSnapshotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "javaToolApiVersion": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "verifierVersion": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "harnessVersion": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "parentVersion": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "maxInputTokens": {
+          "const": 8000
+        },
+        "maxOutputTokens": {
+          "const": 2000
+        },
+        "maxToolCalls": {
+          "const": 6
+        },
+        "maxModelCalls": {
+          "const": 3
+        },
+        "deadlineMs": {
+          "const": 45000
+        },
+        "repeatCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "runId",
+        "benchmarkSetVersion",
+        "evaluatorVersion",
+        "curriculumSnapshotId",
+        "offeringSnapshotId",
+        "javaToolApiVersion",
+        "verifierVersion",
+        "harnessVersion",
+        "parentVersion",
+        "modelId",
+        "temperature",
+        "maxInputTokens",
+        "maxOutputTokens",
+        "maxToolCalls",
+        "maxModelCalls",
+        "deadlineMs",
+        "repeatCount",
+        "seed",
+        "createdAt"
+      ]
+    },
+    "Course": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "courseCode": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "credits": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "multipleOf": 0.01
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "sourceRefIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "maxLength": 120
+          },
+          "minItems": 1,
+          "maxItems": 20
+        }
+      },
+      "required": [
+        "courseCode",
+        "name",
+        "credits",
+        "category",
+        "sourceRefIds"
+      ]
+    },
+    "SnapshotSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "snapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "CURRICULUM",
+            "OFFERING"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PUBLISHED",
+            "REJECTED"
+          ]
+        },
+        "sourceKind": {
+          "type": "string",
+          "enum": [
+            "CURRICULUM_FILE",
+            "BROWSER_SNAPSHOT",
+            "SYNTHETIC"
+          ]
+        },
+        "termId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sourceValidation": {
+          "enum": [
+            "VERIFIED",
+            "UNVERIFIED",
+            "SYNTHETIC"
+          ]
+        }
+      },
+      "required": [
+        "snapshotId",
+        "kind",
+        "state",
+        "sourceKind",
+        "termId",
+        "createdAt",
+        "sourceValidation"
+      ]
+    },
+    "TeacherCourseOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "courseCode": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "teacherKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "teacherDisplayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "availability": {
+          "type": "string",
+          "enum": [
+            "CURRENT_VERIFIED",
+            "HISTORICAL_ONLY",
+            "UNKNOWN"
+          ]
+        },
+        "reviewNoteIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "maxLength": 120
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "classIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "maxLength": 120
+          },
+          "minItems": 0,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "courseCode",
+        "teacherKey",
+        "teacherDisplayName",
+        "availability",
+        "reviewNoteIds",
+        "classIds"
+      ]
+    },
+    "CareerDirection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "directionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "subjectTags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "minItems": 1,
+          "maxItems": 20
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500
+        },
+        "courseCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "maxLength": 120
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "sourceRefIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "maxLength": 120
+          },
+          "minItems": 1,
+          "maxItems": 20
+        }
+      },
+      "required": [
+        "directionId",
+        "subjectTags",
+        "title",
+        "description",
+        "courseCodes",
+        "sourceRefIds"
+      ]
+    },
+    "ImportResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "snapshotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PUBLISHED",
+            "REJECTED"
+          ]
+        },
+        "reused": {
+          "type": "boolean"
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "snapshotId",
+        "state",
+        "reused",
+        "issues"
+      ]
+    },
+    "PreferenceScore": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verifierResultId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "value": {
+                "type": "number"
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            },
+            "required": [
+              "name",
+              "value",
+              "unit"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 30
+        },
+        "unknownMetrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "verifierResultId",
+        "metrics",
+        "unknownMetrics"
+      ]
+    },
+    "ImportWorkbook": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "trackId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "file": {
+          "type": "string",
+          "format": "binary"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "trackId",
+        "file"
+      ]
+    },
+    "RunReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "harnessVersion": {
+          "type": "string"
+        },
+        "parentVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision": {
+          "enum": [
+            "BASELINE",
+            "PROMOTED",
+            "REJECTED"
+          ]
+        },
+        "heldOutScore": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "averageInputTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "averageOutputTokens": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "averageToolCalls": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "averageLatencyMs": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "failureCategories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30
+        }
+      },
+      "required": [
+        "runId",
+        "harnessVersion",
+        "parentVersion",
+        "decision",
+        "heldOutScore",
+        "averageInputTokens",
+        "averageOutputTokens",
+        "averageToolCalls",
+        "averageLatencyMs",
+        "failureCategories"
+      ]
+    }
+  }
+}

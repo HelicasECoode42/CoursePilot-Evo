@@ -7,3 +7,6 @@
 - [多轮 RSI 晋级/回滚](evolution-loop.mmd)
 - [单次学业规划与 Java 核验](planning-verification.mmd)
 - [五人模块依赖](team-dependencies.mmd)
+
+- [单问题学生流程](student-question-flow.mmd)
+- [五周分批交付与并行准备](delivery-batches.mmd)

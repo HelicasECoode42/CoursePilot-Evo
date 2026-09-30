@@ -1,21 +1,62 @@
-# CoursePilot-Evo｜五周课程项目
+# CoursePilot-Evo
 
-**当前状态：文档、数据源副本和仓库骨架；尚无可运行的 CoursePilot Java/Python/Web 或 Benchmark 结果。**目标是在一条经审核的 2024 级培养路径上，建立可核验的学业规划 Agent，并实验将重复有效的推理沉淀为可复用的 Harness 资产。
+一个帮助学生核对学业进度、了解课程与教师、表达选课偏好并比较方案的学业规划项目。页面一次问一个问题，支持高绩点、工作量、签到、兴趣、指定教师、职业与时间等组合目标。课程事实和时间由 Java 核验，Agent 负责理解、规划与解释。
 
-## 一句话架构
+**当前状态：开发设计、可校验接口契约、仓库检查工具和独立 HTML 示例。Java/Python/Vue 服务、真实班次接入和 RSI 指标尚未实现。**五人计划五周完成，一个计算机培养路径先行。
 
-Vue 3 Web 接受学生已修课程与目标；**System 2** Python Planning Agent 解释目标并调 typed Tool；**System 1** Java/Spring Boot 用培养计划和可选的本学期班次快照计算课程、学分、要求、冲突和计划合法性；Python Benchmark/RSI 保存 Trace，按隔离 held-out 结果晋级或回滚 `AGENTS.md/skills/tool_policy/context_policy`。Java Tool API、基模和预算在同轮比较中固定。首版**网页，不做小程序或自动选课**。
+## 从这里开始
 
-用户提供的 `.xls` 是培养计划真源。本机 `选课插件v0.6.js` 只能用于静态倒推班次字段；目前无法进入教务选课页实测，真实班次入口记为 `UNVERIFIED_NO_ACCESS`。五周首版用明确标注的模拟班次 fixture 测解析/冲突算法，对真实周五空课和实时开课一律回答 UNKNOWN。[Java 导入与规则落地方案](docs/10-java-import-and-rules.md)说明自动导入门槛、SQL 与 AI 的分工。
+| 你要做什么 | 入口 |
+| --- | --- |
+| 看学生体验 | [HTML 示例](demo/coursepilot-guided-demo.html)及[交接说明](demo/README.md)，下载后用浏览器打开 |
+| 看开发范围与批次 | [开发大纲](docs/15-team-baseline-and-batches.md)、[五人模块](docs/05-team-and-sub-trds.md) |
+| 了解用户需要 | [PRD](docs/02-prd.md)、[选课需求与资料研究](docs/14-student-choice-research-and-ux.md) |
+| 实现接口 | [总体 TRD](docs/03-trd.md)、[行为契约](docs/04-infrastructure-workflow.md)、[OpenAPI/Schema](contracts/README.md) |
+| 领取模块 | [A 数据](docs/trd/a-data.md)、[B Java](docs/trd/b-verifier.md)、[C Agent](docs/trd/c-agent.md)、[D RSI](docs/trd/d-benchmark-rsi.md)、[E Web](docs/trd/e-web-integration.md) |
+| 提交与 debug | [工程规范](docs/16-engineering-and-debugging.md)、[GitHub 协作](docs/12-github-collaboration.md)、[PR 模板](.github/pull_request_template.md) |
+| 填志愿与账号 | [人员表模板](docs/team/team-signup-template.csv)，导入金山表格；填写后的表不要提交公开仓库 |
+| 看图与实验 | [Mermaid 图](docs/diagrams/README.md)、[Benchmark 协议](docs/07-benchmark-protocol.md) |
 
-## 推荐阅读顺序
+## 架构与目录
 
-1. [项目设定文字稿](docs/11-project-setting-submission.md)与[老师版五周项目安排](docs/01-teacher-project-plan.md)
-2. [真实教学计划核查](docs/06-workbook-audit.md)与[浏览器班次入口/JSON Schema](docs/09-browser-adapter.md)
-3. [老师反馈后的引导式规划、数据供给和 Harness 场景](docs/13-guided-planning-and-harness.md)、[内部 PRD](docs/02-prd.md)、[总体 TRD](docs/03-trd.md)与[Java 导入/SQL/规则实施方案](docs/10-java-import-and-rules.md)
-4. [统一基础设施与工作流契约](docs/04-infrastructure-workflow.md)
-5. [四组 Benchmark 与多轮 RSI 协议](docs/07-benchmark-protocol.md)
-6. [五人分工和子 TRD](docs/05-team-and-sub-trds.md)、[学习仓库](docs/08-learning-repos.md)
-7. [项目编码 Agent 约定](AGENTS.md)、[五人 GitHub 协作约定](docs/12-github-collaboration.md)及[Mermaid 图源](docs/diagrams/README.md)
+```mermaid
+flowchart LR
+  W[Vue Web 一次一问] --> P[Python API / Planning Runner]
+  H[可版本化 Harness] --> P
+  P --> J[Java typed Tools / Verifier]
+  J --> DB[(MySQL / 不可变快照 / 来源)]
+  B[隔离 Benchmark] --> P
+  B --> E[失败归因 / 最小 patch / held-out]
+  E --> H
+```
 
-原 v0.1 讨论稿保留在 `docs/archive/`，八周安排已失效。`data/raw/` 的原始工作簿和插件副本只作本地输入并被 Git 忽略。**GitHub 仓库已创建并推送：[HelicasECoode42/CoursePilot-Evo](https://github.com/HelicasECoode42/CoursePilot-Evo)**；2026-09-30 核对为公开，四位成员待提供用户名后邀请取得写入权限。PhysicalRSI/GDPevo 仅作设计参考，不是本项目已复现或已达成的结果。
+- `contracts/`：字段真源、OpenAPI、JSON Schema、正反例。
+- `java-environment/`：A 导入 + B 数据和唯一规则核验，当前骨架。
+- `agent-runtime/`：C 唯一生产/评测 Runner 与运行 Harness，当前骨架。
+- `benchmark/`、`evo-harness/`：D 任务、隔离评分、失败归因与晋级，当前骨架。
+- `web/`：E 的 Vue 产品实现；`demo/` 是独立交互示例。
+- `docs/`：PRD/TRD、开发规范、学习资料与设计图。
+- `scripts/`、`.github/`：契约、自查、模块检查和 PR/CI 规范。
+
+## 仓库检查
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+python scripts/check_contracts.py
+python scripts/self_check.py
+python scripts/check_modules.py
+```
+
+可执行服务还没建立，当前没有“一键启动完整系统”的承诺。各模块首次加代码时须同时加 manifest、固定依赖、测试入口与启动说明；模块检查明确输出尚未实现模块的 SKIP。CI 通过不代表功能全部实现或安全已经保证。
+
+## 数据与信任边界
+
+培养计划由本地 `.xls` 输入导入，原文件不公开提交。班次当前只有插件静态研究和模拟 fixture，没有已验证的真实教务快照。真实时间缺失、解析未知或来源未核验时，必须显示 UNKNOWN；模拟核验不能称真实课表已有效。评价注明教师/修读学期/来源，不能保证给分、签到或当期开课。
+
+学生在官方系统自行选课；项目不持有教务凭据、不执行选课提交。公开仓库排除原始资料、个人成绩、密钥、私有 Trace 和独立验收答案。具体代码与日志要求见工程规范。
+
+自进化参考 System 1/2 与 task-group 思路，限定运行 Harness 文本/策略 patch；固定模型、工具和预算，经隔离 held-out 决定晋级/回滚。两轮流程和少 token 且不降质是验收/实验目标，结果须实测。
+
+接口与跨模块一致性检查见 [复核记录](docs/17-contract-review.md)。

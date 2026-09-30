@@ -1,19 +1,27 @@
-# CoursePilot-Evo：给后续编码 Agent 的项目约定
+# CoursePilot-Evo：开发 Agent 规范
 
-当前只有方案、原始数据本地副本和目录骨架；**不要把设计写成已实现**。先读 `README.md`、`docs/13-guided-planning-and-harness.md`、`docs/06-workbook-audit.md`、`docs/09-browser-adapter.md`、`docs/10-java-import-and-rules.md`、`docs/03-trd.md`、`docs/04-infrastructure-workflow.md`、`docs/07-benchmark-protocol.md`，再读负责模块的 `docs/trd/*.md`。根目录的本文件是开发约定，**不是**可由 Evolver 修改的运行 Harness；运行 Harness 的白名单在 `agent-runtime/harness/`。
+当前是文档/接口契约、仓库检查工具和独立 HTML 示例；业务服务尚未实现。先读 README、docs/15-team-baseline-and-batches.md、docs/16-engineering-and-debugging.md、contracts/README.md、docs/04-infrastructure-workflow.md，再读负责模块 TRD。代码与现状如实报告，不把计划/fixture 写成真实能力。
 
-## 真值与权限边界
+## 所有权和调用
 
-- `data/raw/以此为准，计算机2024级教学计划表20250306.xls` 是培养计划原始来源；24 张表含多路径。首个路径模板做一次独立基线核对，后续同模板由自动门槛发布，保留 `sourceFileHash/sheet/row/column`。`.xls` 没有班次时间。
-- `data/raw/选课插件v0.6.js` 是第三方脚本副本，仅供只读研究。它观察教务页面响应，但原代码含自动点击页面按钮与疑似索引错误，**不可原样运行/复制为 CoursePilot 的只读 Adapter**。不要调用学校接口、模拟登录或保存 Cookie/Token；当前无法访问选课页，真实快照验证延期，首版只做静态分析和模拟 fixture。详见 `docs/09-browser-adapter.md`。
-- System 1 Java 对课程、学分、规则、冲突、计划合法性与来源负责；System 2 Python 对自然语言目标、规划和解释负责。Java 不做复杂自然语言推理，Agent 不自行宣布硬事实。真实班次快照未验证或时间解析未知时返回 UNKNOWN；模拟班次仅用于算法测试，不能展示成真实开课。
-- 页面是 Vue 3 Web，五周不做小程序；学生在官方系统自行选课，项目无提交选课写操作。
+A 导入/来源/黄金输入；B Java 存储/Audit/唯一 TimeParser/Verifier；C Python 唯一生产/评测 Runner/API 网关；D 隔离题集/评分/演化；E Vue 页面/集成。Web只调Python，Python只通过 typed HTTP 取Java事实，Java不调LLM。不复制学分/时间规则，不另造评测Agent。
 
-## 开发顺序与共享契约
+公共字段以 contracts 为准，行为以04契约为准，接口变更同步Schema/fixture/提供者/消费者/TRD。原始教学计划与插件仅在本地data/raw，不推公开仓库；未知规则自动阻断，首个模板基线独立核对。
 
-1. 全组 W1 先冻结 `curriculumSnapshotId/offeringSnapshotId/schemaVersion/javaToolApiVersion/harnessVersion`、CourseOffering JSON、Tool API、Trace、run manifest，再分 A–E 开发；变更先改 `docs/04-infrastructure-workflow.md`。教学计划按 `docs/10-java-import-and-rules.md` 的自动门槛发布：未知格式或总计不一致必须阻断并返回 UNKNOWN，不能用人工点批准绕过。
-2. A 数据适配，B Java Environment/Verifier，C Agent/Harness，D Benchmark/RSI，E Web/集成。不要跨模块复制同一规则或独立发明 DTO；每周跑 Web→Python→Java 的一条集成链。
-3. C 的生产规划与 D 的评测必须用同一个 Runner。模型、temperature、token budget、工具上限、Java Tool API 和评分器在版本比较中冻结。
-4. D 的 Evolver 只见 evolution 输入与脱敏失败 Trace，不得读 Evaluator、标准答案或 held-out 题目/标签。每个 patch 至少有两个不同 case 的共同失败假设，仅修改 `agent-runtime/harness/AGENTS.md`, `skills/`, `tool_policy.yaml`, `context_policy.yaml`。保存 Snapshot/Trace/Score/Token/Latency/Tool Calls/lineage；候选不满足客观门槛就回滚。
-5. 多轮机制至少覆盖 v0→v1→v2 的两次候选决策；实际未成功晋级时要保留 rejected 分支并如实报告。Token 降低且 held-out 不降质是待验证目标，不预填结果。
-6. 对每项完成工作记录测试命令、输出与限制。模型密钥、学号、成绩、教务凭据、完整原始响应不进 Git/Trace；只用虚构或经授权且脱敏的测试数据。GitHub 仓库 `HelicasECoode42/CoursePilot-Evo` 已创建，当前为公开；仍不得提交原始数据和密钥。成员邀请与分支约定见 `docs/12-github-collaboration.md`。
+## 真实性与数据
+
+真实班次未核验；上传者提供BROWSER_SNAPSHOT标签不能使sourceValidation自动VERIFIED。Java重新解析meetingTextRaw，不信任客户端meetings/parseStatus。REAL不能用synthetic，unknown不能通过，建议学期不等于本学期硬要求。
+
+教师绑定课程，历史评价按课程/教师/学期匹配；高绩点、签到、工作量、授课评价不能混为一谈。UI一次一问、学业记录只补缺、无关职业题跳过；工程报告独立受限。
+
+## 安全与Debug
+
+按工程规范做对象级授权、输入大小/枚举、白名单Tool、参数化查询、安全文本展示。评价/文件/模型输出不可执行。密钥不进Prompt/日志，日志只记录定位ID、阶段、状态、耗时。日志不得保留成绩、学校凭据、完整Prompt或思维链。具体配置与预算由manifest冻结。
+
+## 演化
+
+本文件是仓库开发规范，不能被Evolver修改。Evolver仅修改agent-runtime/harness白名单文本/策略，不能读gold/held-out/evaluator、改Java/API/模型/预算。候选须有至少两个不同case的失败假设，两轮判决和失败分支如实留存，不强行宣称成功v1/v2。
+
+## 每次提交
+
+检查staged diff；运行scripts/check_contracts.py、scripts/self_check.py与受影响模块检查，记录结果/限制。首次加模块代码同时加manifest、固定依赖、测试和启动说明。PR用模板自查，相邻模块复核接口。公开仓库排除原始资料、.env、私人记录、runs和独立验收答案。

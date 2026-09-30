@@ -17,7 +17,7 @@ case 草案字段：`caseId, groupId, split, curriculumSnapshotId, offeringSnaps
 
 ## 2. 固定比较条件与记录
 
-每次 vN/vN+1 对比固定：**base model 完整版本、temperature、token budget、最大工具调用数、Java Tool API/Verifier、两个数据快照、评测规则和题集**。无法固定模型供应商版本时记录具体 ID 与日期，报告承认不可完全复现。`run-manifest.json` 记 `modelConfigId, schemaVersion, javaToolApiVersion, verifierVersion, benchmarkSetVersion, evaluatorVersion, curriculumSnapshotId, offeringSnapshotId?, harnessVersion, parentVersion, seed/repeat`。候选仅可修改 Harness 白名单。
+每次 vN/vN+1 对比固定：**base model 完整版本、temperature、token budget、最大工具调用数、Java Tool API/Verifier、两个数据快照、评测规则和题集**。无法固定模型供应商版本时记录具体 ID 与日期，报告承认不可完全复现。`run-manifest.json` 字段以 `contracts/schemas/domain.schema.json` 的 RunManifest 为准；重复运行编号另写入运行目录索引，不自行添加 Schema 外字段。首版固定预算：输入 8000 Token、输出 2000 Token、6 次工具调用、3 次模型调用、总截止时间 45000ms；配置更改须同步契约并重跑父版本。候选仅可修改 Harness 白名单。
 
 每个 case 保存 `AgentState`、脱敏 `Trace`、结构化答复、Java `verifierResultId`、评分、input/output token、工具调用数、总耗时；每轮保存完整 Harness Snapshot、patch diff、hypothesis、父子 lineage、晋级/回滚理由。Provider 未返回 token 用量时记 `UNAVAILABLE`，不能按 0 或估算值与正式数据比较。模型随机性至少做相同设置下的重复运行；计划 3 次，额度不足则记录次数和波动。
 

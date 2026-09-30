@@ -1,0 +1,1838 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CoursePilot planning API",
+    "version": "1.0.0",
+    "description": "开发契约基线；服务尚未实现。行为约束见 docs/04-infrastructure-workflow.md。"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8000"
+    }
+  ],
+  "security": [
+    {
+      "sessionBearer": []
+    }
+  ],
+  "paths": {
+    "/api/v1/sessions": {
+      "post": {
+        "operationId": "createSession",
+        "summary": "创建本地匿名演示会话",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "成功或业务 UNKNOWN；具体数据和状态见契约",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "./schemas/domain.schema.json#/$defs/SessionResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/academic-records": {
+      "post": {
+        "operationId": "saveSessionRecord",
+        "summary": "在当前会话保存已修记录",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "成功或业务 UNKNOWN；具体数据和状态见契约",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "./schemas/domain.schema.json#/$defs/AcademicRecord"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./schemas/domain.schema.json#/$defs/AcademicRecordInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/academic-records/{recordId}": {
+      "get": {
+        "operationId": "readSessionRecord",
+        "summary": "读取本会话记录",
+        "parameters": [
+          {
+            "name": "recordId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或业务 UNKNOWN；具体数据和状态见契约",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "./schemas/domain.schema.json#/$defs/AcademicRecord"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/planning": {
+      "post": {
+        "operationId": "plan",
+        "summary": "根据多目标规划、澄清与重规划",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或业务 UNKNOWN；具体数据和状态见契约",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "./schemas/domain.schema.json#/$defs/PlanningAnswer"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./schemas/domain.schema.json#/$defs/PlanningRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/curriculum-snapshots": {
+      "get": {
+        "operationId": "gatewayListCurricula",
+        "summary": "列出已发布培养快照",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或业务 UNKNOWN；具体数据和状态见契约",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "./schemas/domain.schema.json#/$defs/SnapshotSummary"
+                              },
+                              "minItems": 0,
+                              "maxItems": 200
+                            }
+                          },
+                          "required": [
+                            "items"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/courses": {
+      "get": {
+        "operationId": "gatewayListCourses",
+        "summary": "按培养快照查课程",
+        "parameters": [
+          {
+            "name": "curriculumSnapshotId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或业务 UNKNOWN；具体数据和状态见契约",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "./schemas/domain.schema.json#/$defs/Course"
+                              },
+                              "minItems": 0,
+                              "maxItems": 200
+                            },
+                            "nextCursor": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "items",
+                            "nextCursor"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/teacher-course-options": {
+      "get": {
+        "operationId": "gatewayListTeacherCourseOptions",
+        "summary": "查询教师课程意愿对象，历史与当期分开",
+        "parameters": [
+          {
+            "name": "curriculumSnapshotId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "courseCode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或业务 UNKNOWN；具体数据和状态见契约",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "./schemas/domain.schema.json#/$defs/TeacherCourseOption"
+                              },
+                              "minItems": 0,
+                              "maxItems": 200
+                            },
+                            "nextCursor": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "items",
+                            "nextCursor"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reviews/search": {
+      "get": {
+        "operationId": "gatewaySearchReviews",
+        "summary": "检索课程教师评价证据",
+        "parameters": [
+          {
+            "name": "courseCode",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "teacherKey",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "termId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 5
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或业务 UNKNOWN；具体数据和状态见契约",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "./schemas/domain.schema.json#/$defs/ReviewNote"
+                              },
+                              "minItems": 0,
+                              "maxItems": 10
+                            }
+                          },
+                          "required": [
+                            "items"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/career-directions": {
+      "get": {
+        "operationId": "gatewayListCareerDirections",
+        "summary": "读取有来源方向介绍",
+        "parameters": [
+          {
+            "name": "subjectTag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或业务 UNKNOWN；具体数据和状态见契约",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "./schemas/domain.schema.json#/$defs/CareerDirection"
+                              },
+                              "minItems": 0,
+                              "maxItems": 200
+                            }
+                          },
+                          "required": [
+                            "items"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/requirements/audit": {
+      "post": {
+        "operationId": "gatewayAuditRequirements",
+        "summary": "核对未完成要求和建议修读",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或业务 UNKNOWN；具体数据和状态见契约",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "./schemas/domain.schema.json#/$defs/AuditResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./schemas/domain.schema.json#/$defs/AuditRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reports/runs/{runId}": {
+      "get": {
+        "operationId": "getRunReport",
+        "summary": "受限老师报告查询，不公开 held-out 题面",
+        "security": [
+          {
+            "sessionBearer": [],
+            "adminKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "聚合报告",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "./schemas/domain.schema.json#/$defs/RunReport"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无报告权限",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "报告不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "非法请求",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "会话无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sessionBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "adminKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Admin-Key"
+      }
+    }
+  }
+}

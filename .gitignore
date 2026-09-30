@@ -13,3 +13,14 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# Local sessions, diagnostics and private evaluation data
+coverage/
+.coverage
+.pytest_cache/
+.ruff_cache/
+benchmark/private/
+benchmark/gold/
+benchmark/held-out/
+runs/
+docs/team/*filled*

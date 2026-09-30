@@ -1,84 +1,90 @@
-# 共同基础设施、对象与工作流契约 v0.4
+# 公共接口与数据契约 v1.0
 
-状态：**开发前契约草案**，第 1 周以真实 `.xls` 与明确标记 `SYNTHETIC` 的班次 fixture 冻结 v1；目前没有经授权的真实班次样例。此文件是五人共用的接口真源；个人子 TRD 不得自行改变字段。问题先在这里记录决议，再改 Java/Python/Web DTO 和示例。
+状态：开发基线；服务尚未实现。字段、必填与枚举以 [contracts](../contracts/README.md) 为准。本文件定义不能只靠 JSON Schema 检查的行为。任何个人 TRD 与此冲突时先修契约，不能用个人文档覆盖公共定义。
 
-## 1. 快照、版本与拥有者
+## 1. 调用边界与身份
 
-| 标识 | 含义 / 生成与拥有者 | 变更规则 |
+Web 只调用 Python，Python 通过 HTTP 调 Java；浏览器不能拿 Java Service Key，Python 不直接查 MySQL。所有服务默认 loopback，首版仅本地虚构/授权演示，公开部署与真实学生数据需另做完整认证设计。
+
+Python `POST /api/v1/sessions` 创建匿名演示会话，返回随机高熵 sessionToken，30 分钟过期；服务端只存 token hash。其余学生 API 要 `Authorization: Bearer <sessionToken>`，并验证记录、计划属于当前会话。不能把客户端 sessionId/ownerId 当权限依据；对别人的记录统一 404。
+
+Java 要 `X-Service-Key`，由 Python 配置提供；可信 `X-Subject-Id` 由 Python 在校验 session 后设置，禁止转发浏览器自报同名头。导入再要求 `X-Admin-Key`，学生会话不能导入全局培养/班次/评价。受限老师报告同时要求 sessionBearer 与 adminKey，不能暴露 gold、held-out 题面或私人 Trace。
+
+这些是实现要求，目前没有认证服务。密钥仅在环境变量；不进仓库/Prompt/Trace。CORS 仅允许配置的 Web origin；CORS 不能代替认证。上线前加 HTTPS、限流、对象级授权测试，不能把本地默认配置开放公网。
+
+## 2. 封套、HTTP 与未知
+
+所有 JSON 响应统一 Envelope：schemaVersion=1.0、requestId、traceId（nullable）、status、data、provenance、issues。未知字段拒绝；nullable 必须显式 null，不能空字符串代替。日期采用 RFC3339，存储 UTC，UI 以 Asia/Shanghai 显示。
+
+| HTTP | status | 语义 / 客户端动作 |
+| ---: | --- | --- |
+| 200/201 | OK | 查询/创建完成，仍应看 data 的业务状态 |
+| 200 | UNKNOWN | 业务证据不足；保留可支持建议，展示待确认，不能自动重试模型 |
+| 400/422 | INVALID_INPUT | Schema / 语义不合法；指明字段供修正 |
+| 401/403 | UNAUTHORIZED/FORBIDDEN | 无会话/无权限；不回显鉴权材料 |
+| 404 | NOT_FOUND | 对象不存在或不属于本会话，文案一致 |
+| 409 | CONFLICT | 幂等键重复但内容不同、记录/快照版本冲突 |
+| 413/429 | INVALID_INPUT/ERROR | 超出大小或限流；限流时给 Retry-After |
+| 503/504 | ERROR | 依赖不可用/截止时间；不转换成业务未知或成功 |
+
+Issue 包含稳定 code、面向用户的 message、field（nullable）、retryable。错误堆栈只在脱敏服务日志，响应不泄露 SQL、路径和模型消息。
+
+X-Request-Id 用于相关请求定位，不等于幂等键。合法 ID 长度/字符由 Schema 约束；无可信 traceId 时服务端生成。不得把未经验证的请求 ID 原样拼日志行。
+
+## 3. 幂等、版本与预算
+
+- Python planning 与 academic-record 创建要求 Idempotency-Key。存键=会话+端点+键、规范化请求摘要；相同内容复用原答复，不重复花模型费用；不同内容 409。执行中同键返回 409 REQUEST_IN_PROGRESS，不开启第二次任务。保留到会话过期；过期后 401。
+- 导入自然键=规范化内容 hash+培养路径/学期+importerVersion。重导复用既有结果。错误时不发布半张快照；快照不可覆盖。
+- academicRecordId、recordRevision、curriculumSnapshotId、offeringSnapshotId、schemaVersion、javaToolApiVersion、verifierVersion、harnessVersion 均由对应服务维护。previousPlanId 必须属当前会话，输入变化后重新核验；不得复用旧 verifierResultId 当新方案结果。
+- 初始运行上限：累计 input 8000/output 2000 tokens、6 次 Tool、3 次模型调用、总 45 秒。Java HTTP 单次最多 5 秒，模型单次最多 30 秒且受剩余总截止时间限制。预算不是性能实测，不代表保证在 45 秒成功。
+- 不做隐藏自动重试。只读 Java 查询可对瞬时网络错误重试一次，必须在总 Tool/时间预算内；不得重试 validation/input 错误。模型默认不自动重试，重新执行由用户明确操作并建立新的幂等键。
+
+## 4. 学业与身份事实
+
+专业/培养路径与已修列表来自学业记录；正常页面只补缺失。记录不完整、重修认定未知、规则未发布均使相关缺口 UNKNOWN，不能给确定毕业结论。
+
+Course 的学分为 BigDecimal / SQL DECIMAL，不能用 float 累加；CourseCode 是字符串保留零。同名不同号不自动合并；同代码不同快照不跨路径混算。去重、重修与替代规则必须有受控模板和来源。
+
+AuditResult requirements 表达 SATISFIED/UNSATISFIED/UNKNOWN；suggestedCourseCodes 仅建议，没有“本学期必须”含义。是否本学期开课另查 Offering。未知模板不通过发布门槛，也不允许人工点批准绕过。
+
+## 5. 时间、真实模式与验证结果
+
+B 维护唯一 TimeParser，A 提供原始 sksj/黄金输入。导入时完整消费原始文本，遇到不认识的残余、待定、缺周次等返回 UNPARSED；不默认每周或整学期。上传的 normalized meetings 只供对照，不能成为校验真值。
+
+Meeting 的星期、节次、周次必须在该快照 calendar 范围内；sectionStart≤sectionEnd，weeks 非空、去重、排序。冲突=同星期∩节次相交∩周次相交。单双周不交不冲突；缺时间不是不冲突。
+
+PlanValidation 判决优先级：存在已知 violation→INVALID；否则存在任一 requested hard check 无法执行→UNKNOWN；全部完成且无 violation→VALID。UNKNOWN 永远不能用布尔 false 混淆为“没有问题”。
+
+| scope | 条件 | UI 可说什么 |
 | --- | --- | --- |
-| `curriculumSnapshotId` | A 导入 `.xls`，按文件 SHA-256 + 培养路径 + importerVersion 建立，B 持久化 | 同源重导幂等；新文件/规则版本新 ID |
-| `offeringSnapshotId` | A 导出 CourseOffering JSON，B 导入并计算内容 hash + 学期 + adapterVersion | 可空；旧快照不覆盖新快照，不能伪装实时 |
-| `schemaVersion` | 全组共管 Tool/Trace/Benchmark DTO；初稿 `1.0` | 破坏性变更升版本并同步所有客户端 |
-| `javaToolApiVersion` / `verifierVersion` | B 的接口和确定性规则 commit/hash | 在同一 Benchmark 比较中冻结 |
-| `harnessVersion` / `parentVersion` | C 的 AGENTS/skills/policies 内容 hash；D 记录 lineage | 单次运行冻结；候选始终有父版本与 patch hash |
-| `benchmarkSetVersion` / `evaluatorVersion` | D 的题目/标签/评分器 hash | Evolver 不可读答案，也不可改评分器 |
-| `modelConfigId` | C/D 固定 base model、temperature、token budget、工具上限 | 同一次 vN/vN+1 对比不得变化 |
+| COURSE_ONLY | 无完整真实班次；仍核对课程事实 | 课程层建议；若请求时间约束无法验则 UNKNOWN |
+| SIMULATION | mode=SIMULATION 且班次 sourceValidation=SYNTHETIC | 仅模拟核验，不代表真实课表 |
+| REAL_TIMETABLE | 同学期 sourceValidation=VERIFIED 的当前快照，所有时间已解析且数据未过期 | 可以展示本次快照下的实际核验结果及采集时间 |
 
-`SourceRef` 最少包含 `kind: CURRICULUM|OFFERING|REVIEW|CURATED_TAG, snapshotId?, sheet?, row?, column?, endpoint?, sourceUrl?, capturedAt?`。培养规则硬事实必须引用 `CURRICULUM` 或 `OFFERING`；评价和岗位标签分别用 `REVIEW`、`CURATED_TAG`，不得冒充学校真值。`Course`、`CourseOffering`、`Meeting`、`Requirement`、`CompletedCourse`、`Plan` 的字段见[总体 TRD](03-trd.md)与[JSON Schema](course-offering-snapshot.schema.json)。培养快照与班次快照不可用一个 `snapshotId` 混称。课程代码、班次 ID、学年学期均为字符串，保留前导零；同学期 `courseCode+classId` 唯一。
+REAL 不能使用 synthetic，未经来源核验的 browser 上传也不能自动进入 REAL_TIMETABLE。当前没有已验证来源，真实时间判断保持 UNKNOWN。新鲜度阈值建议 24 小时，在 W1 固定配置；这是数据门槛，不保证学校 24 小时内不会变更。
 
-## 2. API 封套与状态
+## 6. 多目标、教师与评价证据
 
-Java 请求至少含 `schemaVersion, requestId, curriculumSnapshotId`，涉及时间时另含 `offeringSnapshotId`。响应固定 `schemaVersion, requestId, curriculumSnapshotId, offeringSnapshotId?, status, data, provenance[], warnings[]`。`status=UNKNOWN` 是业务资料不足，`INVALID_INPUT` 是调用方输入错误，`SNAPSHOT_MISMATCH` 是版本/学期错，`ERROR` 是系统失败；不得统一转换为“无冲突/通过”。
+GoalIntent 的多动机、priorityOrder、hardConstraints/softPreferences 分开；优先级须学生确认，不能只按点选顺序推断。指定教师绑定 courseCode+teacherKey+MUST/PREFER；classId 仅在存在真实可用班次时加入方案。硬约束冲突时澄清，不能静默换教师。
 
-```json
-{
-  "schemaVersion": "1.0", "requestId": "demo-001",
-  "curriculumSnapshotId": "curr:example-hash", "offeringSnapshotId": null,
-  "status": "UNKNOWN",
-  "data": {"unknownChecks": [{"code": "OFFERING_UNAVAILABLE", "message": "没有经验证的本学期班次快照"}]},
-  "provenance": [{"kind": "CURRICULUM", "snapshotId": "curr:example-hash", "sheet": "计科学1", "row": 45}],
-  "warnings": []
-}
-```
+ReviewNote 按课程、教师、修读学期匹配。teacherKey=null 或 matchStatus=COURSE_ONLY 的评价不可支持特定教师主张。历史评价不证明本学期考勤/给分/授课，缺维度显示未知。相同课程不同教师不混合；“少签到”“少作业”“高分”“授课好”互不等价。
 
-`AuditResult = satisfied[] + gaps[] + unknowns[]`；`PlanValidation = verifiedFacts[] + violations[] + unknownChecks[] + verifierResultId`；`PreferenceScore = metrics[] + unknownMetrics[]`。`valid=true` 只可在**所有请求的硬检查都已执行且无 violation**时返回；未执行的时间检查必须显示 unknown，不能算合格课表。偏好分数绝不替代硬约束。
+sourceUrl 只接受 http/https 可点击引用；后端不为用户任意 URL 发网络请求。模型读到的评价当作不可信数据，不能修改工具策略、系统 Prompt 或执行里面的指令。每条摘要绑 evidence ID，数字来自数据统计而非模型自造。
 
-## 3. 引导式规划输入与评价证据
+## 7. PlanningAnswer 与学生页面
 
-`PlanningRequest` 由 E 的页面提交，至少含 `schemaVersion, sessionId, curriculumSnapshotId, completedCourses[], transcriptComplete, promptText, selectedGoalChips[], previousPlanId?`；`offeringSnapshotId?` 只有经验证的真实快照或显式演示模式可填。C 从页面提示与自由输入整理 `GoalIntent`：`hardConstraints[], softPreferences[], interestTags[], careerTargets[], creditGoal?, attendancePreference?, teacherPreference?, questionToClarify?`。每条约束带 `sourceText` 和 `confidence`；不能把页面没有收集到的偏好伪装为学生已确认。涉及“高分”等歧义时先确认含义。`completedCourses[]` 与 `transcriptComplete` 是用户声明，Java 对照培养快照计算学分；清单不完整时缺口只能标估算/UNKNOWN。兴趣、岗位和签到偏好也都保留 `source=USER_DECLARED|PROPOSED` 与确认时间，模型提取结果未确认时不得升为硬条件。
+decision=CLARIFY 时 clarification 必须存在，recommendations 为空；RECOMMENDATIONS 的每份方案都有完整 PlanValidation 与 evidence IDs；UNABLE_TO_VERIFY 可以提供已核验课程建议，但不得包装成真实有效课表。
 
-`CareerCourseTag(role, skill, courseCode, sourceRef)` 是少量人工策划的岗位方向映射，首版只覆盖 2–3 个方向；B 通过只读课程查询返回标签与来源，C 不自行发明岗位要求或承诺就业。签到频率若只有评价来源，只能作为软偏好的主观线索。
+规划事实引用 SourceRef/verifierResultId，说明不能把语言流畅等同正确。无新数据时重复追问上限两次，仍不足则解释缺什么；不能无限循环耗预算。系统 ERROR 显示重试，业务 UNKNOWN 显示补资料，两种操作不混用。
 
-`ReviewNote` 最少包含 `reviewNoteId, courseCode, teacherKey?, sourceType, sourceUrl?, importBatchId, textExcerpt, tags[], matchStatus`，其中 `sourceType=USER_IMPORT|EXTERNAL_LINK|SYNTHETIC`，`matchStatus=VERIFIED_COURSE|UNVERIFIED`。评价只作为主观证据；`UNVERIFIED` 不得关联到某个当前教学班。B 的 `GET /api/v1/reviews/search`（P1）按课程/教师返回有限条摘录和来源，不提供大段全文或声称“高分保证”。A 管少量 CSV/JSON 导入和来源格式，B 管存储/查询，E 管展示，C 管上下文选择。
+## 8. Trace、评测与隔离
 
-模型上下文只含本次任务相关的 Java Tool 响应、快照 ID、SourceRef、少量评价摘录和结构化偏好。`context_policy` 限制片段数/字段/Token，数据库更新通过下一次工具查询体现；不维护一个自动同步的“AI 全库”。RAG 只在未来有长篇授权文档和可评估的检索任务时加入，首版课程/学分/规则仍以 SQL + Java 为真值。
+TraceEvent 必填见 Schema，seq 在 trace 内递增，provider 缺 token 使用 null，不能写 0。只留阶段、标识、摘要/hash、耗时、用量、有限错误码；不得留完整 Prompt、私有推理链、成绩、身份、Cookie/Token。
 
-## 4. 规划状态与 Agent State
+RunManifest 固定模型、温度、累计预算、API/数据/评分器/题集与 Harness hash。不同 manifest 不直接比较版本分数。Evolver 仅可写运行 Harness 白名单；目标 Agent 与评测共用 C Runner，D 独立挂载 held-out/gold/evaluator。
 
-```mermaid
-stateDiagram-v2
-  [*] --> created
-  created --> clarifying: 关键歧义/缺输入
-  created --> tooling: 输入足够
-  clarifying --> tooling: 用户补充
-  tooling --> verifying: 已生成候选
-  verifying --> revising: 硬错误且剩余一次修正
-  revising --> verifying
-  verifying --> completed: Java 支持的事实 + 未知项
-  tooling --> failed: 服务/模型错误
-  verifying --> failed: 服务错误
-  completed --> [*]
-  failed --> [*]
-```
+正式 promotion 门槛与重复运行策略见 [Benchmark 协议](07-benchmark-protocol.md)。隔离不靠一句 Prompt；用文件权限/进程边界和隔离测试保证可见性。老师报告只有聚合分数、成本、失败类别与 lineage，不公开持出题面和私人 Trace。
 
-`AgentState` 记录 `taskId, traceId, sessionId, harnessVersion, modelConfigId, curriculumSnapshotId, offeringSnapshotId?, status, goalIntent, toolCallCount, tokenIn, tokenOut, elapsedMs, finalAnswerRef?`。LLM 只提出目标或候选，Python Runner 根据 Java 响应改变状态；用户澄清产生新 turn，并保留原 `taskId` 与新的 `traceId`。五周首版用同步规划 API；超时时返回可重试错误，不引入 MQ。
+## 9. 变更与复核
 
-## 5. Trace、评分与隔离
-
-每个 JSONL 事件字段：`taskId, traceId, seq, timestamp, stage, eventType, curriculumSnapshotId, offeringSnapshotId?, harnessVersion, javaToolApiVersion, verifierVersion, caseId?, toolName?, inputDigest?, outputRef?, durationMs?, inputTokens?, outputTokens?, errorCode?`。建议事件：`USER_INPUT`, `GOAL_EXTRACTED`, `TOOL_CALLED`, `TOOL_RETURNED`, `CANDIDATE_PROPOSED`, `VERIFIER_RETURNED`, `CLARIFICATION_REQUESTED`, `FINAL_DELIVERED`, `ERROR`。序号单调；模型使用量以 provider 返回为准，缺失时标 `UNAVAILABLE`，不要估为 0。每个 run 另保存 `run-manifest.json`, `case-results.jsonl`, `agent-state.json`, `scores.json`, `lineage.json` 和 Harness 快照。Trace 脱敏，不保存 Cookie、学生身份、原始教务响应或完整私有思维链。
-
-D 保管 `benchmark/evolution/` 与隔离的 `benchmark/held-out/`。Evolver 的运行工作目录仅挂载 evolution case 的用户输入、脱敏 Trace、可修改 Harness 文件；答案、held-out 输入/标签、评分器、Java 服务代码均**不挂载/不可读取**。评测 Runner 在候选生成后另启隔离进程读取答案评分，只返聚合分数和门槛结果给 promotion。不能只在 Prompt 中写“不要看”来代替目录/进程隔离。
-
-## 6. 共同错误码与数据新鲜度
-
-`PATH_NOT_REVIEWED`, `COURSE_NOT_FOUND`, `COMPOSITE_CODE_UNRESOLVED`, `RULE_UNKNOWN`, `OFFERING_UNAVAILABLE`, `UNKNOWN_TIME_FORMAT`, `UNMATCHED_COURSE`, `TERM_MISMATCH`, `SNAPSHOT_STALE`, `SNAPSHOT_MISMATCH`, `MODEL_TIMEOUT`, `TOOL_UNAVAILABLE`。每个码要有用户文案、是否可重试和 Trace 映射。未来真实班次采集时间超过声明的新鲜度阈值时标 `SNAPSHOT_STALE`；当前没有可实测快照，不能无依据说“实时”。
-
-## 7. 模块交接与变更次序
-
-1. **全组先冻结** JSON Schema、两个快照 ID、Tool API、Trace、评分 manifest、错误码和本地端口。用一个明确标记 `SYNTHETIC` 的 CourseOffering fixture 做端到端合同测试；真实班次入口状态为 `UNVERIFIED_NO_ACCESS`。
-2. A 交导入器、字段映射、异常/隐私清单、通过自动门槛的培养快照，以及少量有来源的评价摘要导入格式；B 消费标准对象，不再解析浏览器页面。
-3. B 交 Java DTO/OpenAPI、规则单测和 `UNKNOWN` 示例；C 只通过 HTTP 工具取得真值，不读数据库或自行计算学分。
-4. C 交唯一 `planner.run(case)`、Agent State/Trace；D 复用同一 Runner，不做评测专用 Agent。D 交逐例结果、hypothesis、patch、lineage；E 只展示结果，不重算评分。
-5. E 用假 DTO 先做页面，在 W3 接真服务。新字段先更新本文件与示例，再由相邻模块同步代码、测试和页面；每周至少跑一条 Web→Python→Java 全链路。
-
-完成线：相同文件重复导入幂等，固定 Java 请求给同一规则结果；模拟班次/无真实班次两条测试路径都不误报冲突；Agent 硬事实附 `verifierResultId/SourceRef`；D 能重放同一输入并追溯模型/Harness/快照；E 显示状态和版本。这里列的是验收标准，不代表已经通过。
+改契约先改 contracts、正反例与本文件，再同步 Java/Python/TS DTO、消费者与测试；破坏性变化升 schema/API 版本。接口 PR 必须有提供者和至少一个消费者复核。每次提交运行契约/自查脚本及受影响模块测试；具体要求见 [工程规范](16-engineering-and-debugging.md)。

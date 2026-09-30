@@ -1,31 +1,37 @@
-# 五人分工与后续子 TRD 任务委派（五周）
+# 五人分工与子 TRD
 
-先读[老师版](01-teacher-project-plan.md)、[完整学生场景](13-guided-planning-and-harness.md)、[总体 TRD](03-trd.md)、[共享契约](04-infrastructure-workflow.md)、[数据入口](09-browser-adapter.md)和[Benchmark](07-benchmark-protocol.md)。**第一周全组冻结两个快照 ID、CourseOffering JSON、Tool API、Trace、run manifest 后**，再按下表领个人任务。成员 A–E 是占位名，实际姓名组内填写。预计 55 人日是计划工时。
+日期：2026-09-30。先读 [团队基线与开发批次](15-team-baseline-and-batches.md)和 [HTML 交接规范](../demo/README.md)，再读 [统一契约](04-infrastructure-workflow.md)和个人子 TRD。成员 A–E 为占位名，组内填姓名。当前文档与原型已准备，服务尚未实现。
 
-| 人 | 子 TRD / 技术栈 | 所有权与首次交付 | 人日 |
+| 人 | 技术栈与子 TRD | 所有权与主要交付 | 人日 |
 | --- | --- | --- | ---: |
-| A | [数据适配](trd/a-data.md)：Java POI + JSON Schema + 插件静态核查 | `.xls` 模板编译/自动校验/原子发布、模拟班次 fixture；P1 少量评价摘要与岗位标签种子格式 | 12 |
-| B | [Java Environment/Verifier](trd/b-verifier.md)：Spring Boot/JPA/Flyway/JUnit | 课程/班次/要求模型、typed Tool API、确定性核验；P1 评价摘要/岗位标签查询 | 12 |
-| C | [Planning Agent](trd/c-agent.md)：Python/FastAPI/Pydantic/httpx | 同一 Agent Runner、引导式 GoalIntent、画像确认与澄清策略、Harness State、脱敏 Trace | 10 |
-| D | [Benchmark/RSI](trd/d-benchmark-rsi.md)：Python/pytest/JSONL | 四组任务、隔离评分、跨 Case Miner、候选/晋级/回滚 | 11 |
-| E | [Web/会话/集成](trd/e-web-integration.md)：Vue 3/Vite/Fetch | 引导式问题、可编辑画像、必修/学分缺口、事实/未知/版本与评价来源可视化、端到端演示 | 10 |
+| A | [数据](trd/a-data.md)：Java 21/Apache POI、JSON Schema、CSV/JSON | 一个培养路径导入、自动门槛、来源定位、已修与评价输入、原始时间黄金 fixture；不另写冲突规则 | 11 |
+| B | [真值与核验](trd/b-verifier.md)：Spring Boot/JPA/MySQL/Flyway/JUnit | 数据存储、Audit、教师课程/评价查询、唯一 TimeParser/ConflictChecker、Tool API | 12 |
+| C | [Agent](trd/c-agent.md)：Python/FastAPI/Pydantic/httpx | 多动机/澄清、指定教师、统一 Runner、Harness State/Trace、少量计算机方向内容 | 11 |
+| D | [评测与演化](trd/d-benchmark-rsi.md)：Python/pytest/JSONL | W1 开始标注四组 case、隔离评分、跨 Case Miner、两轮候选 gate 与报告 | 10 |
+| E | [前端与集成](trd/e-web-integration.md)：Vue 3/Vite/Router、Pinia 或会话状态、Fetch | 一次一问、学业记录、课程教师详情、候选/未知/重规划、独立老师报告页 | 11 |
 
-工作量依据：A 承担 Excel 三类表的解析器、黄金样例、自动校验/异常阻断及班次字段的静态契约，给 12 人日；B 有核心 Java 规则和两个快照，给 12；D 需人工标注与双轮版本流程，给 11；C/E 分别聚焦 Agent 与页面/联调。A/B 的 Java DTO、C/D 的 Runner 和 D/E 的 Trace 展示必须共用契约，不能复制规则或另造对象。
+合计 55 人日，约 330–440 小时，是规划估算。A 少做实时浏览器采集与职业内容；C 承接多目标意图和少量方向；B/D 共同复核真值；E 增加产品交互，但不算业务规则。
 
 ```mermaid
 flowchart LR
-  F[全组 W1: 冻结 Schema / Tool API / Trace / 版本] --> A[A 数据入口]
-  F --> B[B Java 真值]
-  F --> C[C Agent]
-  F --> D[D Benchmark/RSI]
-  F --> E[E Web/集成]
+  F[W1 最小契约与共用 fixture] --> A[A 导入与来源]
+  F --> B[B 数据库与唯一核验]
+  F --> C[C Agent 与意图]
+  F --> D[D case 与评测隔离]
+  F --> E[E 单问题 Web]
   A --> B
   B --> C
   B --> D
   C --> D
   C --> E
-  D --> E
-  E --> DEMO[W5 演示/报告]
+  D --> R[独立老师报告页]
+  E --> S[学生闭环]
+  R --> V[W5 验收]
+  S --> V
 ```
 
-每份子 TRD 写明要回答的问题、文件所有权、输入输出、验收和依赖。W1 用虚构 fixture 并行开发；W2 A/B 先交通过自动门槛的真实培养快照、模拟班次 fixture 与 Tool；W3 C/E 联通；W4 D 跑基线；W5 全组运行双轮候选。接口变更先改共享契约和样例，再同步各模块，实际班次入口不可用时保留明确的 UNKNOWN 降级。GitHub 仓库已创建，当前公开；四位成员待邀请取得写入权限，见协作文档。
+交付按批次推进：第 0 批 W1 前半冻结最小合同；第 1 批 W1–W2 学业事实；第 2 批 W2–W3 前半学生闭环；第 3 批 W3 后半教师评价与取舍；第 4 批 W4 固定基线/跨 Case 假设；第 5 批 W5 双轮候选/报告。每批的具体动作和门槛见 [团队安排](15-team-baseline-and-batches.md)。
+
+每人第一份提交包含：负责目录、输入/输出、一个共享 fixture 跑通的最小功能、测试证据和限制。接口变化先改共享契约，再同步相邻模块和 fixture。时间解析由 B 唯一维护，A 只给原文与样例；C/D 用同一 Runner；E 不展示工程术语给学生。
+
+首版仅一个计算机培养路径；评价用少量授权或演示输入；真实班次不可验证时 UNKNOWN。远程仓库当前公开，不能提交个人成绩、原始学校响应或密钥；成员邀请按协作规范执行；填完的成员表保持私密，不提交到公开仓库。

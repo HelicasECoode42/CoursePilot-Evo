@@ -1,0 +1,23 @@
+{
+  "verifierResultId": "verify:demo",
+  "verdict": "UNKNOWN",
+  "scope": "COURSE_ONLY",
+  "curriculumSnapshotId": "curr:demo",
+  "offeringSnapshotId": null,
+  "recordRevision": 1,
+  "violations": [],
+  "unknownChecks": [
+    {
+      "code": "OFFERING_UNAVAILABLE",
+      "message": "未取得本学期班次",
+      "field": "offeringSnapshotId",
+      "retryable": false
+    }
+  ],
+  "performedChecks": [
+    "COURSE_EXISTS"
+  ],
+  "sourceRefIds": [
+    "source:demo"
+  ]
+}

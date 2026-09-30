@@ -1,0 +1,10 @@
+我们这次 CoursePilot-Evo 的方案、开发大纲和接口规范已经整理到仓库了：
+https://github.com/HelicasECoode42/CoursePilot-Evo
+
+大家先看根目录 README，再打开 demo 里的 HTML 示例，了解一次一问的选课流程。然后看 docs/15-team-baseline-and-batches.md 和对应的 docs/trd 模块文档。
+
+请在金山表格填写姓名/称呼、GitHub 用户名、第一和第二志愿模块、已有技术基础以及每周能投入的时间。表格链接：[这里粘贴你创建的金山表格链接]
+
+模块是 A 数据导入、B Java 核验、C Agent、D 评测与演化、E 网页与集成。我们会结合志愿、基础和时间统一确定分工，再邀请大家进仓库。
+
+之后按任务分支和 PR 协作，每个 PR 要填自查清单。接口用公共契约，不各自重新定义；实现不确定时先用共用 fixture 联调。填写后的人员表不提交公开仓库。
