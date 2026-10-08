@@ -1,4 +1,6 @@
-# 浏览器侧班次数据入口与规范化契约（设计稿）
+# 班次数据来源、抓取流程与浏览器适配（设计稿）
+
+截至 2026-10-08，已读取 SHUOSC 公开历史班次 JSON，并检查其抓取源码；CoursePilot 尚未实现该来源的导入。先读[公开数据与抓取说明](#5-shuosc-公开历史班次与抓取流程)，再按需看下方本人浏览器快照设计。公开历史数据、当前学期实测数据和虚构测试数据分别记录，不能互相替代。
 
 状态：已只读检查用户本机 `选课插件v0.6.js`（SHA-256 `578c21de0fc91a0024b1bb7e01b3889efcce298322cb61b31346ea8bb832068c`），**当前无法进入选课页；CoursePilot 尚未接入，也没有任何实测教务响应**。文件名为 v0.6，脚本头部 `@version` 实为 `0.5`；以下字段只代表脚本实际引用，不代表学校官方 API 承诺。原脚本保留在本地 `data/raw/`，不作为本项目代码发布或直接执行。
 
@@ -26,6 +28,7 @@ sequenceDiagram
   participant JW as 官方选课页 / 浏览器登录态
   participant BA as 只读 Browser Adapter
   participant UI as CoursePilot Web
+  participant P as Python API 网关
   participant J as Java Course Environment
   S->>JW: 自行登录并打开当学期选课页
   JW-->>BA: 页面原有课程/班次响应（只观察）
@@ -33,9 +36,11 @@ sequenceDiagram
   BA->>BA: 映射字段、解析周次、删除无关个人字段
   BA-->>S: CourseOfferingSnapshot JSON 文件
   S->>UI: 上传 JSON
-  UI->>J: POST /api/v1/offering-snapshots/import
+  UI->>P: 提交快照（上传入口待共同契约确认）
+  P->>J: POST /api/v1/offering-snapshots/import
   J->>J: schema/学期/来源/周次/重复 ID 校验
-  J-->>UI: offeringSnapshotId + 警告/拒绝项
+  J-->>P: offeringSnapshotId + 警告/拒绝项
+  P-->>UI: 导入结果
   UI-->>S: 显示来源、采集时间和可用范围
 ```
 
@@ -80,3 +85,53 @@ Java 导入生成 `offeringSnapshotId = SHA-256(规范化 JSON + adapterVersion 
 5. 页面改版、`jQuery.post` 改成其他调用方式、DOM 字段变化或详情 HTML 变化，都应让采集失败并提示重试/改用手工快照；不能静默使用旧数据。学校使用规则与个人数据授权需由团队在实际采集前确认。
 
 入口状态分四档：`UNVERIFIED_NO_ACCESS`（无实测条件）、`PARTIAL`（部分字段/周次不可靠）、`VERIFIED`（有真实、脱敏、人工对照快照）、`UNAVAILABLE`（实测后确认无法稳定合法采集）。只有 `VERIFIED` 且班次时间解析成功时才在面向学生的请求中启用冲突/周五检查；其余继续用培养计划做学业核对，并显示 `OFFERING_UNAVAILABLE`。当前状态为 **`UNVERIFIED_NO_ACCESS`**。模拟 JSON 只用于解析器/冲突算法，不可升为 `VERIFIED` 或用于真实开课建议。
+
+## 5. SHUOSC 公开历史班次与抓取流程
+
+### 已核对什么、可以用来做什么
+
+[shu-course-data](https://github.com/shuosc/shu-course-data) 发布课程与授课数据，数据文件在 `data` 分支。2026-10-08 实际读取的[current.json](https://github.com/shuosc/shu-course-data/blob/data/current.json)指向 `2024-2025-3`；[对应文件](https://github.com/shuosc/shu-course-data/blob/data/terms/2024-2025-3.json)有 **4,822 条记录**，`termName` 为“2024-2025学年春季学期”，`updateTimeMs=1770789410489`（2026-02-11 13:56:50.489 +08:00）。抓取时间与数据所属学期是两个字段，不能从抓取日期猜本学期开课。
+
+它可以提供真实格式的历史课程、授课及时间文本，用于 A 的输入适配、B 的解析和 D 的独立反例；它不提供个人已修记录、毕业要求或教师评价。文件可公开下载，不需要学校账号。当前学期覆盖、周次完整性和字段身份仍需核对，不据此宣布当前课表无冲突。4,822 是记录数，不是不同课程数。
+
+### 上游是怎么抓的
+
+这是对源码的阅读，未运行爬虫或登录学校系统：
+
+1. [GitHub Actions 工作流](https://github.com/shuosc/shu-course-data/blob/main/.github/workflows/interval-crawler-task.yml)读取仓库 Secrets 中的学校账号，启动 OpenVPN 连学校网络，再运行 TypeScript 抓取程序。当前 `schedule` 已被注释，只保留 `workflow_dispatch`；不能依仓库名称断言持续自动更新。
+2. [登录模块](https://github.com/shuosc/shu-course-data/blob/main/src/login.ts)使用学校统一身份认证 `oauth.shu.edu.cn`，提交账号及加密后的密码，经过回调跳转取得选课系统 Token。
+3. [抓取模块](https://github.com/shuosc/shu-course-data/blob/main/src/index.ts)从 `studentInfo` 取得该账号可见的选课批次；按学期选一个批次，建立批次上下文后请求 `clazz/list`。先用一条记录的分页查询取得总数，再按总数获取列表。这是上游实现方式，不保证其他账号可见范围、接口上限或当前系统行为相同。
+4. 抓取模块把学校原字段转成 `courses` 数组，生成内容 MD5、`termName`、`backendOrigin` 与抓取时间，写 `terms/{termId}.json` 和 `current.json`。MD5 用于内容变化标识，不证明来源真实或数据完整。
+5. [后处理](https://github.com/shuosc/shu-course-data/blob/main/post_crawler.py)比较结果并提交到 `data` 分支或创建 PR。当前代码以开放学期列表变化决定是否开 PR，更细字段差异的判定已停用；不能认为所有字段都经过人工审查。
+
+首期只读取已发布历史 JSON，不把上游学校账号登录加入 CoursePilot，也不要求队员将学校密码配置到本项目 CI。重新抓当前学期是后续单独确认的接入工作。上游代码还有关闭 TLS 证书校验的设置，不能照搬到本项目。
+
+### 映射前必须核对的差异
+
+| 上游字段/行为 | 本项目如何处理 |
+| --- | --- |
+| 实际数组是 `courses`，README 表格写 `course` | 以所选版本实际文件为准，输入形状变化报错，不静默读成空列表 |
+| `courseId` / `courseName` | 课程号保留字符串及前导零，与培养计划显式匹配；同名不自动合并 |
+| `teacherId` 在源码中取 `KXH` | 暂保留为上游原始标识；不能直接写为教师 `teacherKey`。A/B 核对其是否课序/班次标识、唯一范围及多教师情况后再映射 |
+| `teacherName` | 保留授课文字；不能仅凭同名生成可全局关联的教师身份 |
+| `classTime` 在源码中取 `YPSJDD` | 原样提供给 B 的唯一解析器，例如“二5-6 限钱院”；备注、未给周次和未知余串不能被静默丢弃或补成全学期 |
+| `credit`、`capacity`、`number` 常为字符串 | 学分用精确小数；容量/人数严格校验，只代表快照时的显示值，不承诺实时余量 |
+| `limitations` | 保留来源和账号可见上下文，不能当作任意学生的完整选课资格判断 |
+| 没有本项目必填的完整 `calendar` | 另外取得对应学期校历/节次依据，缺失则报告未知，不默认周数 |
+
+当前 `OfferingImport.sourceKind` 仅支持 `BROWSER_SNAPSHOT` / `SYNTHETIC`，且单次最多 2,000 条。因此 **该文件还不能直接上传到现有接口**。A 先交输入映射、来源记录、过滤/匹配报告及异常；正式导入前 A/B/C 在 G0 核对社区历史来源、可用范围及容量处理方案，通过公共契约 PR 同步 Schema、正反例、提供方与消费方。不能冒充浏览器采集、把历史真实数据标成虚构模拟，或静默截掉超限记录。这次资料说明不修改来源枚举或 REAL 门槛。
+
+### 由谁落地、怎样验收
+
+- **A / JiangYiLin-Q121（A3）**：固定仓库提交与学期文件、下载时间、上游抓取时间、原始文件 SHA-256 和使用范围；交匹配/重复/异常清单及字段核对记录。上游 MD5 单独保存。
+- **B / mira-xu（B1/B3）**：和 A 确认来源/身份映射与合同；用真实格式验证时间解析，缺周次、学期不符、超限和标识冲突有明确拒绝或未知，保留唯一规则实现。
+- **D / amorfatiii（D1）**：与 A/B 独立核对历史样例，分别记录历史格式、虚构算法案例和当前资料缺失的预期；历史数据不冒称当期评测能力。
+- **E / HelicasECoode42（E2/E3）**：正式接入后展示数据所属学期、来源和可用范围；当前原型仍用虚构候选，不能让来源链接看起来像已经接通。
+
+最低验收：固定样本可重复读取且记录数与上游一致；前导零保留；错数组/坏数值/缺周次/旧学期/无法关联身份/超限输入都能定位；没有当前学期验证仍显示时间待确认；A/B 对所选少量记录人工核对后由 D 复核。完整上游数据先留本地，不将整份历史文件当公共测试答案上传。
+
+### 相关项目与来源标注
+
+[SHU 排课助手](https://github.com/shuosc/shu-scheduling-helper)可参考课程筛选、候选课表与冲突展示；[ShuYo](https://github.com/shuosc/ShuYo)可参考课表与学业修读查询。两者作为学习入口，不宣称本项目已经接入它们的服务。[SHUOSC 仓库列表](https://github.com/orgs/shuosc/repositories)用于发现后续参考资料。
+
+[shu-course-data README](https://github.com/shuosc/shu-course-data#许可证)分别标明代码为 AGPL-3.0-or-later、数据为 CC BY-NC-SA 4.0。获取时保留许可及项目来源；复用代码、分发整理后的数据或提供服务前，按具体使用方式核对相应许可要求。
