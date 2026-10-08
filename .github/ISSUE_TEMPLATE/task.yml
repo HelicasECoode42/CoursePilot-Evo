@@ -1,0 +1,41 @@
+name: 开发任务
+description: 一项可验收的小任务；正式发布前确认负责人、关联人和范围
+title: "[任务] "
+body:
+  - type: markdown
+    attributes:
+      value: "先阅读 docs/18-team-progress-guide.md。创建后加入 Project，填写周次、模块、优先级、Assignees 和计划复核人。草案不要当成已派发任务。"
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 交付结果与范围
+      description: 说明用户或调用方最终能做什么，以及本任务不包含什么。
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: 输入输出与契约
+      description: 链接相关 TRD、Schema、接口和样例；接口变更列出提供方与消费者。
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依赖与计划复核人
+      description: 引用依赖 Issue，填写模块角色或已确认 GitHub 账号；无依赖写无。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件
+      description: 写可操作检查，至少包括正常、异常和适用的 UNKNOWN/权限边界。
+      value: "- [ ] 正常场景：\n- [ ] 异常/未知场景：\n- [ ] 关联模块实际调用：\n- [ ] 启动与检查证据："
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 交付证据（开发后补充）
+      description: PR、检查命令与结果、截图/最小复现、未完成限制。禁止敏感原始数据。
