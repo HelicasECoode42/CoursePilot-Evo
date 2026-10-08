@@ -1,0 +1,50 @@
+name: Bug 报告
+description: 登记问题、指派修复、关联回归证据
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "先搜索重复问题。创建后加入 Project，由队长确认优先级、模块和修复人；用 @已确认账号 提醒。不要附成绩、密钥、原始学校资料或私有评测答案。"
+  - type: dropdown
+    id: reproduction_status
+    attributes:
+      label: 复现状态
+      options:
+        - 已复现
+        - 疑似问题，待复现
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 最小复现步骤与输入
+      description: 写其他人照做可以复现的步骤，使用虚构数据。
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: 预期与实际
+      value: "预期：\n\n实际："
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 版本、环境与脱敏证据
+      description: 提交 SHA、浏览器/服务环境、requestId、必要截图或简短日志。
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影响与关联任务
+      description: 哪条流程不能用，是否阻塞其他 Issue；建议优先级由队长确认。
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 修复验收（修复后补充）
+      value: "- [ ] 修复 PR 已关联\n- [ ] 原复现失败已消除\n- [ ] 相关回归检查通过\n- [ ] 报告者或关联队友复测\n- [ ] 合并后关单"

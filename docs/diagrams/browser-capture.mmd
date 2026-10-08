@@ -4,6 +4,7 @@ sequenceDiagram
   participant JW as 官方选课页 / 已登录浏览器
   participant BA as 只读 Browser Adapter
   participant Web as CoursePilot Web
+  participant Python as Python API 网关
   participant Java as Java Course Environment
   Note over Student,Java: 未来流程；当前无法访问选课页实测
   Student->>JW: 自行打开当学期页面
@@ -12,7 +13,9 @@ sequenceDiagram
   BA->>BA: 标准化 CourseOffering / 去个人字段
   BA-->>Student: JSON 文件
   Student->>Web: 上传并预览
-  Web->>Java: import offering snapshot
+  Web->>Python: 上传快照（入口待契约确认）
+  Python->>Java: import offering snapshot
   Java->>Java: 校验 schema / 学期 / 周次 / 来源
-  Java-->>Web: offeringSnapshotId + warnings
+  Java-->>Python: offeringSnapshotId + warnings
+  Python-->>Web: 导入结果
   Web-->>Student: 显示采集时间与可用范围

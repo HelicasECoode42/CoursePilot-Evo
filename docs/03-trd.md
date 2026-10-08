@@ -1,5 +1,7 @@
 # 总体 TRD v1.0｜CoursePilot-Evo
 
+先读[团队业务总览](15-team-baseline-and-batches.md)中的业务流程和对象关系。本页维护技术结构、接口映射和时序；个人完整业务职责写在[模块 TRD](05-team-and-sub-trds.md)，排期只在[周交付安排](19-delivery-plan.md)。
+
 | 项 | 基线 |
 | --- | --- |
 | 状态 | 可执行设计与接口契约；服务尚未实现 |
@@ -45,7 +47,7 @@ flowchart TB
   G --> RP[聚合老师报告]
 ```
 
-默认本地 Web 5173、Python 8000、Java 8080、MySQL 3306，均配置化。Java/MySQL 不暴露浏览器；Python 通过 Service Key 调 Java。没有 MQ、微服务平台和独立向量库要求，避免五周引入额外运维。
+默认本地 Web 5173、Python 8000、Java 8080、MySQL 3306，均配置化。Java/MySQL 不暴露浏览器；Python 通过 Service Key 调 Java。没有 MQ、微服务平台和独立向量库要求，避免首版引入额外运维。
 
 Web 学生页面与老师报告分路由；报告要管理权限，不能只隐藏按钮。匿名本地 session 仅供虚构/授权演示；部署真实学生服务另完成 HTTPS、正式身份、对象级权限、隐私与数据保留方案。
 
@@ -193,4 +195,4 @@ D 的 Evaluator 独立读取 gold/held-out；Evolver 不可读取这些文件或
 | 同一 Runner 与两轮候选 | C/D：manifest、逐例分数、lineage |
 | 单问题、小屏、返回保留、独立报告 | E：交互测试与截图 |
 
-待关闭项：首次培养路径 ID、实际基模 ID、各模块负责人姓名、授权评价样例。默认预算与新鲜度阈值已经给出可实现起点，W1 可经共同契约 PR 调整一次，随后固定比较条件。真实班次仍 UNVERIFIED_NO_ACCESS，不以计划代替已完成。
+待关闭项：首次培养路径 ID、实际基模 ID、授权输入及配置的确认记录、授权评价样例。默认预算与新鲜度阈值已经给出可实现起点，开工时可经共同契约 PR 调整一次，随后固定比较条件。真实班次仍 UNVERIFIED_NO_ACCESS，不以计划代替已完成。

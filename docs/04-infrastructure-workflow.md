@@ -61,7 +61,7 @@ PlanValidation 判决优先级：存在已知 violation→INVALID；否则存在
 | SIMULATION | mode=SIMULATION 且班次 sourceValidation=SYNTHETIC | 仅模拟核验，不代表真实课表 |
 | REAL_TIMETABLE | 同学期 sourceValidation=VERIFIED 的当前快照，所有时间已解析且数据未过期 | 可以展示本次快照下的实际核验结果及采集时间 |
 
-REAL 不能使用 synthetic，未经来源核验的 browser 上传也不能自动进入 REAL_TIMETABLE。当前没有已验证来源，真实时间判断保持 UNKNOWN。新鲜度阈值建议 24 小时，在 W1 固定配置；这是数据门槛，不保证学校 24 小时内不会变更。
+REAL 不能使用 synthetic，未经来源核验的 browser 上传也不能自动进入 REAL_TIMETABLE。当前没有已验证来源，真实时间判断保持 UNKNOWN。新鲜度阈值建议 24 小时，在开工时固定配置；这是数据门槛，不保证学校 24 小时内不会变更。
 
 ## 6. 多目标、教师与评价证据
 
