@@ -9,14 +9,15 @@ body:
     id: outcome
     attributes:
       label: 交付结果与范围
-      description: 说明用户或调用方最终能做什么，以及本任务不包含什么。
+      description: 标题写动作＋对象＋结果；正文明确本任务负责的接口/行为，以及不包含或由谁负责的相邻工作。
+      value: "本任务负责：\n\n不包含／由他人负责："
     validations:
       required: true
   - type: textarea
     id: contract
     attributes:
       label: 输入输出与契约
-      description: 链接相关 TRD、Schema、接口和样例；接口变更列出提供方与消费者。
+      description: 写输入来自谁、输出交给谁、准确接口/对象、TRD 和 Schema 链接；不能只写“接通后端”。
     validations:
       required: true
   - type: textarea
