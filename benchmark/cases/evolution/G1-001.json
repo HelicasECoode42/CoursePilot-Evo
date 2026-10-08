@@ -1,0 +1,11 @@
+{
+  "caseId": "G1-001",
+  "groupId": "G1",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G1-001-academic-record.json",
+  "userQuery": "我现在是大二上（第3学期），想在这个学期把通识课一次修满4学分，同时再选《线性代数》。这两门同时选可以吗？另外我毕业要的那个全英语授课课程，我现在算满足了吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：2024级计算机科学与技术培养方案 计科学1 第49行与第53行的文字规则。已修记录为虚构 fixture。"
+}

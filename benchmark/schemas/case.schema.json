@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/HelicasECoode42/CoursePilot-Evo/benchmark/schemas/case.schema.json",
+  "title": "Benchmark 案例：题面与标注",
+  "description": "题面（CasePrompt，可公开）与标注（CaseGold，运行时私有）分开存放。requiredFacts/requiredUnknowns/requiredClarification/forbiddenClaims/requiredSourceRefs 只出现在标注里。requiredSourceRefs 的元素结构复用 contracts/schemas/domain.schema.json 的 $defs/SourceRef，本文件不重复定义。",
+  "$defs": {
+    "CasePrompt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "groupId",
+        "split",
+        "curriculumSnapshotId",
+        "offeringSnapshotId",
+        "inputFixtureRef",
+        "userQuery",
+        "rubricVersion"
+      ],
+      "properties": {
+        "caseId": {
+          "type": "string",
+          "pattern": "^G[1-4]-[0-9]{3}$"
+        },
+        "groupId": {
+          "type": "string",
+          "enum": [
+            "G1",
+            "G2",
+            "G3",
+            "G4"
+          ]
+        },
+        "split": {
+          "type": "string",
+          "enum": [
+            "evolution",
+            "held-out"
+          ]
+        },
+        "curriculumSnapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$"
+        },
+        "offeringSnapshotId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$"
+        },
+        "inputFixtureRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "userQuery": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2000
+        },
+        "rubricVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "CaseGold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "groupId",
+        "status",
+        "reviewerIds",
+        "requiredFacts",
+        "requiredUnknowns",
+        "requiredClarification",
+        "forbiddenClaims",
+        "requiredSourceRefs",
+        "rubricVersion"
+      ],
+      "properties": {
+        "caseId": {
+          "type": "string",
+          "pattern": "^G[1-4]-[0-9]{3}$"
+        },
+        "groupId": {
+          "type": "string",
+          "enum": [
+            "G1",
+            "G2",
+            "G3",
+            "G4"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "reviewed",
+            "needs_review"
+          ]
+        },
+        "reviewerIds": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          }
+        },
+        "reviewedBy": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          }
+        },
+        "requiredFacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 500
+          }
+        },
+        "requiredUnknowns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 500
+          }
+        },
+        "requiredClarification": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 500
+          }
+        },
+        "forbiddenClaims": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 500
+          }
+        },
+        "requiredSourceRefs": {
+          "type": "array",
+          "minItems": 1
+        },
+        "rubricVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coursepilot-benchmark"
+version = "0.1.0"
+description = "D 模块：验收案例、隔离评分与多轮 RSI 的校验与检查入口"
+requires-python = ">=3.11"
+dependencies = [
+  "jsonschema==4.26.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest==9.1.1",
+  "ruff==0.16.10",
+]
+
+[tool.hatch.build.targets.wheel]
+only-include = ["validate_cases.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"

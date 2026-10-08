@@ -1,0 +1,46 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的学生已修记录，用于题面输入。与任何真实学生无关，不含真实成绩。",
+  "termId": "2024-2025-1",
+  "studentTerm": 3,
+  "majorId": "CS-2024",
+  "completedCourses": [
+    {
+      "courseCode": "08305011",
+      "courseName": "高等数学（一）",
+      "credits": 5.0,
+      "category": "学科基础课",
+      "termIndex": 1
+    },
+    {
+      "courseCode": "08305021",
+      "courseName": "程序设计基础",
+      "credits": 4.0,
+      "category": "学科基础课",
+      "termIndex": 1
+    },
+    {
+      "courseCode": "08305031",
+      "courseName": "核心通识课示例A",
+      "credits": 2.0,
+      "category": "通识课",
+      "termIndex": 1
+    },
+    {
+      "courseCode": "08305041",
+      "courseName": "离散数学",
+      "credits": 3.0,
+      "category": "学科基础课",
+      "termIndex": 2
+    },
+    {
+      "courseCode": "08305051",
+      "courseName": "大学物理",
+      "credits": 3.0,
+      "category": "学科基础课",
+      "termIndex": 2
+    }
+  ],
+  "englishTaughtCourse": null,
+  "overseasExchangeCredits": null
+}
