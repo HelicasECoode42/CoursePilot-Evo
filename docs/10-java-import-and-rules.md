@@ -32,7 +32,7 @@ flowchart LR
 
 **自动发布门槛。** 必须同时通过：路径/sheet/表头指纹匹配；必需列和课程号有效；没有静默覆盖的重复代码；学分与可核对的小计/总计一致；每条 hard rule 有支持的 `ruleType` 和来源坐标；课程数相对基线的差异在明确配置内；黄金样例与导入回归测试通过。全部通过才在数据库事务中发布；任一失败则拒绝发布并给出带单元格坐标的异常报告，受影响事实返回 UNKNOWN。首个模板基线需与原件做**一次**独立核对；之后同模板日常重导无需人工逐条审核。模板变化、新规则或难以解析的备注，由开发者补映射、样例、测试与代码审查后才进入下一版。
 
-**版本与接口。** 已发布快照不可就地改；相同 `fileHash + path + importerVersion` 重导幂等。解析器修正升版本，保留旧快照和差异报告。建议 `POST /api/v1/curriculum-imports` 返回 `PUBLISHED | REJECTED`、`snapshotId?`、`issues[]`、`diff`；`GET /api/v1/curriculum-snapshots/{id}` 返回来源。五周可先做 CLI + JSON 异常报告，再接 Spring Boot API。人工点“批准”不能绕过自动门槛。
+**版本与接口。** 已发布快照不可就地改；相同 `fileHash + path + importerVersion` 重导幂等。解析器修正升版本，保留旧快照和差异报告。建议 `POST /api/v1/curriculum-imports` 返回 `PUBLISHED | REJECTED`、`snapshotId?`、`issues[]`、`diff`；`GET /api/v1/curriculum-snapshots/{id}` 返回来源。可先用 CLI 验证解析，再按第五周任务接通 Spring Boot API。人工点“批准”不能绕过自动门槛。
 
 ## 3. SQL 存事实与版本，Java 计算规则
 
@@ -57,9 +57,8 @@ flowchart LR
 
 首版用明确标为 `SYNTHETIC` 的样例，例如 `星期三第3-4节{1-16周(单)}`，归一成 `Meeting(day, sections, weeks)`。两个教学班在星期、节次、周次三维同时相交才冲突。未知格式保留原文并返回 `UNKNOWN_TIME_FORMAT`，不能判“无冲突”。这验证算法，不证明当期开课。
 
-## 6. 五周验收
+## 6. 验收与排期入口
 
-1. W1：A 固定路径与模板，产出 preview/异常/黄金样例；B 冻结 SQL、DTO、规则类型。真实班次状态 `UNVERIFIED_NO_ACCESS`。
-2. W2：A 交自动校验、失败阻断、幂等和原子发布；首个模板基线一次独立核对；B 交 SQL、核对和 JUnit 对照。
-3. W3：B 用模拟班次验证时间解析与冲突；C/E 集成并清楚显示真实/模拟/未知。
-4. W4-5：Benchmark 分开统计真实培养规则任务与模拟时间算法任务，保留失败例和版本。真实选课页样例出现后单独验证，不阻塞五周主线。
+完整模块业务功能见[A 数据](trd/a-data.md)与[B Java](trd/b-verifier.md)，本页只维护导入与规则实施设计。课程周次以[第五至第八周安排](19-delivery-plan.md)为准。
+
+导入须通过模板基线独立核对、异常阻断、重复导入和原子发布验收；学业核对与独立预期一致。模拟时间算法与真实培养规则分别统计，未知资料不能判通过，失败例和版本保留。真实选课页样例出现后单独核验来源与字段，不作为当前已实现能力。

@@ -4,6 +4,10 @@
 
 **当前状态：开发设计、可校验接口契约、仓库检查工具和独立 HTML 示例。Java/Python/Vue 服务、真实班次接入和 RSI 指标尚未实现。**五人协作，一个计算机培养路径先行；当前第四周末，第八周提交。
 
+## 先看懂项目，再开始开发
+
+先读[团队总览：业务流程、核心对象、模块分工](docs/15-team-baseline-and-batches.md)，再到[个人模块业务说明与 TRD](docs/05-team-and-sub-trds.md)理解完整职责，最后领取[本期业务任务](docs/19-delivery-plan.md)。看板标题是业务交付，接口和实现步骤在卡片里。
+
 ## 团队进度入口
 
 [开发与验收看板](https://github.com/users/HelicasECoode42/projects/1) · [队员操作说明](docs/18-team-progress-guide.md) · [第五至第八周排期草案（待核对）](docs/19-delivery-plan.md)。仅维护周次；任务和 Bug 使用同一看板，审批证据保留在关联 PR。
@@ -13,10 +17,10 @@
 | 你要做什么 | 入口 |
 | --- | --- |
 | 看学生体验 | [HTML 示例](demo/coursepilot-guided-demo.html)及[交接说明](demo/README.md)，下载后用浏览器打开 |
-| 看开发范围与批次 | [开发大纲](docs/15-team-baseline-and-batches.md)、[五人模块](docs/05-team-and-sub-trds.md) |
+| 看项目怎么运转、每人最终交什么 | [团队业务总览](docs/15-team-baseline-and-batches.md)、[模块阅读入口](docs/05-team-and-sub-trds.md) |
 | 了解用户需要 | [PRD](docs/02-prd.md)、[选课需求与资料研究](docs/14-student-choice-research-and-ux.md) |
 | 实现接口 | [总体 TRD](docs/03-trd.md)、[行为契约](docs/04-infrastructure-workflow.md)、[OpenAPI/Schema](contracts/README.md) |
-| 领取模块 | [A 数据](docs/trd/a-data.md)、[B Java](docs/trd/b-verifier.md)、[C Agent](docs/trd/c-agent.md)、[D RSI](docs/trd/d-benchmark-rsi.md)、[E Web](docs/trd/e-web-integration.md) |
+| 看自己的完整模块职责 | [A 数据](docs/trd/a-data.md)、[B Java](docs/trd/b-verifier.md)、[C Agent](docs/trd/c-agent.md)、[D RSI](docs/trd/d-benchmark-rsi.md)、[E Web](docs/trd/e-web-integration.md) |
 | 提交与 debug | [工程规范](docs/16-engineering-and-debugging.md)、[GitHub 协作](docs/12-github-collaboration.md)、[PR 模板](.github/pull_request_template.md) |
 | 填志愿与账号 | [人员表模板](docs/team/team-signup-template.csv)，导入金山表格；填写后的表不要提交公开仓库 |
 | 看图与实验 | [Mermaid 图](docs/diagrams/README.md)、[Benchmark 协议](docs/07-benchmark-protocol.md) |

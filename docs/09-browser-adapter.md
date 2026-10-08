@@ -4,7 +4,7 @@
 
 ## 1. 实际观察与安全边界
 
-脚本匹配 `https://jwxt.shu.edu.cn/jwglxt/xsxk/*`，`@grant none`，重写页面的 `window.jQuery.post` 回调并观察页面原有返回值。脚本依赖 `jQuery`、`_path`、`initXz()`、`ckjxbrsxx()` 和 DOM。它还在初始化时调用 `initXz()` 并点击 `btn_yd`；按钮实际副作用未经验证，因此**不可原样当作只读采集器安装或运行**。`process()` 里 `rawData.filter(x => rawData[x].kch_id == kch_id)` 也有疑似索引错误。待以后有授权页面访问时再核对按钮行为与样例响应，并写独立、无自动点击和无提交动作的只读 Adapter。五周首版只做静态字段契约与模拟样例。
+脚本匹配 `https://jwxt.shu.edu.cn/jwglxt/xsxk/*`，`@grant none`，重写页面的 `window.jQuery.post` 回调并观察页面原有返回值。脚本依赖 `jQuery`、`_path`、`initXz()`、`ckjxbrsxx()` 和 DOM。它还在初始化时调用 `initXz()` 并点击 `btn_yd`；按钮实际副作用未经验证，因此**不可原样当作只读采集器安装或运行**。`process()` 里 `rawData.filter(x => rawData[x].kch_id == kch_id)` 也有疑似索引错误。待以后有授权页面访问时再核对按钮行为与样例响应，并写独立、无自动点击和无提交动作的只读 Adapter。首版只做静态字段契约与模拟样例。
 
 | 页面响应/请求（脚本中的子串） | 脚本行为 | 直接可见字段/状态 | 待验证事项 |
 | --- | --- | --- | --- |

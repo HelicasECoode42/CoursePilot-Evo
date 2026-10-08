@@ -1,6 +1,6 @@
 # 接口契约基线 v1
 
-状态：开发契约，尚未实现服务。OpenAPI/Schema 是字段真源，行为不变量见 [共享契约](../docs/04-infrastructure-workflow.md)。模块 TRD 不重复创造同名 DTO。当前版本为 1.0，W1 的具体基模 ID/首次培养路径还需要填入配置。
+状态：开发契约，尚未实现服务。OpenAPI/Schema 是字段真源，行为不变量见 [共享契约](../docs/04-infrastructure-workflow.md)。模块 TRD 不重复创造同名 DTO。当前版本为 1.0，开工时的具体基模 ID/首次培养路径还需要填入配置。
 
 - [Java OpenAPI](java.openapi.json)：课程/记录/导入/核对/评价/班次/核验。
 - [Python OpenAPI](planning.openapi.json)：匿名演示会话、学生 API 网关、规划与受限报告。

@@ -1,5 +1,5 @@
 name: 开发任务
-description: 一项可验收的小任务；正式发布前确认负责人、关联人和范围
+description: 一项可验收的业务交付；点开再写实施细节
 title: "[任务] "
 body:
   - type: markdown
@@ -9,14 +9,14 @@ body:
     id: outcome
     attributes:
       label: 交付结果与范围
-      description: 标题写动作＋对象＋结果；正文明确本任务负责的接口/行为，以及不包含或由谁负责的相邻工作。
-      value: "本任务负责：\n\n不包含／由他人负责："
+      description: 标题写用户/队友获得的能力。先说明完成后能做什么、对应模块功能编号、本次范围和交接；实现步骤放下面。
+      value: "完成后能做什么：\n\n模块功能编号与文档：\n\n本次主要做什么：\n\n交给谁／相邻责任："
     validations:
       required: true
   - type: textarea
     id: contract
     attributes:
-      label: 输入输出与契约
+      label: 开发参考：输入输出、接口与实现建议
       description: 写输入来自谁、输出交给谁、准确接口/对象、TRD 和 Schema 链接；不能只写“接通后端”。
     validations:
       required: true
