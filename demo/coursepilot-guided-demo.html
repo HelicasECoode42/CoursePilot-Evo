@@ -1,65 +1,520 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#ffffff">
-<title>CoursePilot · 选一份适合你的课表</title>
-<style>
-:root{--ink:#18312b;--soft:#65736d;--green:#226c50;--wash:#f2f7f4;--line:#e1e8e3;font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);background:#fff;font-synthesis:none}*{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button,a,input,select{touch-action:manipulation}button{cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #69a98b;outline-offset:4px}button{color:inherit}a{color:var(--green)}.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.skip{position:absolute;top:-80px;left:20px}.skip:focus{top:14px;z-index:20;background:white;padding:14px}.bar{height:78px;max-width:1100px;margin:auto;padding:0 30px;display:flex;align-items:center;justify-content:space-between}.brand{font-size:20px;font-weight:650;letter-spacing:-.7px;display:flex;gap:10px;align-items:center}.mark{height:24px;width:24px;border:6px solid var(--green);border-radius:50% 50% 50% 3px;transform:rotate(-18deg)}.small{font-size:12px;color:var(--soft);font-weight:400;letter-spacing:0}.record{border:0;background:transparent;color:var(--soft);padding:10px;font-size:13px}.record:hover{color:var(--green)}main{width:min(640px,calc(100% - 40px));margin:32px auto 20px;min-height:500px}.progress{font-size:13px;color:var(--soft);display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}.track{width:90px;height:3px;background:#e9eeeb;border-radius:4px;overflow:hidden}.track span{display:block;height:100%;background:var(--green);width:15%}h1{font-size:clamp(28px,4vw,36px);font-weight:600;line-height:1.35;letter-spacing:-1px;margin:0 0 13px;text-wrap:balance}h2{font-size:21px;margin:0 0 15px;font-weight:600}p{line-height:1.7}.intro{margin:0 0 26px;color:var(--soft);font-size:14px}.options{display:grid;grid-template-columns:1fr 1fr;gap:10px}.option{position:relative;border:1px solid var(--line);border-radius:12px;background:white;text-align:left;padding:15px 17px;min-height:77px;display:flex;align-items:center;gap:12px;transition:border-color .12s,background-color .12s}.option:hover{border-color:#91b59f;background:#fbfdfb}.option[aria-pressed=true]{border-color:var(--green);background:var(--wash)}.option strong{display:block;font-size:16px;font-weight:550;margin-bottom:4px}.option small{display:block;color:var(--soft);font-size:12px;line-height:1.5}.selection{border:1px solid #cbd6ce;border-radius:50%;width:19px;height:19px;flex:none}.option[aria-pressed=true] .selection{background:var(--green);border-color:var(--green);position:relative}.option[aria-pressed=true] .selection:after{content:'✓';color:white;position:absolute;font-size:12px;top:0;left:4px}.controls{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-top:27px;padding-top:20px}.next{background:var(--green);border:0;color:white;font-weight:550;padding:13px 25px;border-radius:9px;min-width:125px}.next:hover{background:#18543d}.back,.textbutton{border:0;background:transparent;color:var(--soft);padding:12px 0;font-size:14px}.back:hover,.textbutton:hover{color:var(--green)}.back:disabled{visibility:hidden}.helper{margin:0;min-height:23px;font-size:13px;color:#8b4b24}.route-note{font-size:12px;color:var(--soft);margin:13px 0 0}.wide .option{min-height:75px}.teachlist{display:grid;gap:10px}.teacher{display:flex;align-items:center;gap:14px;border:1px solid var(--line);padding:14px 16px;border-radius:11px}.teacher.selected{border-color:var(--green);background:var(--wash)}.teacher .teacherbody{flex:1;min-width:0}.teacher strong{font-size:15px;font-weight:550}.teacher p{margin:4px 0 0;font-size:12px;color:var(--soft)}.linkbtn{border:0;background:none;color:var(--green);font-size:12px;padding:8px}.pick{border:1px solid #b9cbc0;background:white;border-radius:6px;padding:7px 12px;font-size:12px;white-space:nowrap}.selected .pick{background:var(--green);color:white;border-color:var(--green)}.field{margin:16px 0}.field label{display:block;font-size:13px;color:var(--soft);margin-bottom:8px}input[type=search],input[type=text],select{width:100%;border:1px solid #cbd7ce;border-radius:9px;padding:12px 14px;background:white;color:var(--ink)}.seg{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}.seg button{border:1px solid var(--line);padding:10px 13px;background:white;border-radius:7px;font-size:13px}.seg button[aria-pressed=true]{background:var(--wash);color:var(--green);border-color:var(--green)}.hint{background:#f8faf8;border-radius:9px;padding:13px 15px;color:var(--soft);font-size:13px;line-height:1.65;margin-top:18px}.hint.amber{background:#fff8ed;color:#875817}.summaryrow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:22px}.pill{background:var(--wash);border-radius:6px;padding:6px 9px;font-size:12px;color:var(--green)}.candidate{border-top:1px solid var(--line);padding:18px 0;display:grid;grid-template-columns:1fr auto;gap:10px}.candidate strong{font-size:17px;font-weight:550}.candidate .meta{font-size:13px;color:var(--soft);margin:6px 0}.candidate .reason{font-size:13px;margin:10px 0 0;line-height:1.7}.pending{font-size:12px;color:#936329;background:#fff5e5;padding:6px 8px;border-radius:5px;height:fit-content}.footer{max-width:640px;margin:25px auto 30px;text-align:center;font-size:11px;color:#6d7a73;padding:0 20px}.detail[hidden]{display:none}.detail{position:fixed;inset:0;background:#17302650;z-index:10;display:flex;align-items:center;justify-content:center;padding:22px}.sheet{width:min(520px,100%);max-height:85dvh;overflow:auto;overscroll-behavior:contain;background:white;border-radius:16px;padding:27px;box-shadow:0 25px 80px #0d261e30}.sheethead{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.close{border:0;background:#f2f5f3;padding:8px 13px;border-radius:7px;font-size:13px}.detail p{font-size:14px;color:var(--soft)}.datarow{border-top:1px solid var(--line);padding:13px 0;font-size:14px;display:flex;justify-content:space-between;gap:20px}.datarow small{color:var(--soft)}.evidence{border-left:2px solid #c8d9ce;padding-left:13px;margin:16px 0}.evidence p{font-size:13px}.detail h3{font-size:15px;font-weight:600;margin-top:22px}.profileFoot{font-size:12px;color:#926c38!important}.dirline{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:18px;color:var(--soft);font-size:12px}.dirline button{padding:4px}.timeOptions{grid-template-columns:repeat(3,1fr)}.timeOptions .option{min-height:62px;justify-content:center;padding:12px}.timeOptions .option strong{margin:0;font-size:14px}.timeOptions .selection{width:15px;height:15px}.timeOptions .option[aria-pressed=true] .selection:after{font-size:10px;left:2px;top:-1px}@media(max-width:540px){.bar{padding:0 20px;height:67px}.brand{font-size:18px}.brand .small{display:none}main{margin-top:22px;min-height:0}h1{font-size:28px}.intro{font-size:13px;margin-bottom:20px}.option{padding:12px;min-height:83px;gap:8px}.option strong{font-size:14px}.option small{font-size:11px}.selection{width:17px;height:17px}.option[aria-pressed=true] .selection:after{left:3px;top:-1px}.controls{margin-top:20px}.teacher{padding:12px;gap:6px}.teacher strong{font-size:13px}.teacher .linkbtn{padding:6px;font-size:11px}.candidate{grid-template-columns:1fr}.candidate .pending{width:fit-content}.timeOptions{grid-template-columns:repeat(2,1fr)}.sheet{padding:22px}.footer{margin-top:20px}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>CoursePilot · 选一份适合你的课表</title>
+    <style>
+
+:root{--ink:#18312b;--soft:#65736d;--green:#226c50;--wash:#f2f7f4;--line:#e1e8e3;font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);background:#fff;font-synthesis:none}*{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button,a,input,select{touch-action:manipulation}button{cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #69a98b;outline-offset:4px}button{color:inherit}a{color:var(--green)}.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.skip{position:absolute;top:-80px;left:20px}.skip:focus{top:14px;z-index:20;background:white;padding:14px}.bar{height:78px;max-width:1100px;margin:auto;padding:0 30px;display:flex;align-items:center;justify-content:space-between}.brand{font-size:20px;font-weight:650;letter-spacing:-.7px;display:flex;gap:10px;align-items:center}.mark{height:24px;width:24px;border:6px solid var(--green);border-radius:50% 50% 50% 3px;transform:rotate(-18deg)}.small{font-size:12px;color:var(--soft);font-weight:400;letter-spacing:0}.record{border:0;background:transparent;color:var(--soft);padding:10px;font-size:13px}.record:hover{color:var(--green)}main{width:min(640px,calc(100% - 40px));margin:32px auto 20px;min-height:500px}.progress{font-size:13px;color:var(--soft);display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}.track{width:90px;height:3px;background:#e9eeeb;border-radius:4px;overflow:hidden}.track span{display:block;height:100%;background:var(--green);width:15%}h1{font-size:clamp(28px,4vw,36px);font-weight:600;line-height:1.35;letter-spacing:-1px;margin:0 0 13px;text-wrap:balance}h2{font-size:21px;margin:0 0 15px;font-weight:600}p{line-height:1.7}.intro{margin:0 0 26px;color:var(--soft);font-size:14px}.options{display:grid;grid-template-columns:1fr 1fr;gap:10px}.option{position:relative;border:1px solid var(--line);border-radius:12px;background:white;text-align:left;padding:15px 17px;min-height:77px;display:flex;align-items:center;gap:12px;transition:border-color .12s,background-color .12s}.option:hover{border-color:#91b59f;background:#fbfdfb}.option[aria-pressed=true]{border-color:var(--green);background:var(--wash)}.option strong{display:block;font-size:16px;font-weight:550;margin-bottom:4px}.option small{display:block;color:var(--soft);font-size:12px;line-height:1.5}.selection{border:1px solid #cbd6ce;border-radius:50%;width:19px;height:19px;flex:none}.option[aria-pressed=true] .selection{background:var(--green);border-color:var(--green);position:relative}.option[aria-pressed=true] .selection:after{content:'✓';color:white;position:absolute;font-size:12px;top:0;left:4px}.controls{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-top:27px;padding-top:20px}.next{background:var(--green);border:0;color:white;font-weight:550;padding:13px 25px;border-radius:9px;min-width:125px}.next:hover{background:#18543d}.back,.textbutton{border:0;background:transparent;color:var(--soft);padding:12px 0;font-size:14px}.back:hover,.textbutton:hover{color:var(--green)}.back:disabled{visibility:hidden}.helper{margin:0;min-height:23px;font-size:13px;color:#8b4b24}.route-note{font-size:12px;color:var(--soft);margin:13px 0 0}.wide .option{min-height:75px}.teachlist{display:grid;gap:10px}.teacher{display:flex;align-items:center;gap:14px;border:1px solid var(--line);padding:14px 16px;border-radius:11px}.teacher.selected{border-color:var(--green);background:var(--wash)}.teacher .teacherbody{flex:1;min-width:0}.teacher strong{font-size:15px;font-weight:550}.teacher p{margin:4px 0 0;font-size:12px;color:var(--soft)}.linkbtn{border:0;background:none;color:var(--green);font-size:12px;padding:8px}.pick{border:1px solid #b9cbc0;background:white;border-radius:6px;padding:7px 12px;font-size:12px;white-space:nowrap}.selected .pick{background:var(--green);color:white;border-color:var(--green)}.field{margin:16px 0}.field label{display:block;font-size:13px;color:var(--soft);margin-bottom:8px}input[type=search],input[type=text],select{width:100%;border:1px solid #cbd7ce;border-radius:9px;padding:12px 14px;background:white;color:var(--ink)}.seg{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}.seg button{border:1px solid var(--line);padding:10px 13px;background:white;border-radius:7px;font-size:13px}.seg button[aria-pressed=true]{background:var(--wash);color:var(--green);border-color:var(--green)}.hint{background:#f8faf8;border-radius:9px;padding:13px 15px;color:var(--soft);font-size:13px;line-height:1.65;margin-top:18px}.hint.amber{background:#fff8ed;color:#875817}.summaryrow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:22px}.pill{background:var(--wash);border-radius:6px;padding:6px 9px;font-size:12px;color:var(--green)}.candidate{border-top:1px solid var(--line);padding:18px 0;display:grid;grid-template-columns:1fr auto;gap:10px}.candidate strong{font-size:17px;font-weight:550}.candidate .meta{font-size:13px;color:var(--soft);margin:6px 0}.candidate .reason{font-size:13px;margin:10px 0 0;line-height:1.7}.pending{font-size:12px;color:#936329;background:#fff5e5;padding:6px 8px;border-radius:5px;height:fit-content}.footer{max-width:640px;margin:25px auto 30px;text-align:center;font-size:11px;color:#6d7a73;padding:0 20px}.detail[hidden]{display:none}.detail{position:fixed;inset:0;background:#17302650;z-index:10;display:flex;align-items:center;justify-content:center;padding:22px}.sheet{width:min(520px,100%);max-height:85dvh;overflow:auto;overscroll-behavior:contain;background:white;border-radius:16px;padding:27px;box-shadow:0 25px 80px #0d261e30}.sheethead{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.close{border:0;background:#f2f5f3;padding:8px 13px;border-radius:7px;font-size:13px}.detail p{font-size:14px;color:var(--soft)}.datarow{border-top:1px solid var(--line);padding:13px 0;font-size:14px;display:flex;justify-content:space-between;gap:20px}.datarow small{color:var(--soft)}.evidence{border-left:2px solid #c8d9ce;padding-left:13px;margin:16px 0}.evidence p{font-size:13px}.detail h3{font-size:15px;font-weight:600;margin-top:22px}.profileFoot{font-size:12px;color:#926c38!important}.dirline{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:18px;color:var(--soft);font-size:12px}.dirline button{padding:4px}.timeOptions{display:grid;gap:10px;grid-template-columns:repeat(3,1fr)}.timeOptions .option{min-height:62px;justify-content:center;padding:12px}.timeOptions .option strong{margin:0;font-size:14px}.timeOptions .selection{width:15px;height:15px}.timeOptions .option[aria-pressed=true] .selection:after{font-size:10px;left:2px;top:-1px}@media(max-width:540px){.bar{padding:0 20px;height:67px}.brand{font-size:18px}.brand .small{display:none}main{margin-top:22px;min-height:0}h1{font-size:28px}.intro{font-size:13px;margin-bottom:20px}.option{padding:12px;min-height:83px;gap:8px}.option strong{font-size:14px}.option small{font-size:11px}.selection{width:17px;height:17px}.option[aria-pressed=true] .selection:after{left:3px;top:-1px}.controls{margin-top:20px}.teacher{padding:12px;gap:6px}.teacher strong{font-size:13px}.teacher .linkbtn{padding:6px;font-size:11px}.candidate{grid-template-columns:1fr}.candidate .pending{width:fit-content}.timeOptions{grid-template-columns:repeat(2,1fr)}.sheet{padding:22px}.footer{margin-top:20px}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+
+.schedule-set{border:0;margin:15px 0 0;padding:0 0 13px;border-bottom:1px solid var(--line)}
+.schedule-set>legend{font-size:14px;font-weight:600;margin-bottom:4px}
+.slot-kind{font-size:12px;color:var(--soft);margin:9px 0 5px}
+.priority-list{margin:13px 0;padding:0;border-top:1px solid var(--line);list-style:none}
+.priority-list li{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
+.priority-number{width:22px;color:var(--green);font-size:13px;text-align:center}
+.priority-name{flex:1;font-size:14px;font-weight:550}
+.move{width:32px;height:32px;border:1px solid var(--line);border-radius:6px;color:var(--green);background:#fff}
+.checkline{display:flex;align-items:flex-start;gap:8px;margin:10px 0;font-size:13px}
+.checkline input{width:16px;height:16px;margin:2px 0 0;accent-color:var(--green)}
+.record-rows,.summary{margin:15px 0;border-top:1px solid var(--line)}
+.summary-row{display:grid;grid-template-columns:140px minmax(0,1fr);gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}
+.summary-row dt{color:var(--soft)}
+.summary-row dd{min-width:0;margin:0;overflow-wrap:anywhere}
+.pillrow{display:flex;flex-wrap:wrap;gap:6px}
+.materials-choice{margin:16px 0;padding:12px;border:1px solid var(--line);border-radius:7px}
+@media(max-width:540px){.summary-row{grid-template-columns:105px minmax(0,1fr);gap:9px}.priority-name{font-size:13px}}
+
+.slotgrid{display:grid;grid-template-columns:48px repeat(7,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin:4px 0 0;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.slotgrid button{touch-action:none}
+.slot-corner{display:block;background:#fff}
+.slot-head{min-height:30px;padding:0 2px;border:0;background:#fff;color:var(--soft);font-size:12px;line-height:1.2}
+.slot-head:hover{background:var(--wash);color:var(--green)}
+.slot{position:relative;min-height:34px;padding:0;border:0;background:#fff;display:flex;align-items:center;justify-content:center}
+.slot:hover{box-shadow:inset 0 0 0 1px #91b59f}
+.slot.is-must{background:rgba(34,108,80,.22);box-shadow:inset 0 0 0 1px #226c50}
+.slot.is-prefer{background:rgba(201,146,42,.22);box-shadow:inset 0 0 0 1px #c9922a}
+.slot:focus-visible,.slot-head:focus-visible{z-index:1}
+.slot-mark{display:block;width:10px;height:10px;box-sizing:border-box;pointer-events:none}
+.slot.is-must .slot-mark{background:#226c50}
+.slot.is-prefer .slot-mark{border:2px solid #c9922a;border-radius:50%}
+@media(max-width:540px){.slotgrid{grid-template-columns:40px repeat(7,minmax(0,1fr))}.slot-head{min-height:28px;font-size:11px}.slot{min-height:30px}.slot-mark{width:8px;height:8px}.slot.is-prefer .slot-mark{border-width:1.5px}}
 </style>
-</head>
-<body>
-<a class="skip" href="#question">跳到当前问题</a>
-<header class="bar"><div class="brand"><span class="mark" aria-hidden="true"></span>CoursePilot <span class="small">交互示例</span></div><button class="record" id="recordBtn" type="button">我的学业记录</button></header>
-<main id="main"><div class="progress"><span id="phase">这学期的想法</span><div class="track" aria-hidden="true"><span id="progressFill"></span></div></div><section id="screen" aria-labelledby="question"></section><p id="feedback" class="helper" role="status" aria-live="polite"></p><nav class="controls" aria-label="问题导航"><button class="back" id="back" type="button">返回上一页</button><button class="next" id="next" type="button">选好了，下一步</button></nav></main>
-<footer class="footer">课程、教师、评价和学业记录均为演示占位；不会实际选课。</footer>
-<div class="detail" id="detail" hidden><section class="sheet" role="dialog" aria-modal="true" aria-labelledby="detailTitle"><div class="sheethead"><h2 id="detailTitle"></h2><button type="button" class="close" id="close">关闭</button></div><div id="detailBody"></div></section></div>
-<script>
-'use strict';
-const $=id=>document.getElementById(id);
-const motives=[['gpa','想拿高绩点','看给分反馈和考核方式'],['easy','想轻松一点','少签到、少作业或少汇报'],['reviews','想上评价好的课','讲得清楚，体验也好'],['teacher','想上某位老师的课','有特别想选的老师或课程'],['interest','想学点感兴趣的','探索新主题，不急着定方向'],['career','为未来工作做准备','先了解方向，再找相关课程'],['study','为升学打好基础','补基础，兼顾成绩与训练'],['time','想要合适的课表','留出实习、自习和生活时间']];
-const preferences=[['grading','给分反馈较友好','仍需结合个人投入'],['attendance','尽量少签到','看考勤要求和近期反馈'],['homework','作业量少一些','不想每周投入太多'],['group','少小组任务','减少组队的不确定性'],['presentation','少汇报和展示','不想频繁做 pre'],['exam','尽量避开闭卷','更愿意报告或项目考核']];
-const directions={
-'计算机科学与技术':[['backend','后端与业务系统','做接口、处理数据、维护服务','常见工作是把业务需求做成稳定的服务和接口。可关注数据库、系统、网络等课程主题；是否有对应课程仍需查本校大纲。'],['web','Web 与交互开发','把需求变成可操作的网页','常见工作是实现页面和交互，处理不同设备上的体验。可探索 Web、软件工程和人机交互主题。'],['data','数据分析与 BI','用数据回答问题、做报表','常见工作涉及数据查询、指标分析与可视化。可探索统计、数据库和数据分析主题。'],['ai','算法与 AI','训练和评估模型解决任务','任务可能涉及推荐、识别和生成。通常要补数学、算法与实验能力；课程选择还要结合已有基础。']],
-'自动化与电气':[['control','控制与自动化','编程控制设备，做调试','常见任务包括控制程序、设备配置和现场调试。可探索控制原理、电路、PLC 与实验主题。'],['embedded','嵌入式与软件控制','让软件与硬件配合工作','可探索程序设计、电子电路和系统实验。这里仅为方向示例，尚未核验该专业培养方案。']],
-'机械类':[['mechanical','结构与机械设计','做结构方案、三维图与工程图','常见任务涉及结构设计、制图及制造验证。可探索机械设计、制图、材料与工艺主题。'],['manufacturing','制造与工艺','了解产品怎样被制造出来','可探索制造方法、材料与工艺主题。这里仅为方向示例，尚未核验该专业培养方案。']],
-'经管与财会':[['business','商业分析与运营','分析市场和用户，评估方案','可探索统计、市场研究和运营分析主题。岗位不只看工具，还需要理解业务问题。'],['accounting','会计与审计','理解账务报表，完成核查','可探索会计、审计、税务与法规主题。方向示例不代表已接入该专业教学计划。']]
-};
-const courseRows=[{id:'a',name:'示例数据库课程',teacher:'示例教师甲',summary:'有往年给分与作业反馈',review:'示例评价：作业频率较低，评分说明比较清楚。',caveat:'未提供本学期考勤要求；不能判断是否签到。',tags:['作业量反馈','评分规则反馈']},{id:'b',name:'示例系统课程',teacher:'示例教师乙',summary:'有往年授课与项目反馈',review:'示例评价：讲解较细，课程项目需要持续投入。',caveat:'工作量与投入因人而异；没有可信成绩统计。',tags:['授课体验反馈','项目训练反馈']}];
-const state={motives:[],preferences:[],career:[],interest:'',pinned:null,pinMode:'prefer',slots:[],timeMode:'hard',major:'计算机科学与技术',route:['goals'],index:0};
-const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function toggle(arr,v){const i=arr.indexOf(v);if(i<0)arr.push(v);else arr.splice(i,1)}
-function options(items,group){return `<div class="options">${items.map(([v,label,desc])=>`<button class="option" type="button" data-group="${group}" data-value="${escape(v)}" aria-pressed="${state[group].includes(v)}"><span class="selection" aria-hidden="true"></span><span><strong>${escape(label)}</strong><small>${escape(desc)}</small></span></button>`).join('')}</div>`}
-function title(q,desc){return `<h1 id="question" tabindex="-1">${q}</h1><p class="intro">${desc}</p>`}
-function rebuildRoute(){state.route=['goals'];if(state.motives.some(x=>['gpa','easy','reviews','study'].includes(x)))state.route.push('preferences');if(state.motives.includes('career'))state.route.push('career');if(state.motives.includes('interest'))state.route.push('interest');state.route.push('teachers','time','result')}
-function render(moveFocus=true){const page=state.route[state.index];$('feedback').textContent='';$('back').disabled=state.index===0;$('next').textContent=page==='result'?'重新调整条件':'选好了，下一步';$('phase').textContent=({goals:'这学期的想法',preferences:'上课与考核偏好',career:'了解发展方向',interest:'想探索的主题',teachers:'想上的课程和老师',time:'你的时间安排',result:'课程候选'})[page];$('progressFill').style.width=`${(state.index+1)/state.route.length*100}%`;let html='';
-if(page==='goals')html=title('这学期选课，你最在意什么？','可以同时选几个。后面只问与你有关的问题。')+options(motives,'motives');
-if(page==='preferences')html=title('什么样的课，更适合你这学期？','这些偏好可以同时存在，也可以都不选。')+options(preferences,'preferences');
-if(page==='career'){const list=directions[state.major];html=title('哪个方向，你想多了解一点？',`按${escape(state.major)}展示。选一个或多个，也可以暂时不决定。`)+options(list.map(x=>x.slice(0,3)),'career')+`<div class="dirline"><span>先看工作做什么，再判断自己是否感兴趣。</span><button class="linkbtn" type="button" data-action="direction">看方向介绍</button></div>`;}
-if(page==='interest')html=title('有什么主题，让你想试试看？','兴趣探索也可以只是这学期的一次尝试。')+`<div class="field"><label for="interest">想学的主题</label><input type="text" id="interest" name="interest" autocomplete="off" value="${escape(state.interest)}" placeholder="例如：摄影、心理学、人工智能、文学…"></div><p class="route-note">没有具体想法也可以跳过，先看看有评价和内容介绍的课程。</p>`;
-if(page==='teachers')html=title('有特别想上的课程或老师吗？','选择具体的课程与老师；没有的话，直接下一步。')+`<div class="field"><label class="sr" for="courseSearch">搜索课程或教师</label><input type="search" id="courseSearch" name="courseSearch" autocomplete="off" placeholder="搜索课程或老师（目前仅示例）…"></div><div class="teachlist" id="teacherList">${teachersHTML(courseRows)}</div><div class="seg" aria-label="指定教师的优先级"><button type="button" data-pinmode="prefer" aria-pressed="${state.pinMode==='prefer'}">优先考虑，可协商</button><button type="button" data-pinmode="must" aria-pressed="${state.pinMode==='must'}">必须保留这个老师和课</button></div>`;
-if(page==='time')html=title('哪些时间，你希望不排课？','先选时段，再决定这是底线还是偏好。')+`<div class="options timeOptions">${['周一','周二','周三','周四','周五','早八'].map(v=>`<button type="button" class="option" data-group="slots" data-value="${v}" aria-pressed="${state.slots.includes(v)}"><span class="selection" aria-hidden="true"></span><strong>${v}</strong></button>`).join('')}</div><div class="seg" aria-label="时间要求的强度"><button type="button" data-timemode="hard" aria-pressed="${state.timeMode==='hard'}">这些时间必须空出来</button><button type="button" data-timemode="soft" aria-pressed="${state.timeMode==='soft'}">尽量避开，可以商量</button></div><p class="route-note">正式产品可以细选星期、节次和周次；这里只演示选择方式。</p>`;
-if(page==='result'){const selected=motives.filter(x=>state.motives.includes(x[0])).map(x=>x[1]);html=title('先看看这些课程和老师','示例候选展示了比较方式；真实课程匹配尚未接入。')+`<div class="summaryrow">${selected.map(x=>`<span class="pill">${escape(x)}</span>`).join('')}${state.slots.length?`<span class="pill">${escape(state.slots.join('、'))}${state.timeMode==='hard'?'必须空出':'尽量空出'}</span>`:''}</div><div class="hint amber">本学期上课时间尚未取得。现在可以保存课程意愿，暂时不能确认课表无冲突。</div>${courseRows.map(x=>`<article class="candidate"><div><strong>${x.name}</strong><p class="meta">${x.teacher} · 示范课程与教师</p><p class="reason">${escape(x.summary)}。与你的目标是否匹配，需要真实课程和评价资料核对。</p><button class="linkbtn" type="button" data-review="${x.id}">看课程与教师评价</button></div><span class="pending">时间待确认</span></article>`).join('')}<p class="route-note">未完成的必修要求与建议修读清单会从你的学业记录生成；当前仅为占位，未计算真实学分缺口。</p>`;}
-$('screen').innerHTML=html;if(moveFocus)$('question').focus({preventScroll:true});window.scrollTo(0,0);}
-function teachersHTML(rows){return rows.length?rows.map(x=>`<article class="teacher ${state.pinned===x.id?'selected':''}"><div class="teacherbody"><strong>${x.name} · ${x.teacher}</strong><p>${x.summary}（示例）</p></div><button class="linkbtn" type="button" data-review="${x.id}">评价</button><button class="pick" type="button" data-pin="${x.id}" aria-pressed="${state.pinned===x.id}">${state.pinned===x.id?'已选':'想上'}</button></article>`).join(''):'<p class="intro">示例库里没有这个课程或老师。正式产品会从已导入资料检索。</p>'}
-let focusBeforeDialog=null;
-function openDetail(titleText,body){focusBeforeDialog=document.activeElement;$('detailTitle').textContent=titleText;$('detailBody').innerHTML=body;$('detail').hidden=false;$('main').inert=true;document.querySelector('.bar').inert=true;$('close').focus()}
-function closeDetail(){$('detail').hidden=true;$('main').inert=false;document.querySelector('.bar').inert=false;focusBeforeDialog?.focus()}
-function review(id){const c=courseRows.find(x=>x.id===id);openDetail(c.name+' · '+c.teacher,`<p class="profileFoot">以下均为虚构示例评价，未接入本校评价网站。</p><h3>上课体验</h3><div class="evidence"><p>${c.review}</p><p class="small">来源：演示评价文档 · 修读学期：示例往年 · 1 条示例</p></div><h3>签到、给分与考核</h3><p>${c.caveat}</p><h3>学分、先修与开课时间</h3><p>真实大纲、学分和本学期班次待导入；不能依靠评价文字推断课程时间。</p><button class="next" type="button" data-dialogpin="${id}">${state.pinned===id?'取消这项意愿':'想上这位老师的这门课'}</button>`)}
-$('recordBtn').onclick=()=>openDetail('你的学业记录',`<p class="profileFoot">这里展示已导入资料的入口，当前没有真实学生数据。</p><div class="field"><label for="major">专业（演示切换）</label><select id="major" name="major">${Object.keys(directions).map(x=>`<option ${state.major===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="datarow"><span>已修课程</span><small>待导入记录</small></div><div class="datarow"><span>未完成的必修要求</span><small>待教学计划核对</small></div><div class="datarow"><span>各类学分缺口</span><small>待记录完整后计算</small></div><p>正式使用时，这些信息来自已关联记录。你只需核对、纠错或补充缺失内容。</p>`);
-$('detailBody').addEventListener('change',e=>{if(e.target.id==='major'){state.major=e.target.value;state.career=[];}});
-$('close').onclick=()=>{closeDetail();render(false)};
-$('detail').addEventListener('click',e=>{if(e.target===$('detail')){closeDetail();render(false)}const pin=e.target.closest('[data-dialogpin]');if(pin){state.pinned=state.pinned===pin.dataset.dialogpin?null:pin.dataset.dialogpin;closeDetail();render(false)}});
-$('detail').addEventListener('keydown',e=>{if(e.key==='Escape'){closeDetail();render(false)}if(e.key==='Tab'){const all=[...$('detail').querySelectorAll('button,input,select,a[href]')].filter(x=>!x.disabled);if(e.shiftKey&&document.activeElement===all[0]){e.preventDefault();all.at(-1).focus()}else if(!e.shiftKey&&document.activeElement===all.at(-1)){e.preventDefault();all[0].focus()}}});
-$('screen').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.group){toggle(state[b.dataset.group],b.dataset.value);b.setAttribute('aria-pressed',String(state[b.dataset.group].includes(b.dataset.value)));$('feedback').textContent='';}
-if(b.dataset.pin){state.pinned=state.pinned===b.dataset.pin?null:b.dataset.pin;$('teacherList').innerHTML=teachersHTML(courseRows);}
-if(b.dataset.pinmode){state.pinMode=b.dataset.pinmode;document.querySelectorAll('[data-pinmode]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.pinmode===state.pinMode)))}
-if(b.dataset.timemode){state.timeMode=b.dataset.timemode;document.querySelectorAll('[data-timemode]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.timemode===state.timeMode)))}
-if(b.dataset.review)review(b.dataset.review);
-if(b.dataset.action==='direction')openDetail('这些方向通常在做什么？',directions[state.major].map(x=>`<h3>${x[1]}</h3><p>${x[3]}</p>`).join('')+'<p class="profileFoot">根据公开招聘任务整理的介绍；课程主题是待本校大纲核对的建议。来源列表见配套需求研究文档。</p>');});
-$('screen').addEventListener('input',e=>{if(e.target.id==='interest')state.interest=e.target.value;if(e.target.id==='courseSearch'){const s=e.target.value.trim();$('teacherList').innerHTML=teachersHTML(courseRows.filter(x=>(x.name+x.teacher).includes(s)))}});
-$('next').onclick=()=>{const page=state.route[state.index];if(page==='goals'){if(!state.motives.length){$('feedback').textContent='先选一项，或者选“想要合适的课表”开始。';return}rebuildRoute()}if(page==='result'){state.index=0;render();return}state.index=Math.min(state.index+1,state.route.length-1);render()};
-$('back').onclick=()=>{state.index=Math.max(0,state.index-1);render()};
-render(false);
-</script>
-</body>
+  </head>
+  <body>
+    <a class="skip" href="#question">跳到当前问题</a>
+    <header class="bar">
+      <div class="brand">
+        <span class="mark" aria-hidden="true"></span>
+        CoursePilot <span class="small">交互示例</span>
+      </div>
+      <button class="record" id="recordBtn" type="button">我的学业记录</button>
+    </header>
+    <main id="main">
+      <div class="progress">
+        <span id="phase">这学期的想法</span>
+        <div class="track" aria-hidden="true"><span id="progressFill"></span></div>
+      </div>
+      <section id="screen" aria-labelledby="question"></section>
+      <p id="feedback" class="helper" role="status" aria-live="polite"></p>
+      <nav class="controls" aria-label="问题导航">
+        <button class="back" id="back" type="button">返回上一页</button>
+        <button class="next" id="next" type="button">选好了，下一步</button>
+      </nav>
+    </main>
+    <footer class="footer">课程、教师、评价、培养方案和学业记录均为虚构演示内容；不会生成真实规划或替你选课。</footer>
+    <div class="detail" id="detail" hidden>
+      <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+        <div class="sheethead"><h2 id="detailTitle"></h2><button type="button" class="close" id="close">关闭</button></div>
+        <div id="detailBody"></div>
+      </section>
+    </div>
+    <script>
+      'use strict';
+      const $ = (id) => document.getElementById(id);
+      const motiveOptions = [
+        ['gpa', '想拿高绩点', '看给分反馈和考核方式'],
+        ['easy', '想轻松一点', '少签到、少作业或少汇报'],
+        ['reviews', '想上评价好的课', '讲得清楚，体验也好'],
+        ['teacher', '想上某位老师的课', '有特别想选的课程和教师'],
+        ['interest', '想学点感兴趣的', '探索新主题，不急着定方向'],
+        ['career', '为未来工作做准备', '先了解方向，再找相关课程'],
+        ['study', '为升学打好基础', '补基础，兼顾成绩与训练'],
+        ['time', '想要合适的课表', '留出实习、自习和生活时间'],
+      ];
+      const preferenceOptions = [
+        ['grading', '给分反馈较友好', '仍需结合个人投入'],
+        ['attendance', '尽量少签到', '以真实课程要求为准'],
+        ['homework', '作业量少一些', '不想每周投入太多'],
+        ['group', '少小组任务', '减少组队的不确定性'],
+        ['presentation', '少汇报和展示', '不想频繁做展示'],
+        ['exam', '尽量避开闭卷', '偏好其他考核方式'],
+      ];
+      const courseRows = [
+        { id: 'a', name: '示例数据库课程', teacher: '示例教师甲', summary: '有往年给分与作业反馈', review: '示例评价：作业频率较低，评分说明比较清楚。', caveat: '未提供本学期考勤要求；不能判断是否签到。' },
+        { id: 'b', name: '示例系统课程', teacher: '示例教师乙', summary: '有往年授课与项目反馈', review: '示例评价：讲解较细，课程项目需要持续投入。', caveat: '工作量与投入因人而异；没有可信成绩统计。' },
+      ];
+
+      // BEGIN coursepilot-demo-flow
+      const directions = {
+        '计算机科学与技术': [
+          ['backend', '后端与业务系统', '做接口、处理数据、维护服务', '常见工作是把业务需求做成稳定的服务和接口。可关注数据库、系统、网络等课程主题；是否有对应课程仍需查本校大纲。'],
+          ['web', 'Web 与交互开发', '把需求变成可操作的网页', '常见工作是实现页面和交互，处理不同设备上的体验。可探索 Web、软件工程和人机交互主题。'],
+          ['data', '数据分析与 BI', '用数据回答问题、做报表', '常见工作涉及数据查询、指标分析与可视化。可探索统计、数据库和数据分析主题。'],
+          ['ai', '算法与 AI', '训练和评估模型解决任务', '任务可能涉及推荐、识别和生成。通常要补数学、算法与实验能力；课程选择还要结合已有基础。'],
+        ],
+        '自动化与电气': [
+          ['control', '控制与自动化', '编程控制设备，做调试', '常见任务包括控制程序、设备配置和现场调试。可探索控制原理、电路、PLC 与实验主题。'],
+          ['embedded', '嵌入式与软件控制', '让软件与硬件配合工作', '可探索程序设计、电子电路和系统实验。这里仅为方向示例，尚未核验该专业培养方案。'],
+          ['power', '电力与能源系统', '参与供配电与能源设备的运行维护', '常见任务涉及电网、变配电与设备监测，可探索电机、电力电子与电力系统主题；这里仅为方向示例，尚未核验该专业培养方案。'],
+          ['instrument', '检测与仪器仪表', '做测量、标定与质量检验', '常见任务涉及传感、信号采集与校准，可探索传感器、测控与信号处理主题；是否有对应课程仍需查本校大纲。'],
+        ],
+        '机械类': [
+          ['mechanical', '结构与机械设计', '做结构方案、三维图与工程图', '常见任务涉及结构设计、制图及制造验证。可探索机械设计、制图、材料与工艺主题。'],
+          ['manufacturing', '制造与工艺', '了解产品怎样被制造出来', '可探索制造方法、材料与工艺主题。这里仅为方向示例，尚未核验该专业培养方案。'],
+          ['thermal', '热能与动力', '围绕流体、传热与动力设备工作', '常见任务涉及热力设备选型与能耗分析，可探索工程热力学、流体力学与传热学主题；是否有对应课程仍需查本校大纲。'],
+          ['autoeng', '汽车与交通装备', '参与整车或零部件的设计与试验', '常见任务涉及结构件、总成与台架试验，可探索车辆工程、机械设计与材料主题；这里仅为方向示例，尚未核验该专业培养方案。'],
+        ],
+        '经管与财会': [
+          ['business', '商业分析与运营', '分析市场和用户，评估方案', '可探索统计、市场研究和运营分析主题。岗位不只看工具，还需要理解业务问题。'],
+          ['accounting', '会计与审计', '理解账务报表，完成核查', '可探索会计、审计、税务与法规主题。方向示例不代表已接入该专业教学计划。'],
+          ['finance', '金融与投资分析', '分析资产、估值与风险', '常见任务涉及财务建模、行业研究与风险评估，可探索金融学、统计与会计主题；是否有对应课程仍需查本校大纲。'],
+          ['supply', '供应链与运营管理', '安排采购、库存与交付', '常见任务涉及计划排程、库存控制与供应商管理，可探索运筹、物流与运营管理主题；这里仅为方向示例，尚未核验该专业培养方案。'],
+        ],
+      };
+      const state = {
+        motives: [], preferences: [], career: [], careerOther: '', interest: '', pinnedPair: null,
+        pinMode: 'prefer', slotMode: 'must', mustSlots: [], preferSlots: [], mustReviewed: false,
+        preferReviewed: false, preferencesReviewed: false, careerReviewed: false,
+        interestReviewed: false, teacherReviewed: false, priorityOrder: [],
+        prioritiesConfirmed: false, demoAcknowledged: false, major: '计算机科学与技术',
+        route: ['goals'], index: 0,
+      };
+      // Every student sees every question; goals only express priority order.
+      function routeFor() {
+        return ['goals', 'preferences', 'career', 'interest', 'teachers', 'time', 'priorities', 'materials', 'result'];
+      }
+      function setMotives(values) {
+        const next = [...new Set(values)];
+        const previous = new Set(state.motives);
+        state.priorityOrder = [
+          ...state.priorityOrder.filter((item) => next.includes(item)),
+          ...next.filter((item) => !previous.has(item)),
+        ];
+        state.prioritiesConfirmed = false;
+        state.motives = next;
+        state.route = routeFor();
+      }
+      function movePriority(index, offset) {
+        const destination = index + offset;
+        if (index < 0 || destination < 0 || destination >= state.priorityOrder.length) return;
+        [state.priorityOrder[index], state.priorityOrder[destination]] = [state.priorityOrder[destination], state.priorityOrder[index]];
+        state.prioritiesConfirmed = false;
+      }
+      function advanceFlow() {
+        const page = state.route[state.index];
+        if (page === 'goals') {
+          if (!state.motives.length) return { ok: false, message: '先选一项本学期的目标。' };
+          state.route = routeFor();
+          state.index = 1;
+          return { ok: true };
+        }
+        if (page === 'priorities' && !state.prioritiesConfirmed) {
+          return { ok: false, message: '请检查目标顺序并勾选确认。' };
+        }
+        if (page === 'materials' && !state.demoAcknowledged) {
+          return { ok: false, message: '如要查看候选，请先确认只使用虚构示例资料。' };
+        }
+        if (page === 'preferences') state.preferencesReviewed = true;
+        if (page === 'career') state.careerReviewed = true;
+        if (page === 'interest') state.interestReviewed = true;
+        if (page === 'teachers') state.teacherReviewed = true;
+        if (page === 'time') { state.mustReviewed = true; state.preferReviewed = true; }
+        if (page === 'result') { state.index = 0; return { ok: true, restart: true }; }
+        state.index = Math.min(state.index + 1, state.route.length - 1);
+        return { ok: true };
+      }
+      function backFlow() {
+        state.index = Math.max(0, state.index - 1);
+        return state.route[state.index];
+      }
+      function setMajor(name) {
+        if (!Object.prototype.hasOwnProperty.call(directions, name)) return false;
+        if (name !== state.major) {
+          state.major = name;
+          state.career = [];
+          state.careerReviewed = false;
+        }
+        return true;
+      }
+      function setCareerOther(value) {
+        state.careerOther = String(value).slice(0, 200);
+        state.careerReviewed = false;
+      }
+      const slotDayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+      const slotDays = [1, 2, 3, 4, 5, 6, 7];
+      const slotPeriods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+      function parseSlot(key) {
+        const match = /^([1-7])-(1[0-2]|[1-9])$/.exec(String(key));
+        return match ? { day: Number(match[1]), period: Number(match[2]) } : null;
+      }
+      function slotListFor(mode) { return mode === 'must' ? state.mustSlots : state.preferSlots; }
+      function slotHas(key, mode = state.slotMode) { return slotListFor(mode).includes(key); }
+      function slotActionFor(key, mode = state.slotMode) { return slotHas(key, mode) ? 'erase' : 'paint'; }
+      function applySlot(key, action, mode = state.slotMode) {
+        if (!parseSlot(key)) return;
+        if (action === 'erase') {
+          state.mustSlots = state.mustSlots.filter((item) => item !== key);
+          state.preferSlots = state.preferSlots.filter((item) => item !== key);
+        } else if (mode === 'must') {
+          state.preferSlots = state.preferSlots.filter((item) => item !== key);
+          if (!state.mustSlots.includes(key)) state.mustSlots = [...state.mustSlots, key];
+        } else {
+          state.mustSlots = state.mustSlots.filter((item) => item !== key);
+          if (!state.preferSlots.includes(key)) state.preferSlots = [...state.preferSlots, key];
+        }
+        state.mustReviewed = false;
+        state.preferReviewed = false;
+      }
+      function toggleSlot(key) {
+        const action = slotActionFor(key);
+        applySlot(key, action);
+        return action;
+      }
+      function toggleLine(keys) {
+        const action = keys.every((key) => slotHas(key)) ? 'erase' : 'paint';
+        keys.forEach((key) => applySlot(key, action));
+        return action;
+      }
+      function dayKeys(day) { return slotPeriods.map((period) => `${day}-${period}`); }
+      function periodKeys(period) { return slotDays.map((day) => `${day}-${period}`); }
+      function runsOf(numbers) {
+        const runs = [];
+        numbers.forEach((value) => {
+          const last = runs[runs.length - 1];
+          if (last && last[last.length - 1] === value - 1) last.push(value);
+          else runs.push([value]);
+        });
+        return runs;
+      }
+      function dayPhrase(days) {
+        return runsOf(days).flatMap((run) => (run.length >= 3
+          ? [`${slotDayNames[run[0] - 1]}至${slotDayNames[run[run.length - 1] - 1]}`]
+          : run.map((day) => slotDayNames[day - 1]))).join('、');
+      }
+      function periodPhrase(periods) {
+        const out = [];
+        const singles = [];
+        let singleSlot = -1;
+        runsOf(periods).forEach((run) => {
+          if (run.length >= 2) out.push(`第${run[0]}–${run[run.length - 1]}节`);
+          else {
+            if (singleSlot < 0) { singleSlot = out.length; out.push(''); }
+            singles.push(run[0]);
+          }
+        });
+        if (singleSlot >= 0) out[singleSlot] = `第${singles.join('、')}节`;
+        return out.join('、');
+      }
+      function summarizeSlots(keys) {
+        const chosen = new Set(keys.filter((key) => parseSlot(key)));
+        if (!chosen.size) return '未设置';
+        const has = (day, period) => chosen.has(`${day}-${period}`);
+        const fullDays = slotDays.filter((day) => slotPeriods.every((period) => has(day, period)));
+        const fullPeriods = slotPeriods.filter((period) => slotDays.every((day) => has(day, period)));
+        const parts = fullDays.map((day) => `${slotDayNames[day - 1]}（整天）`);
+        fullPeriods.forEach((period) => parts.push(`每天第${period}节`));
+        const groups = new Map();
+        slotDays.forEach((day) => {
+          if (fullDays.includes(day)) return;
+          const periods = slotPeriods.filter((period) => !fullPeriods.includes(period) && has(day, period));
+          if (!periods.length) return;
+          const signature = periods.join(',');
+          if (!groups.has(signature)) groups.set(signature, { periods, days: [] });
+          groups.get(signature).days.push(day);
+        });
+        groups.forEach(({ days, periods }) => parts.push(`${dayPhrase(days)} ${periodPhrase(periods)}`));
+        return parts.join('、');
+      }
+      // END coursepilot-demo-flow
+
+      const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+      function options(items, group) {
+        return `<div class="options">${items.map(([value, label, detail]) => `<button class="option" type="button" data-group="${group}" data-value="${escape(value)}" aria-pressed="${state[group].includes(value)}"><span class="selection" aria-hidden="true"></span><span><strong>${escape(label)}</strong><small>${escape(detail)}</small></span></button>`).join('')}</div>`;
+      }
+      function title(text, description) {
+        return `<h1 id="question" tabindex="-1">${text}</h1><p class="intro">${description}</p>`;
+      }
+      function routeName(page) {
+        return ({ goals: '这学期的想法', preferences: '上课与考核偏好', career: '了解发展方向', interest: '想探索的主题', teachers: '课程和教师', time: '时间安排', priorities: '确认目标顺序', materials: '核对学业资料', result: '虚构演示候选' })[page] || '选课规划';
+      }
+      function listOptions(items, group) { return options(items.map((item) => item.slice(0, 3)), group); }
+      let slotDragAction = null;
+      let slotGestureKey = null;
+      function slotGridHTML() {
+        let cells = '';
+        slotPeriods.forEach((period) => {
+          cells += `<button class="slot-head" type="button" data-row="${period}" aria-label="整行选择 第${period}节">第${period}节</button>`;
+          slotDays.forEach((day) => {
+            cells += `<button class="slot" type="button" data-slot="${day}-${period}" aria-pressed="false" aria-label="${slotDayNames[day - 1]} 第${period}节 未选择"><span class="slot-mark" aria-hidden="true"></span></button>`;
+          });
+        });
+        const heads = slotDayNames.map((name, index) => `<button class="slot-head" type="button" data-col="${index + 1}" aria-label="整列选择 ${name}">${name}</button>`).join('');
+        return `<div class="slotgrid" role="group" aria-label="按星期和节次选择要避开的时段"><span class="slot-corner" aria-hidden="true"></span>${heads}${cells}</div>`;
+      }
+      function syncSlotGrid() {
+        document.querySelectorAll('[data-slot]').forEach((cell) => {
+          const key = cell.dataset.slot;
+          const level = slotHas(key, 'must') ? 'must' : (slotHas(key, 'prefer') ? 'prefer' : '');
+          const [day, period] = key.split('-').map(Number);
+          const text = level === 'must' ? '必须避开' : (level === 'prefer' ? '尽量避开' : '未选择');
+          cell.className = level ? `slot is-${level}` : 'slot';
+          cell.setAttribute('aria-pressed', String(Boolean(level)));
+          cell.setAttribute('aria-label', `${slotDayNames[day - 1]} 第${period}节 ${text}`);
+        });
+        document.querySelectorAll('[data-slotmode]').forEach((item) => item.setAttribute('aria-pressed', String(item.dataset.slotmode === state.slotMode)));
+      }
+      function paintSlotDrag(target) {
+        const cell = target?.closest?.('[data-slot]');
+        if (!slotDragAction || !cell) return;
+        applySlot(cell.dataset.slot, slotDragAction);
+        syncSlotGrid();
+      }
+      function endSlotDrag() {
+        slotDragAction = null;
+        setTimeout(() => { slotGestureKey = null; }, 0);
+      }
+      function teachersHTML(rows) {
+        return rows.length ? rows.map((item) => `<article class="teacher ${state.pinnedPair === item.id ? 'selected' : ''}"><div class="teacherbody"><strong>${escape(item.name)} · ${escape(item.teacher)}</strong><p>${escape(item.summary)}（虚构示例）</p></div><button class="linkbtn" type="button" data-review="${escape(item.id)}">看评价</button><button class="pick" type="button" data-pin="${escape(item.id)}" aria-pressed="${state.pinnedPair === item.id}">${state.pinnedPair === item.id ? '已选' : '想上'}</button></article>`).join('') : '<p class="intro">示例库里没有这个课程或老师。正式使用时需从已核验资料检索。</p>';
+      }
+      function careerSummaryValues() {
+        const labels = state.career.map((id) => directions[state.major].find((item) => item[0] === id)?.[1]).filter(Boolean);
+        const other = state.careerOther.trim();
+        return other ? [...labels, other] : labels;
+      }
+      function summaryRow(label, value) { return `<div class="summary-row"><dt>${escape(label)}</dt><dd>${value}</dd></div>`; }
+      function summaryList(values) { return values.length ? values.map((value) => `<span class="pill">${escape(value)}</span>`).join('') : '这一项留空了'; }
+      function render(moveFocus = true) {
+        if (state.route[state.index] === 'result' && !state.demoAcknowledged) state.index = state.route.indexOf('materials');
+        const page = state.route[state.index];
+        $('feedback').textContent = '';
+        $('back').disabled = state.index === 0;
+        $('next').textContent = ({ priorities: '确认顺序并继续', materials: '只看虚构演示候选', result: '重新调整条件' })[page] || '选好了，下一步';
+        $('phase').textContent = routeName(page);
+        $('progressFill').style.width = `${Math.round(((state.index + 1) / state.route.length) * 100)}%`;
+        let html = '';
+        if (page === 'goals') html = title('这学期选课，你最在意什么？', '目标表示你在意什么、先后怎样排。每个问题都会看到，留空即可跳过。') + listOptions(motiveOptions, 'motives');
+        if (page === 'preferences') html = title('什么样的课，更适合你？', '这些上课与考核偏好可以同时选择，也可以都不选。') + listOptions(preferenceOptions, 'preferences') + '<p class="route-note">偏好不代表成绩或课程要求的保证。</p>';
+        if (page === 'career') {
+          const items = directions[state.major];
+          const majorBlock = `<div class="field"><label for="major">你的专业</label><select id="major" name="major">${Object.keys(directions).map((name) => `<option value="${escape(name)}"${name === state.major ? ' selected' : ''}>${escape(name)}</option>`).join('')}</select></div><p class="route-note">真实使用时专业来自培养方案，不需要手选；这里因为没有真实培养方案才让你选。</p><p class="hint amber">这些发展方向是虚构演示内容；真实版本由 /career-directions 提供，每条都必须附来源。</p>`;
+          const careerOtherField = `<div class="field"><label for="careerOther">还有别的方向？写在这里</label><input type="text" id="careerOther" name="careerOther" autocomplete="off" value="${escape(state.careerOther)}" placeholder="例如：教育科技、新能源项目管理…"></div>`;
+          html = title('哪个方向，你想多了解一点？', `按${escape(state.major)}展示。可选择一个或多个，也可以暂时不决定。`) + majorBlock + options(items.map((item) => [item[0], item[1], item[2]]), 'career') + '<div class="dirline"><span>先看工作内容，再判断自己是否感兴趣。</span><button class="linkbtn" type="button" data-action="direction">看方向介绍</button></div>' + careerOtherField;
+        }
+        if (page === 'interest') html = title('有什么主题，让你想试试看？', '写几个关键词即可；暂时没有想法也可以继续。') + `<div class="field"><label for="interest">感兴趣的主题</label><input type="text" id="interest" name="interest" autocomplete="off" value="${escape(state.interest)}" placeholder="例如：摄影、心理学、人工智能、文学…"></div>`;
+        if (page === 'teachers') html = title('有特别想上的课程或老师吗？', '先从虚构示例中选择课程和教师；这不是实际开课信息。') + '<div class="field"><label class="sr" for="courseSearch">搜索示例课程或教师</label><input type="search" id="courseSearch" name="courseSearch" autocomplete="off" placeholder="搜索示例课程或老师…"></div><div class="teachlist" id="teacherList">' + teachersHTML(courseRows) + '</div><div class="seg" aria-label="教师偏好强度"><button type="button" data-pinmode="prefer" aria-pressed="' + (state.pinMode === 'prefer') + '">优先考虑，可协商</button><button type="button" data-pinmode="must" aria-pressed="' + (state.pinMode === 'must') + '">必须保留课程与教师</button></div><p class="route-note">选择与教师绑定的具体课程；这里的内容均为虚构演示。</p>';
+        if (page === 'time') html = title('哪些时间适合你的安排？', '选择一种避开强度后点格子或拖动涂选；点星期或节次可整列、整行选择。没有要求可直接继续。') + '<div class="seg" aria-label="避开强度"><button type="button" data-slotmode="must" aria-pressed="' + (state.slotMode === 'must') + '">必须避开</button><button type="button" data-slotmode="prefer" aria-pressed="' + (state.slotMode === 'prefer') + '">尽量避开</button></div>' + slotGridHTML() + '<p class="route-note">演示时段仅说明填写方式；本学期上课时间尚未取得。</p>';
+        if (page === 'priorities') html = title('请确认目标的先后顺序', '当前顺序只是初始排列。请检查目标先后，再勾选确认；没有勾选前不会交给后续规划。') + `<ol class="priority-list" aria-label="目标先后顺序">${state.priorityOrder.map((motive, index) => `<li><span class="priority-number">${index + 1}</span><span class="priority-name">${escape(motiveOptions.find(([id]) => id === motive)?.[1] || motive)}</span><button class="move" type="button" data-move="${index}" data-offset="-1" aria-label="上移${escape(motiveOptions.find(([id]) => id === motive)?.[1] || motive)}" ${index === 0 ? 'disabled' : ''}>↑</button><button class="move" type="button" data-move="${index}" data-offset="1" aria-label="下移${escape(motiveOptions.find(([id]) => id === motive)?.[1] || motive)}" ${index === state.priorityOrder.length - 1 ? 'disabled' : ''}>↓</button></li>`).join('')}</ol><label class="checkline"><input id="priorityConfirm" type="checkbox" ${state.prioritiesConfirmed ? 'checked' : ''}><span>我已检查并确认这个目标顺序</span></label><p class="route-note">调换顺序后需要重新确认。确认只表示你的优先次序，不代表资料已齐全。</p>`;
+        if (page === 'materials') {
+          const selectedGoals = state.priorityOrder.map((id) => motiveOptions.find(([value]) => value === id)?.[1]).filter(Boolean);
+          const prefs = preferenceOptions.filter(([id]) => state.preferences.includes(id)).map((item) => item[1]);
+              const teacher = state.pinnedPair ? courseRows.find((item) => item.id === state.pinnedPair) : null;
+          html = title('先核对资料，再决定是否看演示', '这里会回看你刚填写的内容，并说明现在缺什么。') + `<dl class="summary">${summaryRow('目标与顺序', `<div class="pillrow">${summaryList(selectedGoals)}</div>`)}${summaryRow('上课与考核偏好', `<div class="pillrow">${summaryList(prefs)}</div>`)}${summaryRow('兴趣主题', escape(state.interest || '这一项留空了'))}${summaryRow('职业方向', `<div class="pillrow">${summaryList(careerSummaryValues())}</div>`)}${summaryRow('课程与教师', teacher ? `${escape(teacher.name)} · ${escape(teacher.teacher)}（${state.pinMode === 'must' ? '必须保留' : '优先考虑'}，虚构示例）` : '尚未选择具体课程与教师')}${summaryRow('必须留空', escape(summarizeSlots(state.mustSlots)))}${summaryRow('尽量避开', escape(summarizeSlots(state.preferSlots)))}</dl><h2>学业资料</h2><div class="record-rows"><div class="datarow"><span>培养方案</span><small>未载入真实方案；无法核对培养要求</small></div><div class="datarow"><span>已修课程与成绩</span><small>没有真实学业记录</small></div><div class="datarow"><span>必修和学分缺口</span><small>资料不足，尚未计算</small></div></div><p class="hint amber">目前缺少真实培养方案和学业记录，因此不能生成真实规划。补充入口尚未接入。</p><button class="linkbtn" type="button" data-action="academic">查看需要补充什么</button><div class="materials-choice"><label class="checkline"><input id="demoConsent" type="checkbox" ${state.demoAcknowledged ? 'checked' : ''}><span>我知道下面的候选使用虚构示例资料，只想查看演示。</span></label></div><p class="route-note">只有勾选上面的说明后，才能继续看虚构演示候选。这里不会把示例资料变成真实记录。</p>`;
+        }
+        if (page === 'result') {
+          const teacher = state.pinnedPair ? courseRows.find((item) => item.id === state.pinnedPair) : null;
+          html = title('虚构演示候选', '以下内容只演示如何查看课程资料，不是为你生成的真实推荐。') + '<p class="hint amber">你已选择查看虚构示例。当前没有真实培养方案、已修记录或本学期班次，所以不能判断课程是否适合或时间是否冲突。</p>' + courseRows.map((item) => `<article class="candidate"><div><strong>${escape(item.name)}</strong><p class="meta">${escape(item.teacher)} · 虚构课程与教师</p><p class="reason">${escape(item.summary)}。与你的目标是否匹配，仍需真实培养方案和学业记录核对。</p><button class="linkbtn" type="button" data-review="${escape(item.id)}">看课程与教师评价</button></div><span class="pending">真实时间待确认</span></article>`).join('') + `<dl class="summary">${summaryRow('你的目标', `<div class="pillrow">${summaryList(state.priorityOrder.map((id) => motiveOptions.find(([value]) => value === id)?.[1]).filter(Boolean))}</div>`)}${summaryRow('职业方向', `<div class="pillrow">${summaryList(careerSummaryValues())}</div>`)}${summaryRow('必须留空', escape(summarizeSlots(state.mustSlots)))}${summaryRow('尽量避开', escape(summarizeSlots(state.preferSlots)))}${summaryRow('课程与教师', teacher ? `${escape(teacher.name)} · ${escape(teacher.teacher)}（${state.pinMode === 'must' ? '必须保留' : '优先考虑'}）` : '尚未选择具体课程与教师')}</dl>`;
+        }
+        $('screen').innerHTML = html;
+        syncSlotGrid();
+        if (moveFocus) $('question').focus({ preventScroll: true });
+        window.scrollTo(0, 0);
+      }
+      let focusBeforeDialog = null;
+      let focusBeforeDialogTarget = null;
+      function stableFocusTarget(element) {
+        if (element?.dataset.review) return { type: 'review', value: element.dataset.review };
+        if (element?.dataset.action) return { type: 'action', value: element.dataset.action };
+        if (element?.id) return { type: 'id', value: element.id };
+        return null;
+      }
+      function restoreDialogFocus() {
+        let target = null;
+        if (focusBeforeDialogTarget?.type === 'review') {
+          target = [...document.querySelectorAll('[data-review]')].find((item) => item.dataset.review === focusBeforeDialogTarget.value);
+        } else if (focusBeforeDialogTarget?.type === 'action') {
+          target = [...document.querySelectorAll('[data-action]')].find((item) => item.dataset.action === focusBeforeDialogTarget.value);
+        } else if (focusBeforeDialogTarget?.type === 'id') {
+          target = $(focusBeforeDialogTarget.value);
+        }
+        if (!target && focusBeforeDialog && document.contains(focusBeforeDialog)) target = focusBeforeDialog;
+        target?.focus();
+        focusBeforeDialog = null;
+        focusBeforeDialogTarget = null;
+      }
+      function openDetail(titleText, body) {
+        focusBeforeDialog = document.activeElement;
+        focusBeforeDialogTarget = stableFocusTarget(focusBeforeDialog);
+        $('detailTitle').textContent = titleText;
+        $('detailBody').innerHTML = body;
+        $('detail').hidden = false;
+        $('main').inert = true;
+        document.querySelector('.bar').inert = true;
+        $('close').focus();
+      }
+      function closeDetail() {
+        $('detail').hidden = true;
+        $('main').inert = false;
+        document.querySelector('.bar').inert = false;
+        render(false);
+        restoreDialogFocus();
+      }
+      function openAcademicInfo() {
+        openDetail('需要补充的学业资料', '<p class="profileFoot">当前页面没有读取、导入或保存真实学业记录的功能。</p><div class="datarow"><span>培养方案</span><small>需要本校已核验的真实版本</small></div><div class="datarow"><span>已修课程与成绩</span><small>需要学生本人核对的学业记录</small></div><div class="datarow"><span>必修和学分缺口</span><small>只有前两项齐全后才能计算</small></div><p>现在无法补交这些资料。本演示不会读取教务账号，也不会创建记录编号。接入学业资料功能后，再由你核对并补全缺项。</p>');
+      }
+      function review(id) {
+        const item = courseRows.find((row) => row.id === id);
+        if (!item) return;
+        openDetail(`${item.name} · ${item.teacher}`, `<p class="profileFoot">以下均为虚构示例评价，未接入本校评价网站。</p><h3>上课体验</h3><div class="evidence"><p>${escape(item.review)}</p><p class="route-note">来源：演示评价文档 · 修读学期：示例往年 · 1 条示例</p></div><h3>签到、给分与考核</h3><p>${escape(item.caveat)}</p><h3>学分、先修与开课时间</h3><p>真实大纲、学分和本学期班次待导入；不能依靠评价文字推断课程时间。</p><button class="next" type="button" data-dialogpin="${escape(id)}">${state.pinnedPair === id ? '取消这项意愿' : '想上这门示例课程'}</button>`);
+      }
+      $('recordBtn').addEventListener('click', openAcademicInfo);
+      $('close').addEventListener('click', closeDetail);
+      $('detail').addEventListener('click', (event) => {
+        if (event.target === $('detail')) { closeDetail(); return; }
+        const pin = event.target.closest('[data-dialogpin]');
+        if (pin) { state.pinnedPair = state.pinnedPair === pin.dataset.dialogpin ? null : pin.dataset.dialogpin; closeDetail(); }
+      });
+      $('detail').addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') { closeDetail(); }
+        if (event.key === 'Tab') {
+          const items = [...$('detail').querySelectorAll('button, input, select, a[href]')].filter((item) => !item.disabled);
+          if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items.at(-1).focus(); }
+          else if (!event.shiftKey && document.activeElement === items.at(-1)) { event.preventDefault(); items[0].focus(); }
+        }
+      });
+      $('screen').addEventListener('click', (event) => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        if (button.dataset.slot) {
+          if (slotGestureKey === button.dataset.slot) { slotGestureKey = null; return; }
+          toggleSlot(button.dataset.slot);
+          $('feedback').textContent = '';
+          syncSlotGrid();
+          return;
+        }
+        if (button.dataset.col || button.dataset.row) {
+          toggleLine(button.dataset.col ? dayKeys(Number(button.dataset.col)) : periodKeys(Number(button.dataset.row)));
+          $('feedback').textContent = '';
+          syncSlotGrid();
+          return;
+        }
+        if (button.dataset.slotmode) {
+          if (button.dataset.slotmode === 'must' || button.dataset.slotmode === 'prefer') state.slotMode = button.dataset.slotmode;
+          syncSlotGrid();
+          return;
+        }
+        if (button.dataset.group === 'motives') {
+          const next = [...state.motives];
+          const index = next.indexOf(button.dataset.value);
+          if (index < 0) next.push(button.dataset.value); else next.splice(index, 1);
+          setMotives(next);
+          button.setAttribute('aria-pressed', String(state.motives.includes(button.dataset.value)));
+        } else if (button.dataset.group) {
+          const values = state[button.dataset.group];
+          const index = values.indexOf(button.dataset.value);
+          if (index < 0) values.push(button.dataset.value); else values.splice(index, 1);
+          if (button.dataset.group === 'mustSlots') state.mustReviewed = false;
+          if (button.dataset.group === 'preferSlots') state.preferReviewed = false;
+          if (button.dataset.group === 'preferences') state.preferencesReviewed = false;
+        if (button.dataset.group === 'career') state.careerReviewed = false;
+          button.setAttribute('aria-pressed', String(values.includes(button.dataset.value)));
+          $('feedback').textContent = '';
+        }
+        if (button.dataset.pin) { state.pinnedPair = state.pinnedPair === button.dataset.pin ? null : button.dataset.pin; state.teacherReviewed = false; $('teacherList').innerHTML = teachersHTML(courseRows); }
+        if (button.dataset.pinmode) { state.pinMode = button.dataset.pinmode; state.teacherReviewed = false; document.querySelectorAll('[data-pinmode]').forEach((item) => item.setAttribute('aria-pressed', String(item.dataset.pinmode === state.pinMode))); }
+        if (button.dataset.move !== undefined) { movePriority(Number(button.dataset.move), Number(button.dataset.offset)); render(); }
+        if (button.dataset.review) review(button.dataset.review);
+        if (button.dataset.action === 'academic') openAcademicInfo();
+        if (button.dataset.action === 'direction') openDetail('这些方向通常在做什么？', directions[state.major].map((item) => `<h3>${escape(item[1])}</h3><p>${escape(item[3])}</p>`).join('') + '<p class="profileFoot">这里只介绍方向，不代表本校已开设对应课程。</p>');
+      });
+      $('screen').addEventListener('change', (event) => {
+        if (event.target.id === 'priorityConfirm') state.prioritiesConfirmed = event.target.checked;
+        if (event.target.id === 'demoConsent') state.demoAcknowledged = event.target.checked;
+        if (event.target.id === 'major' && setMajor(event.target.value)) render();
+      });
+      $('screen').addEventListener('input', (event) => {
+        if (event.target.id === 'careerOther') setCareerOther(event.target.value);
+        if (event.target.id === 'interest') { state.interest = event.target.value.slice(0, 200); state.interestReviewed = false; }
+        if (event.target.id === 'courseSearch') {
+          const query = event.target.value.trim();
+          $('teacherList').innerHTML = teachersHTML(courseRows.filter((item) => `${item.name}${item.teacher}`.includes(query)));
+        }
+      });
+      $('next').addEventListener('click', () => {
+        const result = advanceFlow();
+        if (!result.ok) { $('feedback').textContent = result.message; return; }
+        if (result.restart) { render(); return; }
+        render();
+      });
+      $('back').addEventListener('click', () => { backFlow(); render(); });
+      $('screen').addEventListener('pointerdown', (event) => {
+        const cell = event.target.closest?.('[data-slot]');
+        if (!cell || (event.button !== undefined && event.button !== 0)) return;
+        slotGestureKey = cell.dataset.slot;
+        slotDragAction = slotActionFor(slotGestureKey);
+        applySlot(slotGestureKey, slotDragAction);
+        $('feedback').textContent = '';
+        syncSlotGrid();
+      });
+      $('screen').addEventListener('pointerover', (event) => paintSlotDrag(event.target));
+      $('screen').addEventListener('pointermove', (event) => {
+        if (slotDragAction) paintSlotDrag(document.elementFromPoint(event.clientX, event.clientY));
+      });
+      document.addEventListener('pointerup', endSlotDrag);
+      document.addEventListener('pointercancel', endSlotDrag);
+      render(false);
+    </script>
+  </body>
 </html>
