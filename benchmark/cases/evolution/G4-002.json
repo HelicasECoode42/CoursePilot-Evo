@@ -1,0 +1,11 @@
+{
+  "caseId": "G4-002",
+  "groupId": "G4",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": "synth-g4-002-ai-1",
+  "inputFixtureRef": "benchmark/cases/fixtures/G4-002-offering-and-enrollment.json",
+  "userQuery": "这门《人工智能》容量 50 人，我在选课系统里看到已经有 55 个人报了，我还能选上吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：人造班次快照（SYNTHETIC，容量为采集时显示值）+ 计科学2 表头。考的是「容量/排名只能显示、不得推录取概率」，以及「学校没正式说明过的录取规则只能说不知道」。"
+}

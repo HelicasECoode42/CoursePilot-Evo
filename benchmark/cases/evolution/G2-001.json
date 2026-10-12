@@ -1,0 +1,11 @@
+{
+  "caseId": "G2-001",
+  "groupId": "G2",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G2-001-planning-request.json",
+  "userQuery": "帮我排下个学期的课表吧，最好别给我排早八。不过必修课随便怎么排都行。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：人工题面，没有 .xls 出处。考的是「最好」这类程度词是软偏好而非硬约束。本案例不绑班次快照。"
+}
