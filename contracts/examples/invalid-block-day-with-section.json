@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0",
+  "curriculumSnapshotId": "curr:demo",
+  "offeringSnapshotId": null,
+  "academicRecordId": "record:demo",
+  "mode": "REAL",
+  "promptText": "整天与节次混填，应被拒绝。",
+  "intent": {
+    "motives": [
+      "SCHEDULE"
+    ],
+    "priorityOrder": [
+      "SCHEDULE"
+    ],
+    "hardConstraints": [
+      {
+        "kind": "BLOCK_DAY",
+        "courseCode": null,
+        "teacherKey": null,
+        "dayOfWeek": 1,
+        "section": 1,
+        "value": null,
+        "sourceText": "周一整天不能上课"
+      }
+    ],
+    "softPreferences": [],
+    "pinnedTeacherCoursePairs": [],
+    "interestTags": [],
+    "careerDirectionIds": []
+  },
+  "previousPlanId": null
+}

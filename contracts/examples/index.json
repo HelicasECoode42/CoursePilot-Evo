@@ -38,5 +38,20 @@
     "file": "invalid-valid-with-unknown.json",
     "definition": "PlanValidation",
     "valid": false
+  },
+  {
+    "file": "planning-request-block-slot.json",
+    "definition": "PlanningRequest",
+    "valid": true
+  },
+  {
+    "file": "invalid-block-day-with-section.json",
+    "definition": "PlanningRequest",
+    "valid": false
+  },
+  {
+    "file": "invalid-block-slot-missing-section.json",
+    "definition": "PlanningRequest",
+    "valid": false
   }
 ]
