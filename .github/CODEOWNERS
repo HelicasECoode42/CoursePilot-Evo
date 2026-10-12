@@ -1,0 +1,38 @@
+# 复核门禁：按路径自动指派，不依赖作者记得 @ 人。
+# 账号取自 docs/18-team-progress-guide.md 第 1 节已确认的名单。
+# 规则自上而下匹配，最后一条命中者生效。
+#
+# 两道门禁的分工见 docs/16-engineering-and-debugging.md 第 7 节：
+#   接口／业务门禁——提供者 + 一个实际消费者 + 队长
+#   代码质量门禁——一位队友；跨模块时加队长
+# 本文件只负责「谁必须被请到」，是否放行由复核人判断。
+
+# 兜底：队长看跨模块影响与业务验收
+*                               @HelicasECoode42
+
+# 公共契约：任何改动都要提供者与消费者共同确认，不能单方面改
+/contracts/                     @HelicasECoode42 @mira-xu @goat-yang
+/docs/04-infrastructure-workflow.md  @HelicasECoode42 @mira-xu @goat-yang
+
+# 仓库开发规范与评审流程：改这些等于改全组约束
+/AGENTS.md                      @HelicasECoode42
+/docs/16-engineering-and-debugging.md @HelicasECoode42
+/docs/18-team-progress-guide.md @HelicasECoode42
+/.github/                       @HelicasECoode42
+
+# 模块 TRD 由该模块负责人与队长确认
+/docs/trd/a-data.md             @HelicasECoode42 @JiangYiLin-Q121
+/docs/trd/b-verifier.md         @HelicasECoode42 @mira-xu
+/docs/trd/c-agent.md            @HelicasECoode42 @goat-yang
+/docs/trd/d-benchmark-rsi.md    @HelicasECoode42 @amorfatiii
+/docs/trd/e-web-integration.md  @HelicasECoode42
+
+# 模块实现：日常由本模块负责人复核，跨模块影响由兜底规则把队长带上
+/java-environment/              @mira-xu
+/agent-runtime/                 @goat-yang
+/benchmark/                     @amorfatiii
+/evo-harness/                   @amorfatiii
+/web/                           @HelicasECoode42
+
+# 独立 HTML 原型已冻结为设计存档，新增交互在 web/ 实现
+/demo/                          @HelicasECoode42
