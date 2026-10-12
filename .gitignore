@@ -25,3 +25,6 @@ benchmark/gold/
 benchmark/held-out/
 runs/
 docs/team/*filled*
+
+# Local editor/session scratch
+.claude/
