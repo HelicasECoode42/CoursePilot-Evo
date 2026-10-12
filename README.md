@@ -2,7 +2,7 @@
 
 一个帮助学生核对学业进度、了解课程与教师、表达选课偏好并比较方案的学业规划项目。页面一次问一个问题，支持高绩点、工作量、签到、兴趣、指定教师、职业与时间等组合目标。课程事实和时间由 Java 核验，Agent 负责理解、规划与解释。
 
-**当前状态：开发设计、可校验接口契约、仓库检查工具和独立 HTML 示例。Java/Python/Vue 服务、真实班次接入和 RSI 指标尚未实现。**五人协作，一个计算机培养路径先行；当前第四周末，第八周提交。
+**当前状态：E1 学生目标引导 Vue 页面和仓库检查工具已实现。真实模式已接入匿名会话与已发布培养方案的 HTTP 调用，但 Python 服务尚未实现，当前不能完成真实后端联调。现有契约没有按会话读取学业记录的接口，因此页面会明确停在缺少学业记录，不伪造记录编号。显著标识的 fixture 模式仅演示流程。Java/Python 服务、真实班次接入、课程推荐和 RSI 指标尚未实现。**五人协作，一个计算机培养路径先行；当前第四周末，第八周提交。
 
 ## 先看懂项目，再开始开发
 
@@ -17,12 +17,14 @@
 | 你要做什么 | 入口 |
 | --- | --- |
 | 看学生体验 | [HTML 示例](demo/coursepilot-guided-demo.html)及[交接说明](demo/README.md)，下载后用浏览器打开 |
+| 启动 E1 学生页面 | [Vue Web 说明](web/README.md)：真实服务模式、虚构演示模式、检查方式与当前边界 |
 | 看项目怎么运转、每人最终交什么 | [团队业务总览](docs/15-team-baseline-and-batches.md)、[模块阅读入口](docs/05-team-and-sub-trds.md) |
 | 了解用户需要 | [PRD](docs/02-prd.md)、[选课需求与资料研究](docs/14-student-choice-research-and-ux.md) |
 | 实现接口 | [总体 TRD](docs/03-trd.md)、[行为契约](docs/04-infrastructure-workflow.md)、[OpenAPI/Schema](contracts/README.md) |
 | 找班次资料、理解它怎么抓取 | [公开历史数据与采集说明](docs/09-browser-adapter.md)：SHUOSC 历史 JSON、抓取流程、字段差异和模块交接 |
 | 看自己的完整模块职责 | [A 数据](docs/trd/a-data.md)、[B Java](docs/trd/b-verifier.md)、[C Agent](docs/trd/c-agent.md)、[D RSI](docs/trd/d-benchmark-rsi.md)、[E Web](docs/trd/e-web-integration.md) |
 | 提交与 debug | [工程规范](docs/16-engineering-and-debugging.md)、[GitHub 协作](docs/12-github-collaboration.md)、[PR 模板](.github/pull_request_template.md) |
+| E1 实施方案与任务进度 | [引导页面与披露自查方案](docs/20-e1-and-disclosure-implementation.md)、[Web任务核对记录](docs/21-web-task-status.md) |
 | 填志愿与账号 | [人员表模板](docs/team/team-signup-template.csv)，导入金山表格；填写后的表不要提交公开仓库 |
 | 看图与实验 | [Mermaid 图](docs/diagrams/README.md)、[Benchmark 协议](docs/07-benchmark-protocol.md) |
 
@@ -43,14 +45,25 @@ flowchart LR
 - `java-environment/`：A 导入 + B 数据和唯一规则核验，当前骨架。
 - `agent-runtime/`：C 唯一生产/评测 Runner 与运行 Harness，当前骨架。
 - `benchmark/`、`evo-harness/`：D 任务、隔离评分、失败归因与晋级，当前骨架。
-- `web/`：E 的 Vue 产品实现；`demo/` 是独立交互示例。
+- `web/`：E1 学生目标引导 Vue 页面，按相关目标分支收集课程考核偏好，在同一时间页分别填写必须避开与尽量避开的时段，并显式确认目标优先级、核对学业资料缺口；尚未实现学业记录录入、真实规划提交、推荐结果页和教师详情。`demo/` 是需要用户明确选择虚构资料后才能查看候选的独立交互示例。
 - `docs/`：PRD/TRD、开发规范、学习资料与设计图。
 - `scripts/`、`.github/`：契约、自查、模块检查和 PR/CI 规范。
 
 ## 仓库检查
 
+推荐用 [uv](https://docs.astral.sh/uv/) 配环境，依赖由 `pyproject.toml` 声明、`uv.lock` 锁定：
+
 ```bash
-python -m venv .venv
+uv sync --group dev
+uv run python scripts/check_contracts.py
+uv run python scripts/self_check.py
+uv run python scripts/check_modules.py
+```
+
+没有 uv 时用标准库 venv，效果相同：
+
+```bash
+python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 python scripts/check_contracts.py
@@ -58,7 +71,19 @@ python scripts/self_check.py
 python scripts/check_modules.py
 ```
 
+`requirements-dev.txt` 由 `uv export --only-group dev --no-hashes --no-emit-project -o requirements-dev.txt` 从锁文件生成，供 CI 和不用 uv 的人使用；改依赖请改 `pyproject.toml` 后重跑 `uv lock` 和该导出命令，不要手工编辑这两个文件。
+
 可执行服务还没建立，当前没有“一键启动完整系统”的承诺。各模块首次加代码时须同时加 manifest、固定依赖、测试入口与启动说明；模块检查明确输出尚未实现模块的 SKIP。CI 通过不代表功能全部实现或安全已经保证。
+
+运行前端 E1：
+
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+真实模式默认连接 `http://127.0.0.1:8000`；服务地址可用 `VITE_API_BASE_URL` 配置。显式演示模式用 `VITE_COURSEPILOT_MODE=fixture npm run dev`，所有示例数据均为虚构。版本、脚本和详细限制见 [Web README](web/README.md)。
 
 ## 数据与信任边界
 

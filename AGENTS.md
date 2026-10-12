@@ -12,7 +12,7 @@ A 导入/来源/黄金输入；B Java 存储/Audit/唯一 TimeParser/Verifier；
 
 真实班次未核验；上传者提供BROWSER_SNAPSHOT标签不能使sourceValidation自动VERIFIED。Java重新解析meetingTextRaw，不信任客户端meetings/parseStatus。REAL不能用synthetic，unknown不能通过，建议学期不等于本学期硬要求。
 
-教师绑定课程，历史评价按课程/教师/学期匹配；高绩点、签到、工作量、授课评价不能混为一谈。UI一次一问、学业记录只补缺、无关职业题跳过；工程报告独立受限。
+教师绑定课程，历史评价按课程/教师/学期匹配；高绩点、签到、工作量、授课评价不能混为一谈。UI一次一问、学业记录只补缺；每个问题都向全部学生展示，都可留空跳过，不按动机隐藏题目；工程报告独立受限。
 
 ## 安全与Debug
 
