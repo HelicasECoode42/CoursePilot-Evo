@@ -34,6 +34,7 @@ agent-runtime/
 
 - `PlanValidation`：`VALID` 时 `violations`/`unknownChecks` 必须为空；时间 scope 必须有 `offeringSnapshotId`。
 - `PlanningAnswer`：`CLARIFY` 必须有 `clarification` 且 `recommendations` 为空。
+- `Constraint`：`BLOCK_DAY`/`BLOCK_SECTION` 各取 dayOfWeek/section 一维，`BLOCK_SLOT` 两者都必填。
 
 对应关系由 `tests/test_schema_contract.py` 用仓库自带的 8 个正反例证明（正例通过、反例抛
 `ValidationError`）。`schemas/__init__.py` 的 `SCHEMA_DEFS` 是 `$defs` 名 → 模型 的映射。
@@ -67,6 +68,7 @@ python -m uvicorn agent_runtime.api.app:app --port 8000
   `UNABLE_TO_VERIFY`（`PLANNING_LOOP_PENDING`），不伪造推荐。
 - `ToolClient` 只有工具白名单注册表；未配置 `CP_JAVA_BASE_URL` 时任何工具报 `TOOL_UNAVAILABLE`(503)。
 - 会话与幂等是内存实现，仅本地 demo，非生产身份设计。
-- `planning.openapi.json` 的 11 个端点全部有对应路由；走 Java 的端点未配置 `CP_JAVA_BASE_URL`
-  时返回 `TOOL_UNAVAILABLE`(503)，不冒充无冲突。
+- `planning.openapi.json` 的 12 个端点全部有对应路由；走 Java 的端点未配置 `CP_JAVA_BASE_URL`
+  时返回 `TOOL_UNAVAILABLE`(503)，不冒充无冲突。`listSessionRecords` 对应的 Java 列表工具
+  （`listAcademicRecords`）尚待模块 B 在 `java.openapi.json` 补齐。
 - 预算默认值（8000/2000 tokens、6 tools、3 model calls、45 s）来自公共契约，未做性能实测。

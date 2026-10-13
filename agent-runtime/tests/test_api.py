@@ -54,6 +54,7 @@ class FakeToolClient:
             "listTeacherCourseOptions",
             "searchReviews",
             "listCareerDirections",
+            "listAcademicRecords",
         }:
             return []
         raise ToolUnavailable(tool)
@@ -149,6 +150,20 @@ def test_academic_records_save_is_idempotent() -> None:
     assert first.status_code == 201
     assert first.json()["data"]["academicRecordId"] == "record:demo"
     assert second.json() == first.json()
+
+
+def test_academic_records_list_requires_auth() -> None:
+    client = TestClient(create_app())
+    response = client.get("/api/v1/academic-records", headers={"X-Request-Id": "req:x1"})
+    assert response.status_code == 401
+
+
+def test_academic_records_list_ok_with_fake_java() -> None:
+    client = TestClient(create_app(tool_client=FakeToolClient()))
+    headers = {"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:x1"}
+    response = client.get("/api/v1/academic-records", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["data"] == {"items": []}
 
 
 def test_reports_requires_admin_key() -> None:

@@ -56,3 +56,16 @@ def read_record(
         tool_client.call("getAcademicRecord", None, context, params={"recordId": record_id}),
     )
     return envelope(x_request_id, "OK", result).model_dump(mode="json")
+
+
+@router.get("/api/v1/academic-records")
+def list_records(
+    request: Request,
+    subject_id: Annotated[str, Depends(require_subject)],
+    x_request_id: Annotated[str, Header(alias="X-Request-Id")],
+    tool_client: Annotated[ToolClient, Depends(get_tool_client)],
+) -> dict:
+    # List this session's saved records (empty items is a normal business state).
+    context = make_context(request, subject_id, x_request_id)
+    result = tool_client.call("listAcademicRecords", None, context)
+    return envelope(x_request_id, "OK", {"items": result}).model_dump(mode="json")

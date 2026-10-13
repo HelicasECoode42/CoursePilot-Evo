@@ -51,6 +51,9 @@ TOOLS: dict[str, ToolSpec] = {
     "validatePlan": ToolSpec("POST", "/api/v1/plans/validate", PlanValidation),
     "createAcademicRecord": ToolSpec("POST", "/api/v1/academic-records", AcademicRecord),
     "getAcademicRecord": ToolSpec("GET", "/api/v1/academic-records/{recordId}", AcademicRecord),
+    # listSessionRecords (planning.openapi.json) is the gateway's list endpoint; the
+    # Java side (java.openapi.json) still needs GET /api/v1/academic-records to back it.
+    "listAcademicRecords": ToolSpec("GET", "/api/v1/academic-records", AcademicRecord),
 }
 
 
