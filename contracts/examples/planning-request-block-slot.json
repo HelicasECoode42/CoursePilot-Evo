@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0",
+  "curriculumSnapshotId": "curr:demo",
+  "offeringSnapshotId": null,
+  "academicRecordId": "record:demo",
+  "mode": "REAL",
+  "promptText": "周一第 1 节必须空出来，周三第 2 节尽量避开。",
+  "intent": {
+    "motives": [
+      "SCHEDULE"
+    ],
+    "priorityOrder": [
+      "SCHEDULE"
+    ],
+    "hardConstraints": [
+      {
+        "kind": "BLOCK_SLOT",
+        "courseCode": null,
+        "teacherKey": null,
+        "dayOfWeek": 1,
+        "section": 1,
+        "value": null,
+        "sourceText": "周一第 1 节必须空出来"
+      }
+    ],
+    "softPreferences": [
+      {
+        "dimension": "schedule.blocked_slot",
+        "value": "3-2",
+        "sourceText": "周三第 2 节尽量避开"
+      }
+    ],
+    "pinnedTeacherCoursePairs": [],
+    "interestTags": [],
+    "careerDirectionIds": []
+  },
+  "previousPlanId": null
+}

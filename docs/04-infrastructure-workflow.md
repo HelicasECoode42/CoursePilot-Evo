@@ -53,6 +53,10 @@ B 维护唯一 TimeParser，A 提供原始 sksj/黄金输入。导入时完整�
 
 Meeting 的星期、节次、周次必须在该快照 calendar 范围内；sectionStart≤sectionEnd，weeks 非空、去重、排序。冲突=同星期∩节次相交∩周次相交。单双周不交不冲突；缺时间不是不冲突。
 
+时间类 Constraint 有三种且互斥：`BLOCK_DAY` 填 dayOfWeek、section 为 null，表示该星期整天；`BLOCK_SECTION` 填 section、dayOfWeek 为 null，表示每个上课日的该节；`BLOCK_SLOT` 两者都填，表示该星期的该一节。Schema 已用条件规则拒绝其他组合，不能靠约定维持。
+
+学生的 hardConstraints 不凌驾于培养要求。必修课唯一可选班次落在学生标记的必须避开时段时，判为 violation→INVALID 并指明是哪门必修与哪个时段冲突，由学生决定放宽该时段还是推迟该必修；不得静默忽略该约束，也不得为满足时间要求而删除必修建议。
+
 PlanValidation 判决优先级：存在已知 violation→INVALID；否则存在任一 requested hard check 无法执行→UNKNOWN；全部完成且无 violation→VALID。UNKNOWN 永远不能用布尔 false 混淆为“没有问题”。
 
 | scope | 条件 | UI 可说什么 |
