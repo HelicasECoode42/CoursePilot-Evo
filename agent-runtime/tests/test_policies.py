@@ -1,6 +1,16 @@
 from __future__ import annotations
 
-from agent_runtime.api.schemas import GoalIntent, Issue, PlanItem, PlanningRequest, PlanValidation
+import pytest
+from pydantic import ValidationError
+
+from agent_runtime.api.schemas import (
+    Constraint,
+    GoalIntent,
+    Issue,
+    PlanItem,
+    PlanningRequest,
+    PlanValidation,
+)
 from agent_runtime.domain.policies.answer_compiler import AnswerCompiler
 from agent_runtime.domain.policies.candidate_guard import CandidateGuard, KnownFacts
 from agent_runtime.domain.policies.intent_resolver import IntentResolver
@@ -94,3 +104,38 @@ def test_intent_resolver_accepts_goal() -> None:
     intent.priorityOrder = ["GPA"]
     resolved = IntentResolver().resolve(_request_with_intent(intent))
     assert resolved.needs_clarification is False
+
+
+def _constraint(**overrides: object) -> dict:
+    base: dict[str, object] = {
+        "kind": "BLOCK_DAY",
+        "courseCode": None,
+        "teacherKey": None,
+        "dayOfWeek": 1,
+        "section": None,
+        "value": None,
+        "sourceText": "周五没课",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_constraint_block_day_rejects_section() -> None:
+    with pytest.raises(ValidationError):
+        Constraint(**_constraint(kind="BLOCK_DAY", dayOfWeek=1, section=2))
+
+
+def test_constraint_block_section_rejects_day() -> None:
+    with pytest.raises(ValidationError):
+        Constraint(**_constraint(kind="BLOCK_SECTION", dayOfWeek=1, section=3))
+
+
+def test_constraint_block_slot_requires_both() -> None:
+    with pytest.raises(ValidationError):
+        Constraint(**_constraint(kind="BLOCK_SLOT", dayOfWeek=1, section=None))
+
+
+def test_constraint_block_slot_accepts_both() -> None:
+    constraint = Constraint(**_constraint(kind="BLOCK_SLOT", dayOfWeek=1, section=3))
+    assert constraint.dayOfWeek == 1
+    assert constraint.section == 3

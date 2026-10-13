@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints
+from pydantic import Field, StringConstraints, model_validator
 
 from ._base import Credits, DomainModel, Id
 
@@ -24,6 +24,7 @@ Motive = Literal[
 ConstraintKind = Literal[
     "BLOCK_DAY",
     "BLOCK_SECTION",
+    "BLOCK_SLOT",
     "PIN_TEACHER_COURSE",
     "PIN_COURSE",
     "MAX_CREDITS",
@@ -42,6 +43,25 @@ class Constraint(DomainModel):
     section: Annotated[int, Field(ge=1, le=64)] | None
     value: Credits | None
     sourceText: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+
+    @model_validator(mode="after")
+    def _time_constraint_shape(self) -> Constraint:
+        # Re-encode the schema's allOf if/then rules: BLOCK_DAY/SECTION pick one
+        # dimension, BLOCK_SLOT requires both (contracts/schemas/domain.schema.json).
+        if self.kind == "BLOCK_DAY":
+            if self.dayOfWeek is None:
+                raise ValueError("BLOCK_DAY requires dayOfWeek")
+            if self.section is not None:
+                raise ValueError("BLOCK_DAY requires section to be null")
+        elif self.kind == "BLOCK_SECTION":
+            if self.dayOfWeek is not None:
+                raise ValueError("BLOCK_SECTION requires dayOfWeek to be null")
+            if self.section is None:
+                raise ValueError("BLOCK_SECTION requires section")
+        elif self.kind == "BLOCK_SLOT":
+            if self.dayOfWeek is None or self.section is None:
+                raise ValueError("BLOCK_SLOT requires both dayOfWeek and section")
+        return self
 
 
 class TeacherPreference(DomainModel):
