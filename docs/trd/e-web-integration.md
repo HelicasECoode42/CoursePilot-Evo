@@ -43,6 +43,7 @@ store 分 inputDraft、record/audit、planningResult、requestState；表单 sta
 
 | UI 动作 | 接口 / 状态 |
 | --- | --- |
+| 读本会话学业记录 | `GET academic-records`，由会话派生归属，浏览器不提交 owner；`items` 为空表示尚无记录，是正常业务状态而不是错误，此时走补录入口 |
 | 选路径/查课程 | curricula/courses，带 requestId，处理空与分页 |
 | 查教师与评价 | teacher-course-options/reviews，current/historical/unknown 分开 |
 | 看职业介绍 | career-directions，按 subjectTag，只展示有来源内容 |
