@@ -53,5 +53,20 @@
     "file": "invalid-block-slot-missing-section.json",
     "definition": "PlanningRequest",
     "valid": false
+  },
+  {
+    "file": "academic-record.json",
+    "definition": "AcademicRecord",
+    "valid": true
+  },
+  {
+    "file": "invalid-academic-record-unknown-outcome.json",
+    "definition": "AcademicRecord",
+    "valid": false
+  },
+  {
+    "file": "invalid-academic-record-missing-revision.json",
+    "definition": "AcademicRecord",
+    "valid": false
   }
 ]
