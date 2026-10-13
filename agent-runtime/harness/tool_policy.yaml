@@ -1,0 +1,18 @@
+# Registered Java tools the model may call, with per-run call caps.
+# The hard cap is enforced by the runner budget (maxToolCalls=6); per-tool caps
+# must never exceed it.
+tools:
+  - name: auditRequirements
+    max_calls: 1
+  - name: listCourses
+    max_calls: 2
+  - name: listTeacherCourseOptions
+    max_calls: 2
+  - name: searchReviews
+    max_calls: 2
+  - name: listOfferings
+    max_calls: 1
+  - name: listCareerDirections
+    max_calls: 1
+  - name: validatePlan
+    max_calls: 2
