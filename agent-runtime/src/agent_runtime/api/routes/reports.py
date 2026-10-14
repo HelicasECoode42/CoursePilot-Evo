@@ -1,4 +1,4 @@
-"""GET /api/v1/reports/runs/{run_id} — restricted teacher report."""
+"""GET /api/v1/reports/runs/{runId} — restricted teacher report."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ from agent_runtime.api.errors import NotFoundError
 router = APIRouter()
 
 
-@router.get("/api/v1/reports/runs/{run_id}")
+@router.get("/api/v1/reports/runs/{runId}")
 def get_run_report(
-    run_id: str,
+    runId: str,
     subject_id: Annotated[str, Depends(require_subject)],
     x_request_id: Annotated[str, Header(alias="X-Request-Id")],
     admin: Annotated[None, Depends(require_admin)],

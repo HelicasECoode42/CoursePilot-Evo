@@ -166,6 +166,14 @@ def test_academic_records_list_ok_with_fake_java() -> None:
     assert response.json()["data"] == {"items": []}
 
 
+def test_academic_records_read_uses_camel_case_path() -> None:
+    client = TestClient(create_app(tool_client=FakeToolClient()))
+    headers = {"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:x1"}
+    response = client.get("/api/v1/academic-records/record:demo", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["data"]["academicRecordId"] == "record:demo"
+
+
 def test_reports_requires_admin_key() -> None:
     client = TestClient(create_app(Settings(admin_key="secret")))
     headers = {"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:x1"}
