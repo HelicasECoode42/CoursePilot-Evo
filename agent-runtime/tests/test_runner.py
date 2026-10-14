@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -8,8 +9,15 @@ import pytest
 from agent_runtime.adapters.fake_tools import TypedFakeToolClient
 from agent_runtime.adapters.harness_loader import HarnessSnapshot
 from agent_runtime.adapters.model_client import FakeModelAdapter, ModelInvalidOutput, ModelReply
+from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient, ToolUnavailable
-from agent_runtime.api.schemas import PlanItem, PlanningRequest
+from agent_runtime.api.schemas import (
+    Constraint,
+    PlanItem,
+    PlanningRequest,
+    RunManifest,
+    TeacherPreference,
+)
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.runner import PlanningRunner
 
@@ -89,6 +97,69 @@ def test_run_stops_after_one_invalid_output_repair(planning_request: PlanningReq
     answer = _runner(AlwaysInvalid()).run(planning_request, _context(planning_request))
     assert answer.decision == "UNABLE_TO_VERIFY"
     assert any(issue.code == "MODEL_INVALID_OUTPUT" for issue in answer.unknowns)
+
+
+def test_run_persists_sanitized_trace_and_manifest(
+    planning_request: PlanningRequest, tmp_path: Path
+) -> None:
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    repository = FileResultRepository(tmp_path)
+    runner = PlanningRunner(
+        tool_client=TypedFakeToolClient(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        result_repository=repository,
+    )
+    answer = runner.run(planning_request, _context(planning_request))
+    directory = tmp_path / answer.traceId.replace(":", "_")
+    events = [
+        line
+        for line in (directory / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line
+    ]
+    assert events
+    last_event = json.loads(events[-1])
+    assert last_event["eventType"] == "FINAL_DELIVERED"
+    assert last_event["inputTokens"] is None
+    assert last_event["outputTokens"] is None
+    assert "promptText" not in (directory / "events.jsonl").read_text(encoding="utf-8")
+    manifest = RunManifest.model_validate_json(
+        (directory / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest.maxInputTokens == 8000
+    assert manifest.maxToolCalls == 6
+    assert manifest.deadlineMs == 45000
+    assert manifest.modelId == "DEPLOYMENT_MODEL_PLACEHOLDER"
+    saved = json.loads((directory / "answer.json").read_text(encoding="utf-8"))
+    assert saved["decision"] == answer.decision
+
+
+def test_run_clarifies_must_teacher_vs_hard_time(planning_request: PlanningRequest) -> None:
+    planning_request.intent.motives = ["SPECIFIC_TEACHER", "SCHEDULE"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    planning_request.intent.pinnedTeacherCoursePairs = [
+        TeacherPreference(courseCode="CS101", teacherKey="teacher:demo", mode="MUST")
+    ]
+    planning_request.intent.hardConstraints = [
+        Constraint(
+            kind="BLOCK_SLOT",
+            courseCode=None,
+            teacherKey=None,
+            dayOfWeek=5,
+            section=1,
+            value=None,
+            sourceText="周五第1节必须空",
+        )
+    ]
+    answer = _runner().run(planning_request, _context(planning_request))
+    assert answer.decision == "CLARIFY"
+    assert answer.clarification is not None
+    assert answer.clarification.questionId == "tradeoff:teacher-vs-schedule"
+    assert answer.recommendations == []
+    assert {choice.value for choice in answer.clarification.choices} == {
+        "KEEP_TEACHER",
+        "KEEP_SCHEDULE",
+    }
 
 
 def test_run_raises_tool_unavailable_without_java(planning_request: PlanningRequest) -> None:

@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_MODULE_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="CP_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="CP_",
+        extra="ignore",
+    )
 
     # Java tool API (module B). Empty -> tools report TOOL_UNAVAILABLE (503).
     java_base_url: str | None = None
@@ -34,3 +41,11 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+
+def load_settings(env_file: Path | None = None) -> Settings:
+    """Load ``agent-runtime/.env`` for local runs. Tests should call ``Settings()``."""
+    env_path = env_file if env_file is not None else _MODULE_ROOT / ".env"
+    if env_path.is_file():
+        return Settings(_env_file=env_path)
+    return Settings()

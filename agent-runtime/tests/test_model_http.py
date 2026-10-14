@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -40,6 +41,9 @@ def test_http_model_parses_json_items() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "Bearer test-key"
         assert request.url.path.endswith("/chat/completions")
+        body = json.loads(request.content)
+        assert body["response_format"] == {"type": "json_object"}
+        assert all(message["role"] != "tool" for message in body["messages"])
         return httpx.Response(
             200,
             json={
@@ -66,6 +70,38 @@ def test_http_model_parses_json_items() -> None:
     reply = adapter.generate(context=_context(), messages=[], tool_schemas=[])
     assert reply.items is not None
     assert reply.items[0].courseCode == "CS101"
+
+
+def test_http_model_extracts_json_from_fenced_text() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "好的，候选如下\n```json\n"
+                                '{"items":[{"courseCode":"MATH201",'
+                                '"teacherKey":null,"classId":null}]}\n```'
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    adapter = HttpModelAdapter(
+        "https://api.deepseek.com",
+        "test-key",
+        "deepseek-chat",
+        0.0,
+        transport=httpx.MockTransport(handler),
+    )
+    reply = adapter.generate(context=_context(), messages=[], tool_schemas=[])
+    assert reply.items is not None
+    assert reply.items[0].courseCode == "MATH201"
 
 
 def test_http_model_invalid_json_raises() -> None:

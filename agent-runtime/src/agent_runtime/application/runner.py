@@ -14,6 +14,7 @@ from agent_runtime.adapters.model_client import (
     ModelInvalidOutput,
     ModelReply,
 )
+from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient
 from agent_runtime.adapters.trace_port import TracePort
 from agent_runtime.api.schemas import (
@@ -31,6 +32,7 @@ from agent_runtime.api.schemas import (
 from agent_runtime.application.budget import Budget, BudgetTracker
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.ids import digest, new_id
+from agent_runtime.application.run_manifest import RunIdentity, build_run_manifest
 from agent_runtime.domain.policies.answer_compiler import AnswerCompiler
 from agent_runtime.domain.policies.candidate_guard import CandidateGuard, KnownFacts
 from agent_runtime.domain.policies.clarification_policy import ClarificationPolicy
@@ -55,6 +57,8 @@ class PlanningRunner:
         clarification_policy: ClarificationPolicy | None = None,
         answer_compiler: AnswerCompiler | None = None,
         candidate_guard: CandidateGuard | None = None,
+        result_repository: FileResultRepository | None = None,
+        run_identity: RunIdentity | None = None,
     ) -> None:
         self._tools = tool_client
         self._harness = harness
@@ -63,6 +67,8 @@ class PlanningRunner:
         self._clarification = clarification_policy or ClarificationPolicy()
         self._answer = answer_compiler or AnswerCompiler()
         self._guard = candidate_guard or CandidateGuard()
+        self._results = result_repository
+        self._run_identity = run_identity or RunIdentity()
 
     def run(self, request: PlanningRequest, context: ExecutionContext) -> PlanningAnswer:
         task_id = new_id("task")
@@ -104,8 +110,7 @@ class PlanningRunner:
             answer = self._answer.clarify(
                 task_id=task_id, trace_id=trace_id, audit=audit, question=question, usage=usage
             )
-            trace.emit("FINAL_DELIVERED", output_ref=answer.taskId)
-            return answer
+            return self._deliver(answer, trace, context)
 
         facts = self._collect_facts(request, audit, context, budget, trace)
         reply = self._propose(request, context, facts, budget, trace)
@@ -127,8 +132,7 @@ class PlanningRunner:
                 usage=usage,
             )
             trace.emit("ERROR", error_code="MODEL_INVALID_OUTPUT")
-            trace.emit("FINAL_DELIVERED", output_ref=answer.taskId)
-            return answer
+            return self._deliver(answer, trace, context)
 
         if reply.clarify is not None:
             trace.emit("CLARIFICATION_REQUESTED", output_ref=reply.clarify.questionId)
@@ -139,8 +143,7 @@ class PlanningRunner:
                 question=reply.clarify,
                 usage=usage,
             )
-            trace.emit("FINAL_DELIVERED", output_ref=answer.taskId)
-            return answer
+            return self._deliver(answer, trace, context)
 
         items = reply.items or []
         guard_issues = self._guard.check(items, facts)
@@ -161,8 +164,7 @@ class PlanningRunner:
                 usage=usage,
             )
             trace.emit("ERROR", error_code="EVIDENCE_MISMATCH")
-            trace.emit("FINAL_DELIVERED", output_ref=answer.taskId)
-            return answer
+            return self._deliver(answer, trace, context)
 
         trace.emit("CANDIDATE_PROPOSED", output_ref=items[0].courseCode)
         verdict = cast(
@@ -204,8 +206,7 @@ class PlanningRunner:
             usage=usage,
             unknowns=unknowns,
         )
-        trace.emit("FINAL_DELIVERED", output_ref=answer.taskId)
-        return answer
+        return self._deliver(answer, trace, context)
 
     def _collect_facts(
         self,
@@ -261,7 +262,7 @@ class PlanningRunner:
             },
             {"role": "user", "content": request.promptText},
             {
-                "role": "tool",
+                "role": "user",
                 "content": FACTS_MESSAGE_PREFIX
                 + json.dumps(
                     {
@@ -301,7 +302,9 @@ class PlanningRunner:
         budget.record_tool_call()
         budget.check_deadline()
         trace.emit("TOOL_CALLED", tool_name=name)
+        started = datetime.now(UTC)
         result = self._tools.call(name, dto, context, params=params)
+        duration_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
         output_ref = None
         if hasattr(result, "academicRecordId"):
             output_ref = result.academicRecordId
@@ -309,8 +312,28 @@ class PlanningRunner:
             output_ref = result.verifierResultId
         elif isinstance(result, list) and result and hasattr(result[0], "courseCode"):
             output_ref = result[0].courseCode
-        trace.emit("TOOL_RETURNED", tool_name=name, output_ref=output_ref)
+        trace.emit(
+            "TOOL_RETURNED",
+            tool_name=name,
+            output_ref=output_ref,
+            duration_ms=duration_ms,
+        )
         return result
+
+    def _deliver(
+        self,
+        answer: PlanningAnswer,
+        trace: TracePort,
+        context: ExecutionContext,
+    ) -> PlanningAnswer:
+        trace.emit("FINAL_DELIVERED", output_ref=answer.taskId)
+        if self._results is not None:
+            self._results.save(
+                answer=answer,
+                events=trace.events,
+                manifest=build_run_manifest(context=context, identity=self._run_identity),
+            )
+        return answer
 
     @staticmethod
     def _usage(budget: BudgetTracker, started: datetime) -> Usage:

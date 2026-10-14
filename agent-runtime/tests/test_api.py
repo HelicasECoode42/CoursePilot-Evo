@@ -10,7 +10,7 @@ from agent_runtime.adapters.fake_tools import TypedFakeToolClient
 from agent_runtime.adapters.tool_client import ToolUnavailable
 from agent_runtime.api.app import create_app
 from agent_runtime.api.schemas import AcademicRecord, AuditResult, PlanningRequest
-from agent_runtime.api.settings import Settings
+from agent_runtime.api.settings import Settings, load_settings
 from agent_runtime.application.ids import digest
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
@@ -215,6 +215,22 @@ def test_planning_in_progress_same_key_returns_409() -> None:
     )
     assert response.status_code == 409
     assert response.json()["issues"][0]["code"] == "REQUEST_IN_PROGRESS"
+
+
+def test_plain_settings_ignores_local_env_file() -> None:
+    settings = Settings()
+    assert settings.use_fake_tools is False
+    assert settings.model_api_key == ""
+    assert settings.java_base_url is None
+
+
+def test_load_settings_reads_explicit_env_file(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("CP_USE_FAKE_TOOLS=true\nCP_MODEL_ID=deepseek-chat\n", encoding="utf-8")
+    settings = load_settings(env_file)
+    assert settings.use_fake_tools is True
+    assert settings.model_id == "deepseek-chat"
+    assert settings.model_api_key == ""
 
 
 def test_reports_requires_admin_key() -> None:

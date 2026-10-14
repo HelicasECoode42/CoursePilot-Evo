@@ -10,12 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from agent_runtime.adapters.fake_tools import TypedFakeToolClient
 from agent_runtime.adapters.harness_loader import HarnessLoader
 from agent_runtime.adapters.model_client import build_model_adapter
+from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient
 from agent_runtime.api.errors import register_error_handlers
 from agent_runtime.api.idempotency import IdempotencyStore
 from agent_runtime.api.routes import academic_records, gateway, planning, reports, sessions
 from agent_runtime.api.session_store import SessionStore
-from agent_runtime.api.settings import Settings
+from agent_runtime.api.settings import Settings, load_settings
+from agent_runtime.application.run_manifest import RunIdentity
 from agent_runtime.application.runner import PlanningRunner
 
 _MODULE_ROOT = Path(__file__).resolve().parents[3]
@@ -26,6 +28,7 @@ def create_app(
     *,
     tool_client: ToolClient | None = None,
     runner: PlanningRunner | None = None,
+    result_repository: FileResultRepository | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     harness = HarnessLoader(_resolve_harness_dir(settings)).load()
@@ -43,6 +46,9 @@ def create_app(
     app.state.idempotency = IdempotencyStore()
     app.state.harness = harness
     app.state.tool_client = tool_client
+    verifier_version = (
+        "verifier:fake" if isinstance(tool_client, TypedFakeToolClient) else "verifier:local-unset"
+    )
     app.state.runner = runner or PlanningRunner(
         tool_client=tool_client,
         harness=harness,
@@ -52,6 +58,8 @@ def create_app(
             model_id=settings.model_id,
             temperature=settings.temperature,
         ),
+        result_repository=result_repository,
+        run_identity=RunIdentity(verifier_version=verifier_version),
     )
 
     app.add_middleware(
@@ -81,3 +89,9 @@ def _resolve_harness_dir(settings: Settings) -> Path:
     if path.is_absolute():
         return path
     return (_MODULE_ROOT / path).resolve()
+
+
+app = create_app(
+    settings=load_settings(),
+    result_repository=FileResultRepository(_MODULE_ROOT / "runs"),
+)

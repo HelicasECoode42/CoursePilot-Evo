@@ -120,11 +120,12 @@ class HttpModelAdapter:
         tool_schemas: list[dict],
     ) -> ModelReply:
         del tool_schemas
-        timeout = max(0.1, min(15.0, (context.deadline - datetime.now(UTC)).total_seconds()))
+        timeout = max(0.1, min(40.0, (context.deadline - datetime.now(UTC)).total_seconds()))
         url = f"{self._base_url}/chat/completions"
         payload = {
             "model": self._model_id,
             "temperature": self._temperature,
+            "response_format": {"type": "json_object"},
             "messages": [
                 {
                     "role": "system",
@@ -155,15 +156,26 @@ class HttpModelAdapter:
             content = response.json()["choices"][0]["message"]["content"]
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise ModelInvalidOutput("模型响应缺少 content") from exc
+        if not isinstance(content, str) or not content.strip():
+            raise ModelInvalidOutput("模型响应缺少 content")
         return _reply_from_content(content)
 
 
-def _reply_from_content(content: str) -> ModelReply:
+def _extract_json_object(content: str) -> str:
     text = content.strip()
     if text.startswith("```"):
         text = text.strip("`")
         if text.lower().startswith("json"):
             text = text[4:].strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        return text[start : end + 1]
+    return text
+
+
+def _reply_from_content(content: str) -> ModelReply:
+    text = _extract_json_object(content)
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
