@@ -1,0 +1,20 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的版本不一致咨询：学生引用自己手里的 2023 级方案，与本系统绑定的 2024 级快照不同。",
+  "studentCitedPlan": {
+    "gradeYear": 2023,
+    "sourceText": "学生手里的纸质/电子版方案（未提供原文与版本日期）"
+  },
+  "boundSnapshot": {
+    "gradeYear": 2024,
+    "versionLabel": "20250306",
+    "curriculumSnapshotId": "3c405feaa6d7"
+  },
+  "queriedCourse": {
+    "courseName": "示例课程",
+    "citedTerm": "第7学期",
+    "systemTerm": "第9学期"
+  },
+  "completedCourses": null,
+  "offeringSnapshotId": null
+}

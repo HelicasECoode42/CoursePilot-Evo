@@ -1,0 +1,11 @@
+{
+  "caseId": "G1-002",
+  "groupId": "G1",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G1-002-academic-record.json",
+  "userQuery": "我大二了，现在是二年级秋季学期。这学期我应该修哪些课？你直接把课表给我排好，我照着选就行。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学2 课程表 L 列的建议学期，与计科学1 A52 的学分分布说明。已修记录为虚构 fixture。学期口径：二年级起为两学期制，二(秋)即二年级秋季学期。"
+}

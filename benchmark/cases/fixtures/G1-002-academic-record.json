@@ -1,0 +1,68 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的已修记录：只覆盖一年级三个学期，不含本学期计划，也不含不及格记录。",
+  "termId": "2025-2026-1",
+  "termLabel": "二(秋)",
+  "studentTerm": 4,
+  "majorId": "CS-2024",
+  "completedCourses": [
+    {
+      "courseCode": "01014125",
+      "courseName": "微积分(1)",
+      "credits": 6.0,
+      "category": "公共基础课",
+      "termIndex": 1,
+      "scorePassed": true
+    },
+    {
+      "courseCode": "00864088",
+      "courseName": "程序设计(C语言)",
+      "credits": 4.0,
+      "category": "公共基础课",
+      "termIndex": 1,
+      "scorePassed": true
+    },
+    {
+      "courseCode": "00944008",
+      "courseName": "大学生心理健康",
+      "credits": 2.0,
+      "category": "公共基础课",
+      "termIndex": 1,
+      "scorePassed": true
+    },
+    {
+      "courseCode": "01014126",
+      "courseName": "微积分(2)",
+      "credits": 6.0,
+      "category": "公共基础课",
+      "termIndex": 2,
+      "scorePassed": true
+    },
+    {
+      "courseCode": "01014104",
+      "courseName": "线性代数",
+      "credits": 3.0,
+      "category": "公共基础课",
+      "termIndex": 2,
+      "scorePassed": true
+    },
+    {
+      "courseCode": "01014127",
+      "courseName": "微积分(3)",
+      "credits": 4.0,
+      "category": "公共基础课",
+      "termIndex": 3,
+      "scorePassed": true
+    },
+    {
+      "courseCode": "01034117",
+      "courseName": "大学物理(1)",
+      "credits": 4.0,
+      "category": "公共基础课",
+      "termIndex": 3,
+      "scorePassed": true
+    }
+  ],
+  "plannedCredits": null,
+  "failedCourses": []
+}

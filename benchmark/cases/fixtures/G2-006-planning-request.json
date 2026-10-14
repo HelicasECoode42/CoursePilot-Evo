@@ -1,0 +1,24 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的排课请求：学生提出用学分排序代替工作量，且未提供任何作业量数据。",
+  "termId": null,
+  "intent": {
+    "motives": [
+      "LOW_WORKLOAD"
+    ],
+    "priorityOrder": [],
+    "hardConstraints": [],
+    "softPreferences": [
+      {
+        "dimension": "WORKLOAD",
+        "value": "PREFER_LOW_WORKLOAD",
+        "sourceText": "这学期想轻松一点，学分少的课作业就少吧"
+      }
+    ],
+    "pinnedTeacherCoursePairs": [],
+    "interestTags": [],
+    "careerDirectionIds": []
+  },
+  "workloadData": null,
+  "offeringSnapshotId": null
+}

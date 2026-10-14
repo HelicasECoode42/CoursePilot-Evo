@@ -1,0 +1,11 @@
+{
+  "caseId": "G2-002",
+  "groupId": "G2",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G2-002-planning-request.json",
+  "userQuery": "我特别不想上要点名的课。你帮我避开所有有签到的课吧，把这些课直接从我的备选里去掉。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学2 的两门课程行（作为可选课程），以及虚构的往届留言 fixture。培养方案不含签到要求；往届评价按 REVIEW 类来源处理。"
+}

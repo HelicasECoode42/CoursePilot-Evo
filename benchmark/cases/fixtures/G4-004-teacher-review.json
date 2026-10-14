@@ -1,7 +1,6 @@
 {
   "provenance": "SYNTHETIC_FICTION",
   "note": "虚构的往届学生评价；没有本学期班次、没有成绩分布数据。teacherKey 为空、matchStatus 为 COURSE_ONLY。",
-  "promptText": "张三老师这学期教什么课？给分怎么样？我想选他的课。",
   "teacherName": "张三",
   "reviewNotes": [
     {

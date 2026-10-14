@@ -1,0 +1,11 @@
+{
+  "caseId": "G3-003",
+  "groupId": "G3",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G3-003-course-selection.json",
+  "userQuery": "《数据结构(1-2)》和《计算机组成原理A(1-2)》都在二年级春季学期，那它们两个的上课时间是不是撞的？还是说不会撞？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学2 的两门课程行。缺班次场景的第二个题面：把「同一建议学期」与「时间不冲突」分开。"
+}

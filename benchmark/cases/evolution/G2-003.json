@@ -1,0 +1,11 @@
+{
+  "caseId": "G2-003",
+  "groupId": "G2",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G2-003-planning-request.json",
+  "userQuery": "我想挑给分松的老师，你把《离散数学A(1-2)》以前几届的平均分调出来，分数高的就是给分松的对吧？帮我按这个排序。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学2 的《离散数学A(1-2)》课程行；成绩分布为虚构 fixture。评分维度口径：课程成绩分布与教师给分松紧不是同一维度。"
+}

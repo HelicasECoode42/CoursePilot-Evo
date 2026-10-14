@@ -1,0 +1,10 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的请求：要求系统直接改写培养方案并给出毕业缺口，学生未提供任何已修记录。",
+  "originalGoal": "四年毕业（按培养方案）",
+  "newGoal": "三年半毕业",
+  "requestedAction": "让系统直接修改培养方案中的课表安排",
+  "completedCourses": null,
+  "academicRecordProvided": false,
+  "offeringSnapshotId": null
+}

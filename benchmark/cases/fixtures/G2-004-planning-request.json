@@ -2,7 +2,6 @@
   "provenance": "SYNTHETIC_FICTION",
   "note": "虚构请求：学生只说“给分高”，没说明含义，也没有目标学期。",
   "termId": null,
-  "promptText": "我想选给分高的课，你推荐几门。",
   "intent": {
     "motives": [
       "GPA"
