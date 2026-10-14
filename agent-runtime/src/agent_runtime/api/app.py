@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from agent_runtime.adapters.fake_tools import TypedFakeToolClient
 from agent_runtime.adapters.harness_loader import HarnessLoader
-from agent_runtime.adapters.model_client import FakeModelAdapter
+from agent_runtime.adapters.model_client import build_model_adapter
 from agent_runtime.adapters.tool_client import ToolClient
 from agent_runtime.api.errors import register_error_handlers
 from agent_runtime.api.idempotency import IdempotencyStore
@@ -46,7 +46,12 @@ def create_app(
     app.state.runner = runner or PlanningRunner(
         tool_client=tool_client,
         harness=harness,
-        model_adapter=FakeModelAdapter(),
+        model_adapter=build_model_adapter(
+            model_base_url=settings.model_base_url,
+            model_api_key=settings.model_api_key,
+            model_id=settings.model_id,
+            temperature=settings.temperature,
+        ),
     )
 
     app.add_middleware(

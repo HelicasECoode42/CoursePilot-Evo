@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Protocol
+
+import httpx
 
 from agent_runtime.api.schemas import PlanItem, Question
 from agent_runtime.application.context import ExecutionContext
@@ -89,3 +92,99 @@ class FakeModelAdapter:
             for code in sorted(facts.course_codes)[:3]
         ]
         return ModelReply(items=items)
+
+
+class HttpModelAdapter:
+    """OpenAI-compatible chat completions. Endpoint comes from settings, never from text."""
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        model_id: str,
+        temperature: float,
+        *,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._model_id = model_id
+        self._temperature = temperature
+        self._transport = transport
+
+    def generate(
+        self,
+        *,
+        context: ExecutionContext,
+        messages: list[dict[str, str]],
+        tool_schemas: list[dict],
+    ) -> ModelReply:
+        del tool_schemas
+        timeout = max(0.1, min(15.0, (context.deadline - datetime.now(UTC)).total_seconds()))
+        url = f"{self._base_url}/chat/completions"
+        payload = {
+            "model": self._model_id,
+            "temperature": self._temperature,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "只输出一个 JSON 对象，不要解释。"
+                        '格式为 {"items":[{"courseCode":"...","teacherKey":null,"classId":null}]} '
+                        '或 {"clarify":{"questionId":"...","text":"...","choices":[],'
+                        '"allowFreeText":true,"requiredFor":[]}}。'
+                        "courseCode 必须来自 AVAILABLE_FACTS。"
+                    ),
+                },
+                *messages,
+            ],
+        }
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+            "X-Request-Id": context.request_id,
+        }
+        try:
+            with httpx.Client(timeout=timeout, transport=self._transport) as client:
+                response = client.post(url, headers=headers, json=payload)
+        except httpx.HTTPError as exc:
+            raise ModelInvalidOutput("模型请求失败") from exc
+        if response.status_code >= 400:
+            raise ModelInvalidOutput("模型端点拒绝请求")
+        try:
+            content = response.json()["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise ModelInvalidOutput("模型响应缺少 content") from exc
+        return _reply_from_content(content)
+
+
+def _reply_from_content(content: str) -> ModelReply:
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ModelInvalidOutput("模型输出不是 JSON") from exc
+    if not isinstance(data, dict):
+        raise ModelInvalidOutput("模型输出不是 JSON 对象")
+    if data.get("clarify") is not None:
+        return ModelReply(clarify=Question.model_validate(data["clarify"]))
+    raw_items = data.get("items") or []
+    if not raw_items:
+        raise ModelInvalidOutput("模型未给出候选")
+    return ModelReply(items=[PlanItem.model_validate(item) for item in raw_items])
+
+
+def build_model_adapter(
+    *,
+    model_base_url: str | None,
+    model_api_key: str,
+    model_id: str,
+    temperature: float,
+) -> FakeModelAdapter | HttpModelAdapter:
+    if model_base_url and model_api_key:
+        return HttpModelAdapter(model_base_url, model_api_key, model_id, temperature)
+    return FakeModelAdapter()

@@ -72,8 +72,11 @@ python -m uvicorn agent_runtime.api.app:app --port 8000
   `UNKNOWN` + `COURSE_ONLY`，不能当成无冲突课表。
 - 有目标时 Runner 走 提议 → Guard → `validatePlan` → 编译；候选 id 不在工具集合则
   `EVIDENCE_MISMATCH`/`UNKNOWN_COURSE`，非法模型 JSON 只修复一次。
-- `ToolClient` 的 HTTP 调用仍未接通；未配置 `CP_JAVA_BASE_URL` 且未开假工具时
-  `TOOL_UNAVAILABLE`(503)。
+- `ToolClient` 已按 `java.openapi.json` 发 typed HTTP（`X-Service-Key` /
+  `X-Subject-Id` / `X-Request-Id`，GET 列表读 `data.items`）。未配置
+  `CP_JAVA_BASE_URL` 且未开假工具时仍是 `TOOL_UNAVAILABLE`(503)。
+- 配置了 `CP_MODEL_BASE_URL` 与 `CP_MODEL_API_KEY` 时走 OpenAI 兼容
+  `/chat/completions`；密钥只放本机 `.env`。未配置时仍用假模型。
 - 会话与幂等是内存实现。相同键执行中返回 `409 REQUEST_IN_PROGRESS`；失败会释放占位以便重试。
 - `planning.openapi.json` 的 12 个端点全部有对应路由；走 Java 的端点未配置 `CP_JAVA_BASE_URL`
   时返回 `TOOL_UNAVAILABLE`(503)，不冒充无冲突。`listSessionRecords` 对应的 Java 列表工具
