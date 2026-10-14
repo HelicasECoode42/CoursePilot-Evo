@@ -76,3 +76,24 @@ class AnswerCompiler:
             reviewNoteIds=review_note_ids,
             verification=verdict,
         )
+
+    def recommendations(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        audit: AuditResult,
+        recommendations: list[Recommendation],
+        usage: Usage,
+        unknowns: list[Issue] | None = None,
+    ) -> PlanningAnswer:
+        return PlanningAnswer(
+            taskId=task_id,
+            traceId=trace_id,
+            decision="RECOMMENDATIONS",
+            academicAudit=audit,
+            recommendations=recommendations[:3],
+            clarification=None,
+            unknowns=unknowns or [],
+            usage=usage,
+        )

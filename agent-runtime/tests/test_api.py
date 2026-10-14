@@ -6,10 +6,12 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from agent_runtime.adapters.fake_tools import TypedFakeToolClient
 from agent_runtime.adapters.tool_client import ToolUnavailable
 from agent_runtime.api.app import create_app
-from agent_runtime.api.schemas import AcademicRecord, AuditResult
+from agent_runtime.api.schemas import AcademicRecord, AuditResult, PlanningRequest
 from agent_runtime.api.settings import Settings
+from agent_runtime.application.ids import digest
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
@@ -172,6 +174,47 @@ def test_academic_records_read_uses_camel_case_path() -> None:
     response = client.get("/api/v1/academic-records/record:demo", headers=headers)
     assert response.status_code == 200
     assert response.json()["data"]["academicRecordId"] == "record:demo"
+
+
+def test_planning_w2_fake_tools_returns_unknown_course_layer() -> None:
+    client = TestClient(create_app(tool_client=TypedFakeToolClient()))
+    response = client.post(
+        "/api/v1/planning",
+        json=_request_body(),
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "Idempotency-Key": "k-w2",
+            "X-Request-Id": "req:w2",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "OK"
+    assert body["data"]["decision"] == "RECOMMENDATIONS"
+    assert body["data"]["recommendations"][0]["verification"]["verdict"] == "UNKNOWN"
+
+
+def test_planning_in_progress_same_key_returns_409() -> None:
+    app = create_app(tool_client=TypedFakeToolClient())
+    client = TestClient(app)
+    token = _token(client)
+    payload = PlanningRequest.model_validate(_request_body())
+    body_digest = digest(
+        json.dumps(payload.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    )
+    session_id = app.state.session_store.resolve(token)
+    app.state.idempotency.begin(session_id, "planning", "k-inflight", body_digest)
+    response = client.post(
+        "/api/v1/planning",
+        json=_request_body(),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Idempotency-Key": "k-inflight",
+            "X-Request-Id": "req:inflight",
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["issues"][0]["code"] == "REQUEST_IN_PROGRESS"
 
 
 def test_reports_requires_admin_key() -> None:

@@ -30,15 +30,13 @@ def save_record(
     body_digest = digest(
         json.dumps(body.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
     )
-    cached = idempotency.resolve(subject_id, "academic-records", idempotency_key, body_digest)
-    if cached is not None:
-        return cached
 
-    context = make_context(request, subject_id, x_request_id, body.curriculumSnapshotId)
-    result = cast(AcademicRecord, tool_client.call("createAcademicRecord", body, context))
-    payload = envelope(x_request_id, "OK", result).model_dump(mode="json")
-    idempotency.store(subject_id, "academic-records", idempotency_key, body_digest, payload)
-    return payload
+    def produce() -> dict:
+        context = make_context(request, subject_id, x_request_id, body.curriculumSnapshotId)
+        result = cast(AcademicRecord, tool_client.call("createAcademicRecord", body, context))
+        return envelope(x_request_id, "OK", result).model_dump(mode="json")
+
+    return idempotency.run(subject_id, "academic-records", idempotency_key, body_digest, produce)
 
 
 @router.get("/api/v1/academic-records/{recordId}")

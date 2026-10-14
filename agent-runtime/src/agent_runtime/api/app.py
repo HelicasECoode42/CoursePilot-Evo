@@ -7,7 +7,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from agent_runtime.adapters.fake_tools import TypedFakeToolClient
 from agent_runtime.adapters.harness_loader import HarnessLoader
+from agent_runtime.adapters.model_client import FakeModelAdapter
 from agent_runtime.adapters.tool_client import ToolClient
 from agent_runtime.api.errors import register_error_handlers
 from agent_runtime.api.idempotency import IdempotencyStore
@@ -27,7 +29,13 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings()
     harness = HarnessLoader(_resolve_harness_dir(settings)).load()
-    tool_client = tool_client or ToolClient(settings.java_base_url, settings.service_key)
+    if tool_client is None:
+        if settings.java_base_url:
+            tool_client = ToolClient(settings.java_base_url, settings.service_key)
+        elif settings.use_fake_tools:
+            tool_client = TypedFakeToolClient()
+        else:
+            tool_client = ToolClient(None, settings.service_key)
 
     app = FastAPI(title="CoursePilot planning API", version="1.0.0")
     app.state.settings = settings
@@ -35,7 +43,11 @@ def create_app(
     app.state.idempotency = IdempotencyStore()
     app.state.harness = harness
     app.state.tool_client = tool_client
-    app.state.runner = runner or PlanningRunner(tool_client=tool_client, harness=harness)
+    app.state.runner = runner or PlanningRunner(
+        tool_client=tool_client,
+        harness=harness,
+        model_adapter=FakeModelAdapter(),
+    )
 
     app.add_middleware(
         CORSMiddleware,

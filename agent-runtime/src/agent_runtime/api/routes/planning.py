@@ -32,23 +32,21 @@ def plan(
     body_digest = digest(
         json.dumps(body.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
     )
-    cached = idempotency.resolve(subject_id, "planning", idempotency_key, body_digest)
-    if cached is not None:
-        return cached
 
-    settings = request.app.state.settings
-    harness = request.app.state.harness
-    context = ExecutionContext(
-        subject_id=subject_id,
-        request_id=x_request_id,
-        curriculum_snapshot_id=body.curriculumSnapshotId,
-        offering_snapshot_id=body.offeringSnapshotId,
-        model_id=settings.model_id,
-        temperature=settings.temperature,
-        deadline=datetime.now(UTC) + timedelta(milliseconds=45000),
-        harness_version=harness.version,
-    )
-    answer = runner.run(body, context)
-    payload = envelope(x_request_id, "OK", answer).model_dump(mode="json")
-    idempotency.store(subject_id, "planning", idempotency_key, body_digest, payload)
-    return payload
+    def produce() -> dict:
+        settings = request.app.state.settings
+        harness = request.app.state.harness
+        context = ExecutionContext(
+            subject_id=subject_id,
+            request_id=x_request_id,
+            curriculum_snapshot_id=body.curriculumSnapshotId,
+            offering_snapshot_id=body.offeringSnapshotId,
+            model_id=settings.model_id,
+            temperature=settings.temperature,
+            deadline=datetime.now(UTC) + timedelta(milliseconds=45000),
+            harness_version=harness.version,
+        )
+        answer = runner.run(body, context)
+        return envelope(x_request_id, "OK", answer).model_dump(mode="json")
+
+    return idempotency.run(subject_id, "planning", idempotency_key, body_digest, produce)

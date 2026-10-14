@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from agent_runtime.adapters.tool_client import InvalidTool, ToolUnavailable
-from agent_runtime.api.idempotency import IdempotencyConflict
+from agent_runtime.api.idempotency import IdempotencyConflict, RequestInProgress
 from agent_runtime.api.schemas import Envelope, Issue
 from agent_runtime.application.budget import BudgetExceeded
 from agent_runtime.application.ids import new_id
@@ -111,6 +111,13 @@ def register_error_handlers(app: FastAPI) -> None:
     async def idempotency_conflict(request: Request, exc: IdempotencyConflict) -> JSONResponse:
         issue = Issue(
             code="IDEMPOTENCY_CONFLICT", message=str(exc), field="Idempotency-Key", retryable=False
+        )
+        return _json(request, 409, "CONFLICT", [issue])
+
+    @app.exception_handler(RequestInProgress)
+    async def request_in_progress(request: Request, exc: RequestInProgress) -> JSONResponse:
+        issue = Issue(
+            code="REQUEST_IN_PROGRESS", message=str(exc), field="Idempotency-Key", retryable=True
         )
         return _json(request, 409, "CONFLICT", [issue])
 

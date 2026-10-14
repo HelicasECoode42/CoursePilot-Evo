@@ -15,11 +15,14 @@ class Settings(BaseSettings):
     # Admin key for the restricted teacher report (docs/04 section 1).
     admin_key: str = ""
 
-    # Controlled model endpoint. Empty -> the W1 stub flow (no model call).
+    # Controlled model endpoint. Empty -> FakeModelAdapter (W2 typed fake).
     model_base_url: str | None = None
     model_api_key: str = ""
     model_id: str = "DEPLOYMENT_MODEL_PLACEHOLDER"
     temperature: float = 0.0
+
+    # Local W2 demo only. True -> TypedFakeToolClient. Never a real verifier.
+    use_fake_tools: bool = False
 
     # Sessions and CORS.
     session_ttl_seconds: int = 1800

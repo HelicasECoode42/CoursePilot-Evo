@@ -3,8 +3,9 @@
 CoursePilot-Evo 的 System 2 层：唯一的**生产/评测 Runner**、FastAPI 网关和可版本化运行
 Harness。硬事实全部来自 Java（System 1），本模块只负责理解目标、调用策略、候选、澄清与解释。
 
-> 当前是 **W1 骨架**：DTO 契约、Runner 入口、意图/澄清/守卫纯策略、Harness 装载、session/planning
-> 最小纵向切片。**尚未接入真实模型与真实 Java**——模型适配器和 ToolClient 的 HTTP 部分留到 W2/W3。
+> 当前是 **W2 类型化假循环**：DTO 契约、Runner 入口、意图/澄清/守卫、假模型候选、假 Java
+> `validatePlan`、Harness、session/planning。**尚未接入真实模型与真实 Java**——默认无
+> `CP_JAVA_BASE_URL` 时 planning 仍返回 503；本地演示可设 `CP_USE_FAKE_TOOLS=true`。
 
 ## 目录结构（依赖方向 api → application → domain/policies，adapters 封装 IO）
 
@@ -58,16 +59,22 @@ python -m ruff format --check .
 python -m ruff check .
 python -m pytest -q
 
-# 启动（本地 demo，无 Java 时 planning 返回 503 TOOL_UNAVAILABLE）
+# 启动（默认无 Java 时 planning 返回 503 TOOL_UNAVAILABLE）
 python -m uvicorn agent_runtime.api.app:app --port 8000
+
+# 本地看 W2 假循环（课程层 UNKNOWN，不是真课表）
+# set CP_USE_FAKE_TOOLS=true
 ```
 
 ## 当前限制（如实）
 
-- `ModelAdapter` 只有接口，无真实模型调用；`PlanningRunner` 对「有目标」的请求返回
-  `UNABLE_TO_VERIFY`（`PLANNING_LOOP_PENDING`），不伪造推荐。
-- `ToolClient` 只有工具白名单注册表；未配置 `CP_JAVA_BASE_URL` 时任何工具报 `TOOL_UNAVAILABLE`(503)。
-- 会话与幂等是内存实现，仅本地 demo，非生产身份设计。
+- `FakeModelAdapter` 只从工具返回的课程 id 里挑候选，不是真实模型；核验器假工具固定
+  `UNKNOWN` + `COURSE_ONLY`，不能当成无冲突课表。
+- 有目标时 Runner 走 提议 → Guard → `validatePlan` → 编译；候选 id 不在工具集合则
+  `EVIDENCE_MISMATCH`/`UNKNOWN_COURSE`，非法模型 JSON 只修复一次。
+- `ToolClient` 的 HTTP 调用仍未接通；未配置 `CP_JAVA_BASE_URL` 且未开假工具时
+  `TOOL_UNAVAILABLE`(503)。
+- 会话与幂等是内存实现。相同键执行中返回 `409 REQUEST_IN_PROGRESS`；失败会释放占位以便重试。
 - `planning.openapi.json` 的 12 个端点全部有对应路由；走 Java 的端点未配置 `CP_JAVA_BASE_URL`
   时返回 `TOOL_UNAVAILABLE`(503)，不冒充无冲突。`listSessionRecords` 对应的 Java 列表工具
   （`listAcademicRecords`）尚待模块 B 在 `java.openapi.json` 补齐。
