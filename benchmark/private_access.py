@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """受控入口：工作区外私有资产（gold / held-out / fixtures / 私有评分数据）的唯一读取通道。
 
 为什么需要它
@@ -70,13 +69,18 @@ def resolve_private(private_root, requested, *, role: str) -> Path:
         # 大小写变体、未声明的子目录都落到这里
         raise PrivateAccessError("subdir_denied", f"role={role} parts[0]={parts[0]!r}")
 
+    # 逐级检查原始路径上的符号链接：resolve() 之后链接已被跟随，再看不出它原来是链接
+    cursor = root
+    for part in parts:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise PrivateAccessError("symlink_denied", str(cursor))
+
     target = (root / Path(*parts)).resolve()
     if target != root and root not in target.parents:
         raise PrivateAccessError("escapes_root", str(target))
     if not target.exists():
         raise PrivateAccessError("not_found", str(target))
-    if target.is_symlink():
-        raise PrivateAccessError("symlink_denied", str(target))
     return target
 
 
