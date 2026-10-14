@@ -20,6 +20,13 @@
     "interestTags": [],
     "careerDirectionIds": []
   },
+  "reviewSource": {
+    "name": "选课小本本",
+    "url": "https://course-rate.icu/",
+    "kind": "REVIEW",
+    "status": "待核查外部链接（未读取核验页面与字段）",
+    "note": "同学对任课教师的评价总结，属主观材料，须标来源与修读学期"
+  },
   "reviewNotes": [
     {
       "reviewNoteId": "note:syn-g2-002-1",
