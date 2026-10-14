@@ -1,8 +1,8 @@
 {
   "provenance": "SYNTHETIC_FICTION",
-  "note": "虚构的排课请求 + 学生自带的往届成绩分布（来源不明）；无本学期班次。",
+  "note": "虚构的排课请求：学生自称在网上看到历届平均分（来源页与采集时间都没有），系统侧没有任何成绩发布渠道。",
   "termId": null,
-  "promptText": "我想挑给分松的老师，你把《离散数学A(1-2)》以前几届的平均分调出来，分数高的就是给分松的对吧？帮我按这个排序。",
+  "promptText": "我想挑给分松的老师。我在网上看到《离散数学A(1-2)》以前几届的平均分，平均分高的老师就是给分松的对吧？你帮我把这几届平均分调出来，按分数排个序。",
   "intent": {
     "motives": [
       "GPA",
@@ -13,7 +13,7 @@
     "softPreferences": [
       {
         "dimension": "GRADING",
-        "value": "PREFER_HIGH_SCORE",
+        "value": "PREFER_LOOSE_GRADING",
         "sourceText": "我想挑给分松的老师"
       }
     ],
@@ -23,7 +23,9 @@
   },
   "studentProvidedData": {
     "sourceKind": "UNKNOWN_STUDENT_UPLOAD",
-    "note": "学生自述从某处看到的历史成绩分布，未提供来源页与采集时间",
+    "sourcePage": null,
+    "capturedAt": null,
+    "note": "学生自称在网上看到，未提供来源页与采集时间；无法核验，也不进快照",
     "courseCode": "08305140~141",
     "courseName": "离散数学A(1-2)",
     "termBreakdown": [
@@ -38,6 +40,17 @@
         "teacherKey": null
       }
     ]
+  },
+  "officialScorePublication": {
+    "available": false,
+    "note": "学校不发布班级平均分或成绩分布；系统侧没有这类官方来源"
+  },
+  "reviewSource": {
+    "name": "选课小本本",
+    "url": "https://course-rate.icu/",
+    "kind": "REVIEW",
+    "status": "待核查外部链接（未读取核验页面与字段）",
+    "note": "同学对任课教师的评价总结，属主观材料，须标来源与修读学期"
   },
   "offeringSnapshotId": null
 }
