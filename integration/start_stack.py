@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -31,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stack_config import ROOT, errors, resolve, validate
 
 LOG_DIR = ROOT / "runs" / "stack"
+PID_FILE = LOG_DIR / "pids.json"
 
 SERVICES: tuple[dict, ...] = (
     {
@@ -59,9 +63,13 @@ SERVICES: tuple[dict, ...] = (
         "owner": "C",
         "module": "agent-runtime",
         "manifest": "pyproject.toml",
-        "start_cmd": None,
-        "cmd_source": "待 C 的 README 登记启动命令（W1 骨架尚未写）",
-        "health_path": "/health",
+        "start_cmd": ["python", "-m", "uvicorn", "agent_runtime.api.app:app", "--port", "8000"],
+        "cmd_source": (
+            "agent-runtime/README.md 已登记：python -m uvicorn agent_runtime.api.app:app --port 8000"
+            "（需先在该模块内 pip install -e .[test]）；该 app 未提供健康端点，就绪只判到 TCP 层，"
+            "行为级就绪由 check_stack.py 的第一步（建会话必须 201）承担"
+        ),
+        "health_path": None,
         "url_key": "CP_API_BASE_URL",
     },
     {
@@ -139,10 +147,72 @@ def judge(svc: dict, values: dict, probe: bool = True) -> dict:
     return result
 
 
-def start_service(svc: dict, values: dict) -> subprocess.Popen:
+def record_pids(procs: dict[str, subprocess.Popen]) -> None:
+    """--keep 时把 PID 记到 runs/stack/pids.json，供 --stop 收尾（一条入口跑完不留进程）。"""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(
+        json.dumps(
+            {name: {"pid": proc.pid, "argv": proc.args} for name, proc in procs.items()},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def terminate_pid(pid: int) -> str:
+    """按平台停止进程：Windows 用 taskkill（连带子进程），其它平台发 SIGTERM。返回结果说明。"""
+    if os.name == "nt":
+        # 不抓文本：中文 Windows 的 taskkill 输出是 GBK，按 UTF-8 解码会在读取线程里抛异常；
+        # 退出码已经够用：0 = 已停、128 = 找不到该进程、其它 = 拒绝或失败。
+        result = subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, check=False)
+        if result.returncode == 0:
+            return "已停止"
+        if result.returncode == 128:
+            return "已不在"
+        return f"无法停止（taskkill 退出码 {result.returncode}）"
+    try:
+        os.kill(pid, signal.SIGTERM)
+        return "已停止"
+    except ProcessLookupError:
+        return "已不在"
+    except OSError as exc:
+        return f"停止失败：{exc}"
+
+
+def stop_recorded() -> int:
+    """按 PID 文件停止上次 --keep 留下的进程；不依赖配置文件，找不到就说明情况并返回 0。"""
+    if not PID_FILE.is_file():
+        print("没有需要停止的进程（runs/stack/pids.json 不存在）。")
+        return 0
+    data = json.loads(PID_FILE.read_text(encoding="utf-8"))
+    for name, info in data.items():
+        pid = int(info.get("pid", 0))
+        if not pid:
+            print(f"{name}：PID 记录不完整，跳过")
+            continue
+        print(f"{name}（PID {pid}）：" + terminate_pid(pid))
+    PID_FILE.unlink()
+    print("若 shell 包装启动的服务（npm → vite）仍占端口，用 pkill -f vite / pkill -f uvicorn 兜底。")
+    return 0
+
+
+def resolve_command(start_cmd: list[str]) -> list[str] | None:
+    """把登记表里的命令解析成可执行路径。
+
+    Windows 上裸名 `npm` 会被 CreateProcess 补成 `npm.exe` 而失败（实际是 `npm.CMD`），
+    所以这里统一用 shutil.which 解析；解析不到就返回 None，由调用方判 UNREACHABLE 而不是崩掉。
+    """
+    resolved = shutil.which(start_cmd[0])
+    if resolved is None:
+        return None
+    return [resolved, *start_cmd[1:]]
+
+
+def start_service(argv: list[str], svc: dict, values: dict) -> subprocess.Popen:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log = open(LOG_DIR / f"{svc['name']}.log", "w", encoding="utf-8")  # noqa: SIM115
-    return subprocess.Popen(svc["start_cmd"], cwd=ROOT / svc["module"], stdout=log, stderr=subprocess.STDOUT)
+    return subprocess.Popen(argv, cwd=ROOT / svc["module"], stdout=log, stderr=subprocess.STDOUT)
 
 
 def wait_ready(svc: dict, values: dict, timeout: float, interval: float) -> dict:
@@ -161,10 +231,15 @@ def wait_ready(svc: dict, values: dict, timeout: float, interval: float) -> dict
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="D2 组合启动脚本")
     ap.add_argument("--plan", action="store_true", help="只判定与打印计划，不启动进程")
+    ap.add_argument("--keep", action="store_true", help="起完不停止已启动的进程（给 CI 接着跑检查用）")
+    ap.add_argument("--stop", action="store_true", help="停止上次 --keep 记录的进程，然后退出")
     ap.add_argument("--only", action="append", default=[], help="只处理指定服务，可重复")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--env-file", default=None)
     args = ap.parse_args(argv)
+
+    if args.stop:
+        return stop_recorded()
 
     values, _sources, used_file = resolve(Path(args.env_file) if args.env_file else None)
     problems = validate(values)
@@ -194,13 +269,29 @@ def main(argv: list[str] | None = None) -> int:
             if verdict["status"] == "READY":
                 results.append(verdict)
                 continue
-            procs[svc["name"]] = start_service(svc, values)
+            argv = resolve_command(svc["start_cmd"])
+            if argv is None:
+                verdict["status"] = "UNREACHABLE"
+                verdict["detail"] = f"启动命令不可执行：PATH 里找不到 {svc['start_cmd'][0]}"
+                verdict["next"] = f"把 {svc['start_cmd'][0]} 装好并放进 PATH；日志与判定不改口径"
+                results.append(verdict)
+                continue
+            procs[svc["name"]] = start_service(argv, svc, values)
             results.append(wait_ready(svc, values, timeout, interval))
     finally:
-        for proc in procs.values():
-            proc.terminate()
-        if procs:
-            print(f"已停止本次启动的 {len(procs)} 个进程；日志见 runs/stack/")
+        if procs and args.keep:
+            print(
+                f"已按 --keep 保留 {len(procs)} 个进程（PID："
+                + "、".join(f"{k}={v.pid}" for k, v in procs.items())
+                + "）；日志见 runs/stack/"
+            )
+            record_pids(procs)
+            print("收尾用 python integration/start_stack.py --stop（PID 已记到 runs/stack/pids.json）。")
+        else:
+            for proc in procs.values():
+                proc.terminate()
+            if procs:
+                print(f"已停止本次启动的 {len(procs)} 个进程；日志见 runs/stack/")
 
     if args.json:
         print(

@@ -16,7 +16,16 @@ test = [
 ]
 
 [tool.hatch.build.targets.wheel]
-only-include = ["stack_config.py", "start_stack.py"]
+only-include = [
+  "stack_config.py",
+  "start_stack.py",
+  "stack_checks.py",
+  "check_stack.py",
+  "smoke_stack.py",
+  "web_checks.py",
+  "check_web.py",
+  "check_all.py",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
