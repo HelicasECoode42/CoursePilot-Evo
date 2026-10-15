@@ -31,6 +31,30 @@ function fakeClient(
     })),
     clearSession: vi.fn(),
     fixtureAcademicRecordId: vi.fn(() => null),
+    listSessionRecords: vi.fn(async () => ({ items: [] })),
+    saveSessionRecord: vi.fn(async (input) => ({
+      academicRecordId: "record-1",
+      revision: 1,
+      curriculumSnapshotId: input.curriculumSnapshotId,
+      completedCourses: input.completedCourses,
+      transcriptComplete: input.transcriptComplete,
+      sourceKind: input.sourceKind,
+      createdAt: "2026-10-01T00:00:00Z",
+    })),
+    auditRequirements: vi.fn(
+      async (curriculumSnapshotId, academicRecordId) => ({
+        curriculumSnapshotId,
+        academicRecordId,
+        recordRevision: 1,
+        transcriptComplete: false,
+        requirements: [],
+        suggestedCourseCodes: [],
+        unknowns: [],
+      }),
+    ),
+    submitPlanning: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现规划", "invalid_response");
+    }),
     ...overrides,
   };
 }
