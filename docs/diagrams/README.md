@@ -9,4 +9,6 @@
 - [五人模块依赖](team-dependencies.mmd)
 
 - [单问题学生流程](student-question-flow.mmd)
-- [五周分批交付与并行准备](delivery-batches.mmd)
+- [第五至第八周交付图](delivery-batches.mmd)：详细业务安排以[排期](../19-delivery-plan.md)为准。
+
+当前业务地图、对象关系和模块协作图在[团队总览](../15-team-baseline-and-batches.md)；技术时序与表关系在[总体 TRD](../03-trd.md)。

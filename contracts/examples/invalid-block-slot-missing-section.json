@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0",
+  "curriculumSnapshotId": "curr:demo",
+  "offeringSnapshotId": null,
+  "academicRecordId": "record:demo",
+  "mode": "REAL",
+  "promptText": "交集约束缺少节次，应被拒绝。",
+  "intent": {
+    "motives": [
+      "SCHEDULE"
+    ],
+    "priorityOrder": [
+      "SCHEDULE"
+    ],
+    "hardConstraints": [
+      {
+        "kind": "BLOCK_SLOT",
+        "courseCode": null,
+        "teacherKey": null,
+        "dayOfWeek": 1,
+        "section": null,
+        "value": null,
+        "sourceText": "周一某节不能上课"
+      }
+    ],
+    "softPreferences": [],
+    "pinnedTeacherCoursePairs": [],
+    "interestTags": [],
+    "careerDirectionIds": []
+  },
+  "previousPlanId": null
+}

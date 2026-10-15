@@ -73,4 +73,4 @@ python scripts/check_modules.py
 
 当前模板/CI 可以自动检查基础项；分支保护是否启用以 GitHub 设置为准，不能把有模板等同强制审核。以后有成员名单后填写 CODEOWNERS，不能预填假用户名。
 
-参考：[OWASP 日志规范](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)、[OWASP REST 安全](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html)、[GitHub Actions 安全](https://docs.github.com/en/actions/reference/security/secure-use)。本项目按本地五周范围选用具体控制，不照搬大型系统。
+参考：[OWASP 日志规范](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)、[OWASP REST 安全](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html)、[GitHub Actions 安全](https://docs.github.com/en/actions/reference/security/secure-use)。本项目按本地首版范围选用具体控制，不照搬大型系统。

@@ -309,6 +309,7 @@
           "enum": [
             "BLOCK_DAY",
             "BLOCK_SECTION",
+            "BLOCK_SLOT",
             "PIN_TEACHER_COURSE",
             "PIN_COURSE",
             "MAX_CREDITS"
@@ -389,6 +390,44 @@
         "section",
         "value",
         "sourceText"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "BLOCK_DAY" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "dayOfWeek": { "type": "integer" },
+              "section": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "BLOCK_SECTION" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "dayOfWeek": { "type": "null" },
+              "section": { "type": "integer" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "BLOCK_SLOT" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "dayOfWeek": { "type": "integer" },
+              "section": { "type": "integer" }
+            }
+          }
+        }
       ]
     },
     "TeacherPreference": {
