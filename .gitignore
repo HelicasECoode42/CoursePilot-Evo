@@ -11,6 +11,7 @@ __pycache__/
 target/
 node_modules/
 dist/
+*.egg-info/
 *.log
 .DS_Store
 
