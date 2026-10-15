@@ -21,7 +21,7 @@ uv run python scripts/self_check.py
 
 ## 变更记录
 
-- 新增 `GET /api/v1/academic-records`，列出本会话已有的学业记录。此前只有按 ID 读取和创建两个接口，学生无从得知自己的记录编号，`docs/15` 第 2 节「已有本会话记录则读取，缺记录才补充」这一步在契约上无法实现。归属由会话派生，浏览器不提交 owner，与 `docs/17` 的身份边界一致；`items` 为空数组表示尚无记录，属于正常业务状态，不返回 404。同时补上 `AcademicRecord` 的一个正例与两个反例，此前该对象没有任何样例。
+- 新增 `GET /api/v1/academic-records`，列出本会话已有的学业记录。此前只有按 ID 读取和创建两个接口，学生无从得知自己的记录编号，`docs/15` 第 2 节「已有本会话记录则读取，缺记录才补充」这一步在契约上无法实现。归属由会话派生，浏览器不提交 owner，与 `docs/17` 的身份边界一致；`items` 为空数组表示尚无记录，属于正常业务状态，不返回 404。同时补上 `AcademicRecord` 的一个正例与两个反例，此前该对象没有任何样例。同一条链路在 `java.openapi.json` 补上对应的 `listAcademicRecords`（`GET /api/v1/academic-records`）：Python 网关需要它才能向 Java 取记录，此前只有 Python 侧声明而 Java 侧缺失，提供者与消费者不同步。
 - `Constraint.kind` 增加 `BLOCK_SLOT`（星期 × 节次的交集），软偏好增加 `schedule.blocked_slot`。同时为三个时间 kind 加条件规则：`BLOCK_DAY` 的 `section` 必须为 null，`BLOCK_SECTION` 的 `dayOfWeek` 必须为 null，`BLOCK_SLOT` 两者都必须非空。在此之前 Schema 并不禁止同时填写两者，语义只靠文档约定，属于已存在的歧义。`schemaVersion` 保持 `1.0`：各模块均未开始实现，无已发布消费者需要兼容。模块开工后再改契约必须升版本。
 
 离线校验仅验证契约、引用与样例；跨字段含义、对象级授权、SQL 事务和运行截止时间仍必须在模块测试中验证。
