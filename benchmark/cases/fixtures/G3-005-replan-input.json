@@ -1,0 +1,29 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的改目标请求：从常规四年毕业改为大三下学期整学期实习，原方案需要重算。",
+  "originalGoal": "按培养方案建议学期常规修读，四年毕业",
+  "newGoal": "大三下学期腾出整学期去实习",
+  "originalPlanSummary": "专业选修按三(秋)、三(春)的建议学期修读，实践环节按三(夏)安排",
+  "affectedRows": [
+    {
+      "courseCode": "08306055",
+      "courseName": "人机界面设计",
+      "plannedTerm": "三(秋1-8)",
+      "actionAfterChange": "需前移或改到其它学期"
+    },
+    {
+      "courseCode": "08305014",
+      "courseName": "数据库原理(1)",
+      "plannedTerm": "三(春1-8)",
+      "actionAfterChange": "需前移或改到其它学期"
+    },
+    {
+      "courseCode": "0830A037",
+      "courseName": "计算机应用大型作业",
+      "plannedTerm": "三(夏)",
+      "actionAfterChange": "需重排"
+    }
+  ],
+  "completedCourses": "已有记录摘要，含一、二年级课程；三、四年级课程未修",
+  "offeringSnapshotId": null
+}

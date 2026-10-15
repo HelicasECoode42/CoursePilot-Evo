@@ -1,0 +1,52 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构请求：学生只说「给分高」，未说明含义，也没有目标学期。附一条虚构的选课小本本评价摘要，用于考「主观评价只能标明来源后作参考」。",
+  "termId": null,
+  "intent": {
+    "motives": [
+      "GPA"
+    ],
+    "priorityOrder": [],
+    "hardConstraints": [],
+    "softPreferences": [
+      {
+        "dimension": "GRADING",
+        "value": "HIGH",
+        "sourceText": "我想选给分高的课"
+      }
+    ],
+    "pinnedTeacherCoursePairs": [],
+    "interestTags": [],
+    "careerDirectionIds": []
+  },
+  "reviewSource": {
+    "name": "选课小本本",
+    "url": "https://course-rate.icu/",
+    "kind": "REVIEW",
+    "status": "待核查外部链接（未读取核验页面与字段）",
+    "note": "同学对任课教师的评价总结，属主观材料，须标来源与修读学期"
+  },
+  "officialScorePublication": {
+    "available": false,
+    "note": "学校不发布班级平均分或成绩分布；系统侧没有这类官方来源"
+  },
+  "reviewNotes": [
+    {
+      "reviewNoteId": "note:syn-g2-004-1",
+      "courseCode": "08305009~010",
+      "courseName": "数据结构(1-2)",
+      "teacherKey": null,
+      "termId": "2025-2026-2",
+      "sourceKind": "SYNTHETIC",
+      "publishedAt": null,
+      "sourceUrl": "https://course-rate.icu/",
+      "excerpt": "这门课老师给分挺大方的，最后交个大作业就行",
+      "dimensions": [
+        "GRADING"
+      ],
+      "matchStatus": "COURSE_ONLY",
+      "sourceRefId": "ref:syn-g2-004-booklet"
+    }
+  ],
+  "offeringSnapshotId": null
+}

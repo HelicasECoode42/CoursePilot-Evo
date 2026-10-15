@@ -1,0 +1,11 @@
+{
+  "caseId": "G4-003",
+  "groupId": "G4",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G4-003-academic-record.json",
+  "userQuery": "《互联网产品实践项目》这门课是几个学分？属于哪一类？我想把它算进专业选修课里。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 的专业选修行、计科学2 的专业选修课区块说明。考的是资料缺失时的正确行为：说未知、要编号，不猜。"
+}

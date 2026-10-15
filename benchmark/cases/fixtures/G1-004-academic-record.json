@@ -1,0 +1,14 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构汇总记录：只给专业选修的已修总学分，故意不给课程明细（本题考的就是缺明细）。",
+  "termId": "2024-2025-3",
+  "studentTerm": 3,
+  "majorId": "CS-2024",
+  "completed": {
+    "professionalElectiveCredits": 18.0,
+    "generalEducationCredits": null,
+    "itemized": false
+  },
+  "sourceKind": "SYNTHETIC",
+  "transcriptComplete": false
+}

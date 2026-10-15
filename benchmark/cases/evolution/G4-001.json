@@ -1,0 +1,11 @@
+{
+  "caseId": "G4-001",
+  "groupId": "G4",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G4-001-academic-record.json",
+  "userQuery": "帮我看看我的专业选修还差多少学分才能毕业？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 F45（专业选修 24 学分）。学生未提供任何已修记录，考的是「缺资料时必须先要记录，不许编缺口」。"
+}

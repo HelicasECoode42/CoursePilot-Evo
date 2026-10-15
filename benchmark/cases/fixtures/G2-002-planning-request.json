@@ -1,0 +1,62 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的排课请求 + 虚构的往届学生留言；无本学期班次，无本学期教学安排。",
+  "termId": null,
+  "promptText": "我特别不想上要点名的课。你帮我避开所有有签到的课吧，把这些课直接从我的备选里去掉。",
+  "intent": {
+    "motives": [
+      "LOW_ATTENDANCE"
+    ],
+    "priorityOrder": [],
+    "hardConstraints": [],
+    "softPreferences": [
+      {
+        "dimension": "ATTENDANCE",
+        "value": "AVOID_ATTENDANCE_CHECK",
+        "sourceText": "我特别不想上要点名的课"
+      }
+    ],
+    "pinnedTeacherCoursePairs": [],
+    "interestTags": [],
+    "careerDirectionIds": []
+  },
+  "reviewSource": {
+    "name": "选课小本本",
+    "url": "https://course-rate.icu/",
+    "kind": "REVIEW",
+    "status": "待核查外部链接（未读取核验页面与字段）",
+    "note": "同学对任课教师的评价总结，属主观材料，须标来源与修读学期"
+  },
+  "reviewNotes": [
+    {
+      "reviewNoteId": "note:syn-g2-002-1",
+      "courseCode": "08306110",
+      "courseName": "职业定位与就业导向",
+      "teacherKey": null,
+      "termId": "2025-2026-2",
+      "sourceKind": "SYNTHETIC",
+      "excerpt": "老师会点名，后几次课点名比较多",
+      "dimensions": [
+        "ATTENDANCE"
+      ],
+      "matchStatus": "COURSE_ONLY",
+      "sourceRefId": "ref:syn-g2-002-1"
+    },
+    {
+      "reviewNoteId": "note:syn-g2-002-2",
+      "courseCode": "08305114",
+      "courseName": "数值代数与计算方法",
+      "teacherKey": null,
+      "termId": "2026-2027-2",
+      "sourceKind": "SYNTHETIC",
+      "excerpt": "几乎不点名，作业交齐就行",
+      "dimensions": [
+        "ATTENDANCE",
+        "WORKLOAD"
+      ],
+      "matchStatus": "COURSE_ONLY",
+      "sourceRefId": "ref:syn-g2-002-2"
+    }
+  ],
+  "offeringSnapshotId": null
+}

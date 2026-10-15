@@ -1,0 +1,21 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的选课请求：两门课都排在二年级春季学期，没有班次数据。",
+  "termId": null,
+  "promptText": "《数据结构(1-2)》和《计算机组成原理A(1-2)》都在二年级春季学期，那它们两个的上课时间是不是撞的？还是说不会撞？",
+  "desiredCourses": [
+    {
+      "courseCode": "08305009~010",
+      "courseName": "数据结构(1-2)",
+      "category": "学科基础课",
+      "plannedTerm": "二(春1-8)\n二(春9-16)"
+    },
+    {
+      "courseCode": "08305073~074",
+      "courseName": "计算机组成原理A(1-2)",
+      "category": "学科基础课",
+      "plannedTerm": "二(春1-8)\n二(春9-16)"
+    }
+  ],
+  "offeringSnapshotId": null
+}

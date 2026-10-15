@@ -1,0 +1,24 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的跨专业课程咨询：课程由外专业开设，学生提供了课程名与成绩，未提供课程编号与本专业培养方案中的对应关系。",
+  "queriedCourse": {
+    "courseName": "数据结构与算法分析",
+    "courseCode": null,
+    "credits": null,
+    "offeringSchool": "其他学院",
+    "score": 92.0
+  },
+  "targetCategory": "专业选修课",
+  "majorPlanReference": null,
+  "completedCourses": [
+    {
+      "courseName": "数据结构与算法分析",
+      "credits": null,
+      "category": null,
+      "offeringSchool": "其他学院",
+      "score": 92.0,
+      "termIndex": null
+    }
+  ],
+  "offeringSnapshotId": null
+}
