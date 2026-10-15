@@ -244,6 +244,11 @@ async function submitRequest() {
     await router.push("/plan/result");
   }
 }
+
+/** 缺学业记录时把学生送到资料页，那里才有读记录与核对流程。 */
+async function openRecords() {
+  await router.push("/records");
+}
 </script>
 
 <template>
@@ -745,6 +750,14 @@ async function submitRequest() {
         @click="prepareRequest"
       >
         检查下一步资料
+      </button>
+      <button
+        v-if="store.handoffMissing.includes('学业记录')"
+        class="button button--primary"
+        type="button"
+        @click="openRecords"
+      >
+        去补充学业资料
       </button>
       <button
         v-if="store.planningHandoff"

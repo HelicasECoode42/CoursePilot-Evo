@@ -3,12 +3,16 @@ import { computed, onScopeDispose, ref } from "vue";
 import { ApiFailure, type CoursePilotApiClient } from "../api/client";
 import { api } from "../api";
 import type {
+  AcademicRecord,
+  AuditResult,
+  CompletedCourse,
   Motive,
   PlanningAnswer,
   PlanningRequest,
   SnapshotSummary,
 } from "../contracts";
 import { keyForRequest, type IdempotencyKeyState } from "../domain/idempotency";
+import { buildRecordInput } from "../domain/academic-record";
 import type { ClassPreferenceId } from "../domain/class-preferences";
 import {
   adjacentQuestion,
@@ -27,6 +31,8 @@ import {
 
 export type SessionStatus = "idle" | "loading" | "ready" | "error" | "expired";
 export type SubmitStatus = "idle" | "submitting" | "ready" | "error";
+/** 学业记录与核对共用的加载状态。 */
+export type LoadStatus = "idle" | "loading" | "ready" | "error";
 type MissingContextLabel =
   | "有效会话"
   | "培养方案"
@@ -60,7 +66,16 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     const planningResult = ref<PlanningAnswer | null>(null);
     const submitStatus = ref<SubmitStatus>("idle");
     const submitError = ref("");
+    const records = ref<AcademicRecord[]>([]);
+    const recordsStatus = ref<LoadStatus>("idle");
+    const recordsError = ref("");
+    const selectedRecordId = ref<string | null>(null);
+    const audit = ref<AuditResult | null>(null);
+    const auditStatus = ref<LoadStatus>("idle");
+    const auditError = ref("");
     let activeController: AbortController | null = null;
+    let recordController: AbortController | null = null;
+    let recordVersion = 0;
     let submitController: AbortController | null = null;
     let submitVersion = 0;
     let keyState: IdempotencyKeyState | null = null;
@@ -78,6 +93,36 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       planningResult.value = null;
       submitError.value = "";
       if (submitStatus.value !== "idle") submitStatus.value = "idle";
+    }
+
+    /**
+     * 记录/核对换会话或换培养方案时作废：中止在途请求并按 recordVersion 丢弃迟到响应。
+     */
+    function discardRecords() {
+      recordVersion += 1;
+      const controller = recordController;
+      recordController = null;
+      controller?.abort();
+      records.value = [];
+      recordsStatus.value = "idle";
+      recordsError.value = "";
+      selectedRecordId.value = null;
+      audit.value = null;
+      auditStatus.value = "idle";
+      auditError.value = "";
+    }
+
+    /** 开始一次记录/核对请求；新的请求会中止上一次。 */
+    function beginRecordRequest(): { version: number; signal: AbortSignal } {
+      recordVersion += 1;
+      recordController?.abort();
+      const controller = new AbortController();
+      recordController = controller;
+      return { version: recordVersion, signal: controller.signal };
+    }
+
+    function isCurrentRecordRequest(version: number): boolean {
+      return version === recordVersion;
     }
 
     function clearPlanningHandoff() {
@@ -106,6 +151,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       sessionStatus.value = "expired";
       errorMessage.value = message;
       clearPlanningHandoff();
+      discardRecords();
     }
 
     function expireSessionWhenDue() {
@@ -144,6 +190,12 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         ) ?? null,
     );
     const mode = computed(() => client.mode);
+    const selectedRecord = computed(
+      () =>
+        records.value.find(
+          (record) => record.academicRecordId === selectedRecordId.value,
+        ) ?? null,
+    );
 
     function visibleError(error: unknown): string {
       if (error instanceof ApiFailure) return error.message;
@@ -223,6 +275,8 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         return;
       selectedCurriculumId.value = snapshotId;
       clearPlanningHandoff();
+      // 核对绑定培养方案版本，换方案后旧核对结果不再适用。
+      discardRecords();
     }
 
     function setMotives(motives: Motive[]) {
@@ -309,7 +363,9 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         curriculumSourceKind: selectedCurriculum.value?.sourceKind ?? null,
         curriculumSourceValidation:
           selectedCurriculum.value?.sourceValidation ?? null,
-        academicRecordId: client.fixtureAcademicRecordId(),
+        academicRecordId:
+          selectedRecord.value?.academicRecordId ??
+          client.fixtureAcademicRecordId(),
         offeringSnapshotId: null,
         mode: client.mode === "fixture" ? "SIMULATION" : "REAL",
       });
@@ -363,9 +419,132 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       }
     }
 
+    /**
+     * 读本会话已有的学业记录。`items` 为空是正常业务状态：进入补录，不报错。
+     */
+    async function loadRecords(): Promise<void> {
+      if (!sessionId.value) {
+        recordsStatus.value = "error";
+        recordsError.value = "请先建立本次会话。";
+        return;
+      }
+      const { version, signal } = beginRecordRequest();
+      recordsStatus.value = "loading";
+      recordsError.value = "";
+      try {
+        const list = await client.listSessionRecords(signal);
+        if (!isCurrentRecordRequest(version)) return;
+        records.value = list.items;
+        selectedRecordId.value = list.items[0]?.academicRecordId ?? null;
+        recordsStatus.value = "ready";
+      } catch (error) {
+        if (!isCurrentRecordRequest(version)) return;
+        if (error instanceof ApiFailure && error.kind === "aborted") return;
+        if (error instanceof ApiFailure && error.status === 401) {
+          invalidateSession(error.message);
+          return;
+        }
+        recordsStatus.value = "error";
+        recordsError.value = visibleError(error);
+      }
+    }
+
+    /** 切换当前使用的学业记录；换记录会让已有核对与请求草稿作废。 */
+    function selectRecord(recordId: string) {
+      if (!records.value.some((item) => item.academicRecordId === recordId))
+        return;
+      selectedRecordId.value = recordId;
+      audit.value = null;
+      auditStatus.value = "idle";
+      auditError.value = "";
+      clearPlanningHandoff();
+    }
+
+    /** 缺记录时补录。成功返回 true，由调用方决定要不要接着跑核对。 */
+    async function saveRecord(
+      courses: readonly CompletedCourse[],
+      transcriptComplete: boolean,
+    ): Promise<boolean> {
+      const curriculumSnapshotId = selectedCurriculumId.value;
+      if (!sessionId.value || !curriculumSnapshotId) {
+        recordsStatus.value = "error";
+        recordsError.value = "请先建立会话并选择培养方案。";
+        return false;
+      }
+      const { version, signal } = beginRecordRequest();
+      recordsStatus.value = "loading";
+      recordsError.value = "";
+      try {
+        const saved = await client.saveSessionRecord(
+          buildRecordInput(curriculumSnapshotId, courses, transcriptComplete),
+          newIdempotencyKey(),
+          signal,
+        );
+        if (!isCurrentRecordRequest(version)) return false;
+        records.value = [
+          saved,
+          ...records.value.filter(
+            (item) => item.academicRecordId !== saved.academicRecordId,
+          ),
+        ];
+        selectedRecordId.value = saved.academicRecordId;
+        recordsStatus.value = "ready";
+        clearPlanningHandoff();
+        return true;
+      } catch (error) {
+        if (!isCurrentRecordRequest(version)) return false;
+        if (error instanceof ApiFailure && error.kind === "aborted")
+          return false;
+        if (error instanceof ApiFailure && error.status === 401) {
+          invalidateSession(error.message);
+          return false;
+        }
+        recordsStatus.value = "error";
+        recordsError.value = visibleError(error);
+        return false;
+      }
+    }
+
+    /**
+     * 学业核对。未知项由服务端在 `unknowns` 里说明；这里不替它下结论。
+     */
+    async function runAudit(): Promise<void> {
+      const record = selectedRecord.value;
+      const curriculumSnapshotId = selectedCurriculumId.value;
+      if (!record || !curriculumSnapshotId) {
+        auditStatus.value = "error";
+        auditError.value = "请先选择培养方案和学业记录。";
+        return;
+      }
+      const { version, signal } = beginRecordRequest();
+      auditStatus.value = "loading";
+      auditError.value = "";
+      try {
+        const result = await client.auditRequirements(
+          curriculumSnapshotId,
+          record.academicRecordId,
+          signal,
+        );
+        if (!isCurrentRecordRequest(version)) return;
+        audit.value = result;
+        auditStatus.value = "ready";
+        clearPlanningHandoff();
+      } catch (error) {
+        if (!isCurrentRecordRequest(version)) return;
+        if (error instanceof ApiFailure && error.kind === "aborted") return;
+        if (error instanceof ApiFailure && error.status === 401) {
+          invalidateSession(error.message);
+          return;
+        }
+        auditStatus.value = "error";
+        auditError.value = visibleError(error);
+      }
+    }
+
     onScopeDispose(() => {
       clearExpiryTimer();
       discardSubmission();
+      discardRecords();
       const controller = activeController;
       activeController = null;
       controller?.abort();
@@ -402,6 +581,14 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       planningResult,
       submitStatus,
       submitError,
+      records,
+      recordsStatus,
+      recordsError,
+      selectedRecordId,
+      selectedRecord,
+      audit,
+      auditStatus,
+      auditError,
       currentQuestion,
       questions,
       startSession,
@@ -415,6 +602,10 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       confirmPriorities,
       preparePlanningHandoff,
       submitPlan,
+      loadRecords,
+      selectRecord,
+      saveRecord,
+      runAudit,
       previousQuestion,
     };
   });
