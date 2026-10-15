@@ -10,9 +10,11 @@ from agent_runtime.api.schemas import (
     PlanItem,
     PlanningRequest,
     PlanValidation,
+    TeacherPreference,
 )
 from agent_runtime.domain.policies.answer_compiler import AnswerCompiler
 from agent_runtime.domain.policies.candidate_guard import CandidateGuard, KnownFacts
+from agent_runtime.domain.policies.clarification_policy import ClarificationPolicy
 from agent_runtime.domain.policies.intent_resolver import IntentResolver
 
 
@@ -102,6 +104,54 @@ def test_intent_resolver_accepts_goal() -> None:
     intent = _empty_intent()
     intent.motives = ["GPA"]
     intent.priorityOrder = ["GPA"]
+    resolved = IntentResolver().resolve(_request_with_intent(intent))
+    assert resolved.needs_clarification is False
+
+
+def test_intent_resolver_asks_when_must_teacher_and_hard_time_unranked() -> None:
+    intent = _empty_intent()
+    intent.motives = ["SPECIFIC_TEACHER", "SCHEDULE"]
+    intent.priorityOrder = ["GPA"]
+    intent.pinnedTeacherCoursePairs = [
+        TeacherPreference(courseCode="CS101", teacherKey="teacher:demo", mode="MUST")
+    ]
+    intent.hardConstraints = [
+        Constraint(
+            kind="BLOCK_SLOT",
+            courseCode=None,
+            teacherKey=None,
+            dayOfWeek=5,
+            section=1,
+            value=None,
+            sourceText="周五第1节必须空",
+        )
+    ]
+    resolved = IntentResolver().resolve(_request_with_intent(intent))
+    assert resolved.needs_clarification is True
+    assert "teacher_vs_schedule" in resolved.missing
+    question = ClarificationPolicy().build_question(resolved)
+    assert question.questionId == "tradeoff:teacher-vs-schedule"
+    assert {choice.value for choice in question.choices} == {"KEEP_TEACHER", "KEEP_SCHEDULE"}
+
+
+def test_intent_resolver_skips_tradeoff_when_both_are_ranked() -> None:
+    intent = _empty_intent()
+    intent.motives = ["SPECIFIC_TEACHER", "SCHEDULE"]
+    intent.priorityOrder = ["SPECIFIC_TEACHER", "SCHEDULE"]
+    intent.pinnedTeacherCoursePairs = [
+        TeacherPreference(courseCode="CS101", teacherKey="teacher:demo", mode="MUST")
+    ]
+    intent.hardConstraints = [
+        Constraint(
+            kind="BLOCK_DAY",
+            courseCode=None,
+            teacherKey=None,
+            dayOfWeek=5,
+            section=None,
+            value=None,
+            sourceText="周五没课",
+        )
+    ]
     resolved = IntentResolver().resolve(_request_with_intent(intent))
     assert resolved.needs_clarification is False
 
