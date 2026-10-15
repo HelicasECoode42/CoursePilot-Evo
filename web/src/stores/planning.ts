@@ -2,7 +2,13 @@ import { defineStore } from "pinia";
 import { computed, onScopeDispose, ref } from "vue";
 import { ApiFailure, type CoursePilotApiClient } from "../api/client";
 import { api } from "../api";
-import type { Motive, PlanningRequest, SnapshotSummary } from "../contracts";
+import type {
+  Motive,
+  PlanningAnswer,
+  PlanningRequest,
+  SnapshotSummary,
+} from "../contracts";
+import { keyForRequest, type IdempotencyKeyState } from "../domain/idempotency";
 import type { ClassPreferenceId } from "../domain/class-preferences";
 import {
   adjacentQuestion,
@@ -20,6 +26,7 @@ import {
 } from "../domain/schedule-grid";
 
 export type SessionStatus = "idle" | "loading" | "ready" | "error" | "expired";
+export type SubmitStatus = "idle" | "submitting" | "ready" | "error";
 type MissingContextLabel =
   | "有效会话"
   | "培养方案"
@@ -31,6 +38,10 @@ type MissingContextLabel =
   | "时间安排";
 
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
+
+function newIdempotencyKey(): string {
+  return `web-${crypto.randomUUID().replaceAll("-", "")}`;
+}
 
 export function createPlanningStore(client: CoursePilotApiClient = api) {
   return defineStore("coursepilot-planning", () => {
@@ -46,13 +57,34 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     const planningHandoff = ref<PlanningRequest | null>(null);
     const handoffMissing = ref<MissingContextLabel[]>([]);
     const handoffHints = ref<string[]>([]);
+    const planningResult = ref<PlanningAnswer | null>(null);
+    const submitStatus = ref<SubmitStatus>("idle");
+    const submitError = ref("");
     let activeController: AbortController | null = null;
+    let submitController: AbortController | null = null;
+    let submitVersion = 0;
+    let keyState: IdempotencyKeyState | null = null;
     let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /**
+     * 条件一变，在途的规划答复就作废：中止等待、丢弃迟到响应、清掉旧结果。
+     * 唯一写入 planningResult 的地方是 submitPlan，这里只负责作废。
+     */
+    function discardSubmission() {
+      submitVersion += 1;
+      const controller = submitController;
+      submitController = null;
+      controller?.abort();
+      planningResult.value = null;
+      submitError.value = "";
+      if (submitStatus.value !== "idle") submitStatus.value = "idle";
+    }
 
     function clearPlanningHandoff() {
       planningHandoff.value = null;
       handoffMissing.value = [];
       handoffHints.value = [];
+      discardSubmission();
     }
 
     function clearExpiryTimer() {
@@ -287,8 +319,53 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       return built;
     }
 
+    /**
+     * 提交规划请求。三件事只管一件：重复点击忽略、同内容重试复用幂等键、
+     * 迟到响应按 submitVersion 丢弃。缺资料时什么都不提交，由 handoffMissing 展示。
+     */
+    async function submitPlan(): Promise<void> {
+      if (submitStatus.value === "submitting") return;
+      const built = preparePlanningHandoff();
+      const request = planningHandoff.value;
+      if (!built.ok || request === null) {
+        submitStatus.value = "idle";
+        submitError.value = "";
+        return;
+      }
+      keyState = keyForRequest(keyState, request, newIdempotencyKey);
+      const version = ++submitVersion;
+      const controller = new AbortController();
+      submitController?.abort();
+      submitController = controller;
+      submitStatus.value = "submitting";
+      submitError.value = "";
+      try {
+        const answer = await client.submitPlanning(
+          request,
+          keyState.key,
+          controller.signal,
+        );
+        if (version !== submitVersion) return;
+        planningResult.value = answer;
+        submitStatus.value = "ready";
+      } catch (error) {
+        if (version !== submitVersion) return;
+        if (error instanceof ApiFailure && error.kind === "aborted") return;
+        if (error instanceof ApiFailure && error.status === 401) {
+          invalidateSession(error.message);
+          return;
+        }
+        planningResult.value = null;
+        submitStatus.value = "error";
+        submitError.value = visibleError(error);
+      } finally {
+        if (submitController === controller) submitController = null;
+      }
+    }
+
     onScopeDispose(() => {
       clearExpiryTimer();
+      discardSubmission();
       const controller = activeController;
       activeController = null;
       controller?.abort();
@@ -322,6 +399,9 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       planningHandoff,
       handoffMissing,
       handoffHints,
+      planningResult,
+      submitStatus,
+      submitError,
       currentQuestion,
       questions,
       startSession,
@@ -334,6 +414,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       movePriority,
       confirmPriorities,
       preparePlanningHandoff,
+      submitPlan,
       previousQuestion,
     };
   });

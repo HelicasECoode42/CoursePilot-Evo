@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import QuestionView from "../views/QuestionView.vue";
+import ResultView from "../views/ResultView.vue";
 import { usePlanningStore } from "../stores/planning";
 import { resolveQuestion } from "../domain/question-flow";
 
@@ -8,6 +9,7 @@ export const router = createRouter({
   routes: [
     { path: "/", redirect: "/plan/questions/goals" },
     { path: "/plan/questions/:questionId", component: QuestionView },
+    { path: "/plan/result", component: ResultView },
     { path: "/:pathMatch(.*)*", redirect: "/plan/questions/goals" },
   ],
 });

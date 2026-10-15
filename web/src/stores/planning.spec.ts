@@ -1,6 +1,10 @@
 import { createPinia, disposePinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SnapshotSummary } from "../contracts";
+import type {
+  PlanningAnswer,
+  PlanningRequest,
+  SnapshotSummary,
+} from "../contracts";
 import { ApiFailure, type CoursePilotApiClient } from "../api/client";
 import { createPlanningStore } from "./planning";
 
@@ -531,5 +535,169 @@ describe("planning session store", () => {
       expect(store.planningHandoff).toBeNull();
       expect(store.handoffMissing).toEqual([]);
     }
+  });
+
+  describe("submitPlan", () => {
+    const answer: PlanningAnswer = {
+      taskId: "task-1",
+      traceId: "trace-1",
+      decision: "UNABLE_TO_VERIFY",
+      academicAudit: {
+        curriculumSnapshotId: "curriculum-1",
+        academicRecordId: "record-1",
+        recordRevision: 1,
+        transcriptComplete: false,
+        requirements: [],
+        suggestedCourseCodes: [],
+        unknowns: [],
+      },
+      recommendations: [],
+      clarification: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 1,
+      },
+    };
+
+    /** Ready session + verified curriculum + complete answers + a record id. */
+    function submittableStore(overrides: Partial<CoursePilotApiClient> = {}) {
+      const client = fakeClient({
+        fixtureAcademicRecordId: vi.fn(() => "record-1"),
+        ...overrides,
+      });
+      const store = createPlanningStore(client)();
+      store.$patch({
+        sessionStatus: "ready",
+        sessionId: "real-session",
+        expiresAt: "2099-01-01T00:00:00Z",
+        curricula: [curriculum],
+        selectedCurriculumId: curriculum.snapshotId,
+        draft: {
+          ...store.draft,
+          motives: ["GPA"],
+          priorityOrder: ["GPA"],
+          classPreferencesReviewed: true,
+          prioritiesConfirmed: true,
+          mustReviewed: true,
+          preferReviewed: true,
+        },
+      });
+      return store;
+    }
+
+    /** 记录每次提交的请求与幂等键，供断言使用。 */
+    function recordingSubmitter() {
+      const calls: Array<{ request: PlanningRequest; key: string }> = [];
+      const mock = vi.fn(async (request: PlanningRequest, key: string) => {
+        calls.push({ request, key });
+        return answer;
+      });
+      return { mock, calls };
+    }
+
+    it("submits the built request once and keeps the answer", async () => {
+      const { mock, calls } = recordingSubmitter();
+      const store = submittableStore({ submitPlanning: mock });
+
+      await store.submitPlan();
+
+      expect(mock).toHaveBeenCalledTimes(1);
+      expect(calls[0].request.mode).toBe("REAL");
+      expect(calls[0].request.academicRecordId).toBe("record-1");
+      expect(calls[0].key).toMatch(/^web-[A-Za-z0-9]+$/);
+      expect(store.submitStatus).toBe("ready");
+      expect(store.planningResult).toEqual(answer);
+    });
+
+    it("ignores a repeated click while a submission is in flight", async () => {
+      const pending = deferred<PlanningAnswer>();
+      const submitPlanning = vi.fn(() => pending.promise);
+      const store = submittableStore({ submitPlanning });
+
+      const inFlight = store.submitPlan();
+      await store.submitPlan();
+      expect(submitPlanning).toHaveBeenCalledTimes(1);
+      expect(store.submitStatus).toBe("submitting");
+
+      pending.resolve(answer);
+      await inFlight;
+      expect(store.submitStatus).toBe("ready");
+    });
+
+    it("submits nothing while required context is missing", async () => {
+      const submitPlanning = vi.fn();
+      const store = createPlanningStore(fakeClient({ submitPlanning }))();
+
+      await store.submitPlan();
+
+      expect(submitPlanning).not.toHaveBeenCalled();
+      expect(store.planningHandoff).toBeNull();
+      expect(store.submitStatus).toBe("idle");
+    });
+
+    it("reuses the idempotency key on retry and rotates it after a change", async () => {
+      const { mock, calls } = recordingSubmitter();
+      const store = submittableStore({ submitPlanning: mock });
+
+      await store.submitPlan();
+      await store.submitPlan();
+      expect(calls[1].key).toBe(calls[0].key);
+
+      store.updateDraft("careerText", "改成数据方向");
+      await store.submitPlan();
+      expect(calls[2].key).not.toBe(calls[0].key);
+    });
+
+    it("discards a late answer once the student changes a condition", async () => {
+      const pending = deferred<PlanningAnswer>();
+      const submitPlanning = vi.fn(() => pending.promise);
+      const store = submittableStore({ submitPlanning });
+
+      const inFlight = store.submitPlan();
+      store.updateDraft("careerText", "换一个方向");
+      pending.resolve(answer);
+      await inFlight;
+
+      expect(store.planningResult).toBeNull();
+      expect(store.submitStatus).toBe("idle");
+    });
+
+    it("surfaces a failed submission without keeping a stale answer", async () => {
+      const submitPlanning = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiFailure(
+            "服务暂时不可用，请稍后重试。",
+            "http",
+            503,
+            null,
+            true,
+          ),
+        );
+      const store = submittableStore({ submitPlanning });
+
+      await store.submitPlan();
+
+      expect(store.submitStatus).toBe("error");
+      expect(store.submitError).toContain("稍后重试");
+      expect(store.planningResult).toBeNull();
+    });
+
+    it("expires the session when planning answers 401", async () => {
+      const submitPlanning = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiFailure("会话不存在或已过期", "http", 401, "UNAUTHORIZED"),
+        );
+      const store = submittableStore({ submitPlanning });
+
+      await store.submitPlan();
+
+      expect(store.sessionStatus).toBe("expired");
+      expect(store.planningResult).toBeNull();
+    });
   });
 });
