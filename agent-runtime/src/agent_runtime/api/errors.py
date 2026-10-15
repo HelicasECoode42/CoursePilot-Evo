@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from agent_runtime.adapters.model_client import ModelInvalidOutput, ModelTimeout
 from agent_runtime.adapters.tool_client import InvalidTool, ToolUnavailable
 from agent_runtime.api.idempotency import IdempotencyConflict, RequestInProgress
 from agent_runtime.api.schemas import Envelope, Issue
@@ -87,6 +88,16 @@ def register_error_handlers(app: FastAPI) -> None:
             code=exc.issue_code, message=exc.message, field=exc.field, retryable=exc.retryable
         )
         return _json(request, exc.status_code, exc.status, [issue])
+
+    @app.exception_handler(ModelTimeout)
+    async def model_timeout(request: Request, exc: ModelTimeout) -> JSONResponse:
+        issue = Issue(code="MODEL_TIMEOUT", message=str(exc), field=None, retryable=True)
+        return _json(request, 504, "ERROR", [issue])
+
+    @app.exception_handler(ModelInvalidOutput)
+    async def model_invalid_output(request: Request, exc: ModelInvalidOutput) -> JSONResponse:
+        issue = Issue(code="MODEL_INVALID_OUTPUT", message=str(exc), field=None, retryable=False)
+        return _json(request, 422, "ERROR", [issue])
 
     @app.exception_handler(ToolUnavailable)
     async def tool_unavailable(request: Request, exc: ToolUnavailable) -> JSONResponse:

@@ -13,6 +13,7 @@ from agent_runtime.adapters.model_client import (
     ModelAdapter,
     ModelInvalidOutput,
     ModelReply,
+    ModelTimeout,
 )
 from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient
@@ -115,24 +116,6 @@ class PlanningRunner:
         facts = self._collect_facts(request, audit, context, budget, trace)
         reply = self._propose(request, context, facts, budget, trace)
         usage = self._usage(budget, started)
-
-        if reply is None:
-            answer = self._answer.unable_to_verify(
-                task_id=task_id,
-                trace_id=trace_id,
-                audit=audit,
-                issues=[
-                    Issue(
-                        code="MODEL_INVALID_OUTPUT",
-                        message="模型输出无法解析为候选，已停止修复",
-                        field=None,
-                        retryable=False,
-                    )
-                ],
-                usage=usage,
-            )
-            trace.emit("ERROR", error_code="MODEL_INVALID_OUTPUT")
-            return self._deliver(answer, trace, context)
 
         if reply.clarify is not None:
             trace.emit("CLARIFICATION_REQUESTED", output_ref=reply.clarify.questionId)
@@ -280,14 +263,16 @@ class PlanningRunner:
             budget.check_deadline()
             try:
                 reply = self._model.generate(context=context, messages=messages, tool_schemas=[])
+            except ModelTimeout:
+                raise
             except ModelInvalidOutput as exc:
                 last_error = exc
                 continue
+            budget.record_tokens(reply.input_tokens, reply.output_tokens)
             if reply.clarify is not None or reply.items:
                 return reply
             last_error = ModelInvalidOutput("empty candidate list")
-        del last_error
-        return None
+        raise last_error or ModelInvalidOutput("模型输出无法解析为候选，已停止修复")
 
     def _call_tool(
         self,
@@ -338,8 +323,8 @@ class PlanningRunner:
     @staticmethod
     def _usage(budget: BudgetTracker, started: datetime) -> Usage:
         return Usage(
-            inputTokens=None,
-            outputTokens=None,
+            inputTokens=budget.input_tokens,
+            outputTokens=budget.output_tokens,
             toolCalls=budget.tool_calls,
             elapsedMs=int((datetime.now(UTC) - started).total_seconds() * 1000),
         )

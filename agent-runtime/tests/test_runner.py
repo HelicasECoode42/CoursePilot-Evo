@@ -8,7 +8,12 @@ import pytest
 
 from agent_runtime.adapters.fake_tools import TypedFakeToolClient
 from agent_runtime.adapters.harness_loader import HarnessSnapshot
-from agent_runtime.adapters.model_client import FakeModelAdapter, ModelInvalidOutput, ModelReply
+from agent_runtime.adapters.model_client import (
+    FakeModelAdapter,
+    ModelInvalidOutput,
+    ModelReply,
+    ModelTimeout,
+)
 from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient, ToolUnavailable
 from agent_runtime.api.schemas import (
@@ -88,15 +93,51 @@ def test_run_rejects_invented_course_ids(planning_request: PlanningRequest) -> N
 
 def test_run_stops_after_one_invalid_output_repair(planning_request: PlanningRequest) -> None:
     class AlwaysInvalid:
+        calls = 0
+
         def generate(self, *, context, messages, tool_schemas):
             del context, messages, tool_schemas
+            type(self).calls += 1
             raise ModelInvalidOutput("broken json")
 
     planning_request.intent.motives = ["GPA"]
     planning_request.intent.priorityOrder = ["GPA"]
-    answer = _runner(AlwaysInvalid()).run(planning_request, _context(planning_request))
-    assert answer.decision == "UNABLE_TO_VERIFY"
-    assert any(issue.code == "MODEL_INVALID_OUTPUT" for issue in answer.unknowns)
+    with pytest.raises(ModelInvalidOutput):
+        _runner(AlwaysInvalid()).run(planning_request, _context(planning_request))
+    assert AlwaysInvalid.calls == 2
+
+
+def test_run_does_not_repair_model_timeout(planning_request: PlanningRequest) -> None:
+    class TimedOut:
+        calls = 0
+
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            type(self).calls += 1
+            raise ModelTimeout("模型请求超时")
+
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    with pytest.raises(ModelTimeout):
+        _runner(TimedOut()).run(planning_request, _context(planning_request))
+    assert TimedOut.calls == 1
+
+
+def test_run_records_provider_token_usage(planning_request: PlanningRequest) -> None:
+    class CountingModel:
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            return ModelReply(
+                items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)],
+                input_tokens=12,
+                output_tokens=4,
+            )
+
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    answer = _runner(CountingModel()).run(planning_request, _context(planning_request))
+    assert answer.usage.inputTokens == 12
+    assert answer.usage.outputTokens == 4
 
 
 def test_run_persists_sanitized_trace_and_manifest(

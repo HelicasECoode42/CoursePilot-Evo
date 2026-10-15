@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import httpx
+from pydantic import ValidationError
 
 from agent_runtime.api.schemas import PlanItem, Question
 from agent_runtime.application.context import ExecutionContext
@@ -22,7 +23,11 @@ FACTS_MESSAGE_PREFIX = "AVAILABLE_FACTS:"
 
 
 class ModelInvalidOutput(RuntimeError):
-    """Provider returned unusable JSON / empty candidates (-> limited one repair)."""
+    """Unusable JSON / schema-invalid candidates (-> one repair, then 422)."""
+
+
+class ModelTimeout(RuntimeError):
+    """Provider timed out or the transport failed (-> 504, retryable, no repair)."""
 
 
 @dataclass(frozen=True)
@@ -31,6 +36,8 @@ class ModelReply:
 
     clarify: Question | None = None
     items: list[PlanItem] | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class ModelAdapter(Protocol):
@@ -148,17 +155,27 @@ class HttpModelAdapter:
         try:
             with httpx.Client(timeout=timeout, transport=self._transport) as client:
                 response = client.post(url, headers=headers, json=payload)
+        except httpx.TimeoutException as exc:
+            raise ModelTimeout("模型请求超时") from exc
         except httpx.HTTPError as exc:
-            raise ModelInvalidOutput("模型请求失败") from exc
+            raise ModelTimeout("模型请求失败") from exc
         if response.status_code >= 400:
             raise ModelInvalidOutput("模型端点拒绝请求")
         try:
-            content = response.json()["choices"][0]["message"]["content"]
+            payload_json = response.json()
+            content = payload_json["choices"][0]["message"]["content"]
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise ModelInvalidOutput("模型响应缺少 content") from exc
         if not isinstance(content, str) or not content.strip():
             raise ModelInvalidOutput("模型响应缺少 content")
-        return _reply_from_content(content)
+        input_tokens, output_tokens = _usage_tokens(payload_json)
+        reply = _reply_from_content(content)
+        return ModelReply(
+            clarify=reply.clarify,
+            items=reply.items,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
 
 
 def _extract_json_object(content: str) -> str:
@@ -174,6 +191,17 @@ def _extract_json_object(content: str) -> str:
     return text
 
 
+def _usage_tokens(payload: dict) -> tuple[int | None, int | None]:
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return None, None
+    prompt = usage.get("prompt_tokens")
+    completion = usage.get("completion_tokens")
+    input_tokens = prompt if isinstance(prompt, int) and prompt >= 0 else None
+    output_tokens = completion if isinstance(completion, int) and completion >= 0 else None
+    return input_tokens, output_tokens
+
+
 def _reply_from_content(content: str) -> ModelReply:
     text = _extract_json_object(content)
     try:
@@ -182,12 +210,15 @@ def _reply_from_content(content: str) -> ModelReply:
         raise ModelInvalidOutput("模型输出不是 JSON") from exc
     if not isinstance(data, dict):
         raise ModelInvalidOutput("模型输出不是 JSON 对象")
-    if data.get("clarify") is not None:
-        return ModelReply(clarify=Question.model_validate(data["clarify"]))
-    raw_items = data.get("items") or []
-    if not raw_items:
-        raise ModelInvalidOutput("模型未给出候选")
-    return ModelReply(items=[PlanItem.model_validate(item) for item in raw_items])
+    try:
+        if data.get("clarify") is not None:
+            return ModelReply(clarify=Question.model_validate(data["clarify"]))
+        raw_items = data.get("items") or []
+        if not raw_items:
+            raise ModelInvalidOutput("模型未给出候选")
+        return ModelReply(items=[PlanItem.model_validate(item) for item in raw_items])
+    except ValidationError as exc:
+        raise ModelInvalidOutput("模型输出不符合契约") from exc
 
 
 def build_model_adapter(

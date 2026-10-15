@@ -7,11 +7,13 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from agent_runtime.adapters.fake_tools import TypedFakeToolClient
+from agent_runtime.adapters.model_client import ModelInvalidOutput, ModelTimeout
 from agent_runtime.adapters.tool_client import ToolUnavailable
 from agent_runtime.api.app import create_app
 from agent_runtime.api.schemas import AcademicRecord, AuditResult, PlanningRequest
 from agent_runtime.api.settings import Settings, load_settings
 from agent_runtime.application.ids import digest
+from agent_runtime.application.runner import PlanningRunner
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 
@@ -192,6 +194,60 @@ def test_planning_w2_fake_tools_returns_unknown_course_layer() -> None:
     assert body["status"] == "OK"
     assert body["data"]["decision"] == "RECOMMENDATIONS"
     assert body["data"]["recommendations"][0]["verification"]["verdict"] == "UNKNOWN"
+
+
+def test_planning_invalid_model_output_returns_422() -> None:
+    class AlwaysInvalid:
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            raise ModelInvalidOutput("broken json")
+
+    app = create_app(tool_client=TypedFakeToolClient())
+    app.state.runner = PlanningRunner(
+        tool_client=app.state.tool_client,
+        harness=app.state.harness,
+        model_adapter=AlwaysInvalid(),
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/planning",
+        json=_request_body(),
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "Idempotency-Key": "k-invalid",
+            "X-Request-Id": "req:invalid",
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["issues"][0]["code"] == "MODEL_INVALID_OUTPUT"
+    assert response.json()["issues"][0]["retryable"] is False
+
+
+def test_planning_model_timeout_returns_504() -> None:
+    class TimedOut:
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            raise ModelTimeout("模型请求超时")
+
+    app = create_app(tool_client=TypedFakeToolClient())
+    app.state.runner = PlanningRunner(
+        tool_client=app.state.tool_client,
+        harness=app.state.harness,
+        model_adapter=TimedOut(),
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/planning",
+        json=_request_body(),
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "Idempotency-Key": "k-timeout",
+            "X-Request-Id": "req:timeout",
+        },
+    )
+    assert response.status_code == 504
+    assert response.json()["issues"][0]["code"] == "MODEL_TIMEOUT"
+    assert response.json()["issues"][0]["retryable"] is True
 
 
 def test_planning_in_progress_same_key_returns_409() -> None:

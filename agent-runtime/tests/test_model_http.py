@@ -9,6 +9,7 @@ import pytest
 from agent_runtime.adapters.model_client import (
     HttpModelAdapter,
     ModelInvalidOutput,
+    ModelTimeout,
     build_model_adapter,
 )
 from agent_runtime.application.context import ExecutionContext
@@ -56,7 +57,8 @@ def test_http_model_parses_json_items() -> None:
                             )
                         }
                     }
-                ]
+                ],
+                "usage": {"prompt_tokens": 21, "completion_tokens": 8},
             },
         )
 
@@ -70,6 +72,8 @@ def test_http_model_parses_json_items() -> None:
     reply = adapter.generate(context=_context(), messages=[], tool_schemas=[])
     assert reply.items is not None
     assert reply.items[0].courseCode == "CS101"
+    assert reply.input_tokens == 21
+    assert reply.output_tokens == 8
 
 
 def test_http_model_extracts_json_from_fenced_text() -> None:
@@ -102,6 +106,41 @@ def test_http_model_extracts_json_from_fenced_text() -> None:
     reply = adapter.generate(context=_context(), messages=[], tool_schemas=[])
     assert reply.items is not None
     assert reply.items[0].courseCode == "MATH201"
+
+
+def test_http_model_schema_invalid_item_is_invalid_output() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"items":[{}]}'}}]},
+        )
+
+    adapter = HttpModelAdapter(
+        "https://api.deepseek.com",
+        "test-key",
+        "deepseek-chat",
+        0.0,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ModelInvalidOutput, match="不符合契约"):
+        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+
+
+def test_http_model_timeout_is_not_invalid_output() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        raise httpx.TimeoutException("deadline")
+
+    adapter = HttpModelAdapter(
+        "https://api.deepseek.com",
+        "test-key",
+        "deepseek-chat",
+        0.0,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ModelTimeout):
+        adapter.generate(context=_context(), messages=[], tool_schemas=[])
 
 
 def test_http_model_invalid_json_raises() -> None:
