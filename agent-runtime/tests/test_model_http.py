@@ -143,6 +143,26 @@ def test_http_model_timeout_is_not_invalid_output() -> None:
         adapter.generate(context=_context(), messages=[], tool_schemas=[])
 
 
+def test_http_model_empty_items_is_not_invalid_output() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"items":[]}'}}]},
+        )
+
+    adapter = HttpModelAdapter(
+        "https://api.deepseek.com",
+        "test-key",
+        "deepseek-chat",
+        0.0,
+        transport=httpx.MockTransport(handler),
+    )
+    reply = adapter.generate(context=_context(), messages=[], tool_schemas=[])
+    assert reply.items == []
+    assert reply.clarify is None
+
+
 def test_http_model_invalid_json_raises() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

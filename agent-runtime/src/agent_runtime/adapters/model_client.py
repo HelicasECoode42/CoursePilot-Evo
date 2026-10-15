@@ -213,8 +213,12 @@ def _reply_from_content(content: str) -> ModelReply:
     try:
         if data.get("clarify") is not None:
             return ModelReply(clarify=Question.model_validate(data["clarify"]))
-        raw_items = data.get("items") or []
-        if not raw_items:
+        if "items" not in data:
+            raise ModelInvalidOutput("模型未给出候选")
+        raw_items = data["items"]
+        if raw_items == []:
+            return ModelReply(items=[])
+        if not isinstance(raw_items, list):
             raise ModelInvalidOutput("模型未给出候选")
         return ModelReply(items=[PlanItem.model_validate(item) for item in raw_items])
     except ValidationError as exc:

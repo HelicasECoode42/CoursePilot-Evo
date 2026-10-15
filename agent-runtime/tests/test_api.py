@@ -193,7 +193,31 @@ def test_planning_w2_fake_tools_returns_unknown_course_layer() -> None:
     body = response.json()
     assert body["status"] == "OK"
     assert body["data"]["decision"] == "RECOMMENDATIONS"
-    assert body["data"]["recommendations"][0]["verification"]["verdict"] == "UNKNOWN"
+    verification = body["data"]["recommendations"][0]["verification"]
+    assert verification["verdict"] == "UNKNOWN"
+    assert any(issue["code"] == "FAKE_MODEL" for issue in body["data"]["unknowns"])
+    assert all(issue["code"] != "FAKE_MODEL" for issue in verification["unknownChecks"])
+
+
+def test_planning_empty_catalog_is_unable_to_verify_not_422() -> None:
+    client = TestClient(create_app(tool_client=FakeToolClient()))
+    response = client.post(
+        "/api/v1/planning",
+        json=_request_body(),
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "Idempotency-Key": "k-empty",
+            "X-Request-Id": "req:empty",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "OK"
+    assert body["data"]["decision"] == "UNABLE_TO_VERIFY"
+    assert body["data"]["recommendations"] == []
+    assert any(issue["code"] == "EVIDENCE_MISMATCH" for issue in body["data"]["unknowns"])
+    assert any(issue["code"] == "FAKE_MODEL" for issue in body["data"]["unknowns"])
+    assert body["issues"] == []
 
 
 def test_planning_invalid_model_output_returns_422() -> None:

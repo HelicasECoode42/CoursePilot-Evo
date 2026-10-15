@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -17,9 +18,12 @@ from agent_runtime.adapters.model_client import (
 from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient, ToolUnavailable
 from agent_runtime.api.schemas import (
+    AuditResult,
     Constraint,
+    Course,
     PlanItem,
     PlanningRequest,
+    PlanValidation,
     RunManifest,
     TeacherPreference,
 )
@@ -76,6 +80,8 @@ def test_run_returns_course_layer_recommendations_on_w2_fake_loop(
     assert {item.courseCode for item in recommendation.items} <= {"CS101", "MATH201"}
     assert any(issue.code == "OFFERING_UNAVAILABLE" for issue in answer.unknowns)
     assert any(issue.code == "FAKE_TOOL" for issue in answer.unknowns)
+    assert any(issue.code == "FAKE_MODEL" for issue in answer.unknowns)
+    assert all(issue.code != "FAKE_MODEL" for issue in recommendation.verification.unknownChecks)
 
 
 def test_run_rejects_invented_course_ids(planning_request: PlanningRequest) -> None:
@@ -201,6 +207,128 @@ def test_run_clarifies_must_teacher_vs_hard_time(planning_request: PlanningReque
         "KEEP_TEACHER",
         "KEEP_SCHEDULE",
     }
+
+
+def test_empty_candidate_list_is_unable_to_verify(planning_request: PlanningRequest) -> None:
+    class EmptyReply:
+        calls = 0
+
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            type(self).calls += 1
+            return ModelReply(items=[])
+
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    answer = _runner(EmptyReply()).run(planning_request, _context(planning_request))
+    assert EmptyReply.calls == 1
+    assert answer.decision == "UNABLE_TO_VERIFY"
+    assert answer.recommendations == []
+    assert any(issue.code == "EVIDENCE_MISMATCH" for issue in answer.unknowns)
+    assert all(issue.code != "FAKE_MODEL" for issue in answer.unknowns)
+
+
+def test_empty_tool_catalog_is_unable_to_verify(planning_request: PlanningRequest) -> None:
+    class EmptyCatalog:
+        def call(self, tool, dto, context, *, params=None):
+            del context, params
+            if tool == "auditRequirements":
+                return AuditResult(
+                    curriculumSnapshotId=dto.curriculumSnapshotId,
+                    academicRecordId=dto.academicRecordId,
+                    recordRevision=1,
+                    transcriptComplete=False,
+                    requirements=[],
+                    suggestedCourseCodes=[],
+                    unknowns=[],
+                )
+            if tool in {"listCourses", "listTeacherCourseOptions"}:
+                return []
+            raise AssertionError(tool)
+
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    runner = PlanningRunner(
+        tool_client=EmptyCatalog(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=FakeModelAdapter(),
+    )
+    answer = runner.run(planning_request, _context(planning_request))
+    assert answer.decision == "UNABLE_TO_VERIFY"
+    assert answer.recommendations == []
+    assert any(issue.code == "EVIDENCE_MISMATCH" for issue in answer.unknowns)
+    assert any(issue.code == "FAKE_MODEL" for issue in answer.unknowns)
+
+
+def test_fake_model_marker_does_not_rewrite_valid_verdict(
+    planning_request: PlanningRequest,
+) -> None:
+    class ValidJava:
+        def call(self, tool, dto, context, *, params=None):
+            del context, params
+            if tool == "auditRequirements":
+                return AuditResult(
+                    curriculumSnapshotId=dto.curriculumSnapshotId,
+                    academicRecordId=dto.academicRecordId,
+                    recordRevision=1,
+                    transcriptComplete=True,
+                    requirements=[],
+                    suggestedCourseCodes=["CS101"],
+                    unknowns=[],
+                )
+            if tool == "listCourses":
+                return [
+                    Course(
+                        courseCode="CS101",
+                        name="程序设计基础",
+                        credits=Decimal("4.00"),
+                        category="必修",
+                        sourceRefIds=["source:demo"],
+                    )
+                ]
+            if tool == "listTeacherCourseOptions":
+                return []
+            if tool == "validatePlan":
+                return PlanValidation(
+                    verifierResultId="verify:demo",
+                    verdict="VALID",
+                    scope="COURSE_ONLY",
+                    curriculumSnapshotId=dto.curriculumSnapshotId,
+                    offeringSnapshotId=dto.offeringSnapshotId,
+                    recordRevision=1,
+                    violations=[],
+                    unknownChecks=[],
+                    performedChecks=["COURSE_EXISTS"],
+                    sourceRefIds=["source:demo"],
+                )
+            raise AssertionError(tool)
+
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    runner = PlanningRunner(
+        tool_client=ValidJava(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=FakeModelAdapter(),
+    )
+    answer = runner.run(planning_request, _context(planning_request))
+    assert answer.decision == "RECOMMENDATIONS"
+    verification = answer.recommendations[0].verification
+    assert verification.verdict == "VALID"
+    assert verification.unknownChecks == []
+    assert any(issue.code == "FAKE_MODEL" for issue in answer.unknowns)
+
+
+def test_configured_model_has_no_fake_marker(planning_request: PlanningRequest) -> None:
+    class ConfiguredModel:
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            return ModelReply(items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
+
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    answer = _runner(ConfiguredModel()).run(planning_request, _context(planning_request))
+    assert answer.decision == "RECOMMENDATIONS"
+    assert all(issue.code != "FAKE_MODEL" for issue in answer.unknowns)
 
 
 def test_run_raises_tool_unavailable_without_java(planning_request: PlanningRequest) -> None:

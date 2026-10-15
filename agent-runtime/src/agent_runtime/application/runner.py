@@ -126,7 +126,7 @@ class PlanningRunner:
                 question=reply.clarify,
                 usage=usage,
             )
-            return self._deliver(answer, trace, context)
+            return self._deliver(self._mark_fake_model(answer), trace, context)
 
         items = reply.items or []
         guard_issues = self._guard.check(items, facts)
@@ -147,7 +147,7 @@ class PlanningRunner:
                 usage=usage,
             )
             trace.emit("ERROR", error_code="EVIDENCE_MISMATCH")
-            return self._deliver(answer, trace, context)
+            return self._deliver(self._mark_fake_model(answer), trace, context)
 
         trace.emit("CANDIDATE_PROPOSED", output_ref=items[0].courseCode)
         verdict = cast(
@@ -180,7 +180,7 @@ class PlanningRunner:
             review_note_ids=[],
             verdict=verdict,
         )
-        unknowns = list(verdict.unknownChecks) + list(audit.unknowns)
+        unknowns = self._with_fake_model_issue(list(verdict.unknownChecks) + list(audit.unknowns))
         answer = self._answer.recommendations(
             task_id=task_id,
             trace_id=trace_id,
@@ -269,9 +269,14 @@ class PlanningRunner:
                 last_error = exc
                 continue
             budget.record_tokens(reply.input_tokens, reply.output_tokens)
-            if reply.clarify is not None or reply.items:
+            if reply.clarify is not None:
                 return reply
-            last_error = ModelInvalidOutput("empty candidate list")
+            # An empty candidate list is missing data, not a broken model payload.
+            return ModelReply(
+                items=list(reply.items or []),
+                input_tokens=reply.input_tokens,
+                output_tokens=reply.output_tokens,
+            )
         raise last_error or ModelInvalidOutput("模型输出无法解析为候选，已停止修复")
 
     def _call_tool(
@@ -319,6 +324,25 @@ class PlanningRunner:
                 manifest=build_run_manifest(context=context, identity=self._run_identity),
             )
         return answer
+
+    def _with_fake_model_issue(self, issues: list[Issue]) -> list[Issue]:
+        if not isinstance(self._model, FakeModelAdapter):
+            return issues
+        return [
+            *issues,
+            Issue(
+                code="FAKE_MODEL",
+                message="当前是 W2 假模型，不是已配置的模型端点",
+                field=None,
+                retryable=False,
+            ),
+        ]
+
+    def _mark_fake_model(self, answer: PlanningAnswer) -> PlanningAnswer:
+        marked = self._with_fake_model_issue(list(answer.unknowns))
+        if marked == list(answer.unknowns):
+            return answer
+        return answer.model_copy(update={"unknowns": marked})
 
     @staticmethod
     def _usage(budget: BudgetTracker, started: datetime) -> Usage:

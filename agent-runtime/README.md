@@ -4,8 +4,9 @@ CoursePilot-Evo 的 System 2 层：唯一的**生产/评测 Runner**、FastAPI �
 Harness。硬事实全部来自 Java（System 1），本模块只负责理解目标、调用策略、候选、澄清与解释。
 
 > 当前是 **W2 类型化假循环**：DTO 契约、Runner 入口、意图/澄清/守卫、假模型候选、假 Java
-> `validatePlan`、Harness、session/planning。**尚未接入真实模型与真实 Java**——默认无
-> `CP_JAVA_BASE_URL` 时 planning 仍返回 503；本地演示可设 `CP_USE_FAKE_TOOLS=true`。
+> `validatePlan`、Harness、session/planning。未配置模型密钥时走假模型，答案 `unknowns`
+> 带 `FAKE_MODEL`。默认无 `CP_JAVA_BASE_URL` 时 planning 仍返回 503；本地演示可设
+> `CP_USE_FAKE_TOOLS=true`。
 
 ## 目录结构（依赖方向 api → application → domain/policies，adapters 封装 IO）
 
@@ -68,15 +69,17 @@ python -m uvicorn agent_runtime.api.app:app --port 8000
 
 ## 当前限制（如实）
 
-- `FakeModelAdapter` 只从工具返回的课程 id 里挑候选，不是真实模型；核验器假工具固定
-  `UNKNOWN` + `COURSE_ONLY`，不能当成无冲突课表。
+- `FakeModelAdapter` 只从工具返回的课程 id 里挑候选，不是真实模型；只要走到假模型，
+  `PlanningAnswer.unknowns` 就有 `FAKE_MODEL`。核验器假工具固定 `UNKNOWN` + `COURSE_ONLY`，
+  不能当成无冲突课表。工具课程集为空时返回 `UNABLE_TO_VERIFY`，不报模型输出非法。
 - 有目标时 Runner 走 提议 → Guard → `validatePlan` → 编译；候选 id 不在工具集合则
   `EVIDENCE_MISMATCH`/`UNKNOWN_COURSE`，非法模型 JSON 只修复一次。
 - `ToolClient` 已按 `java.openapi.json` 发 typed HTTP（`X-Service-Key` /
   `X-Subject-Id` / `X-Request-Id`，GET 列表读 `data.items`）。未配置
   `CP_JAVA_BASE_URL` 且未开假工具时仍是 `TOOL_UNAVAILABLE`(503)。
 - 配置了 `CP_MODEL_BASE_URL` 与 `CP_MODEL_API_KEY` 时走 OpenAI 兼容
-  `/chat/completions`；密钥只放本机 `.env`。未配置时仍用假模型。
+  `/chat/completions`；密钥只放本机 `.env`。只配地址、密钥为空时仍用假模型，并留下
+  `FAKE_MODEL`。
 - 会话与幂等是内存实现。相同键执行中返回 `409 REQUEST_IN_PROGRESS`；失败会释放占位以便重试。
 - `planning.openapi.json` 的 12 个端点全部有对应路由；走 Java 的端点未配置 `CP_JAVA_BASE_URL`
   时返回 `TOOL_UNAVAILABLE`(503)，不冒充无冲突。`listSessionRecords` 对应的 Java 列表工具
