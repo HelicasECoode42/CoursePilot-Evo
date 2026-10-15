@@ -1,0 +1,28 @@
+{
+  "academicRecordId": "record:demo",
+  "revision": 2,
+  "curriculumSnapshotId": "curr:demo",
+  "completedCourses": [
+    {
+      "courseCode": "CS101",
+      "earnedCredits": 4.0,
+      "outcome": "PASSED",
+      "completedTerm": "2024-2025-1"
+    },
+    {
+      "courseCode": "MATH201",
+      "earnedCredits": null,
+      "outcome": "IN_PROGRESS",
+      "completedTerm": null
+    },
+    {
+      "courseCode": "PHYS110",
+      "earnedCredits": null,
+      "outcome": "UNKNOWN",
+      "completedTerm": "2023-2024-2"
+    }
+  ],
+  "transcriptComplete": false,
+  "sourceKind": "USER_IMPORT",
+  "createdAt": "2026-10-13T01:20:00Z"
+}

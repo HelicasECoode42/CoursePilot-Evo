@@ -568,6 +568,170 @@
       }
     },
     "/api/v1/academic-records": {
+      "get": {
+        "operationId": "listAcademicRecords",
+        "summary": "列出可信主体已有的学业记录",
+        "description": "归属由已认证的 X-Subject-Id 派生，不接受浏览器自报 owner。不做分页：items 为空数组表示该主体尚无记录，返回 200 而不是 404。",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "X-Subject-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；items 为空数组表示该主体尚无学业记录，这是正常业务状态而不是错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "./schemas/domain.schema.json#/$defs/AcademicRecord"
+                              },
+                              "minItems": 0,
+                              "maxItems": 50
+                            }
+                          },
+                          "required": [
+                            "items"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "operationId": "createAcademicRecord",
         "summary": "保存本会话已修记录",

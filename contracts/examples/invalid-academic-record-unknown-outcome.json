@@ -1,0 +1,16 @@
+{
+  "academicRecordId": "record:demo",
+  "revision": 1,
+  "curriculumSnapshotId": "curr:demo",
+  "completedCourses": [
+    {
+      "courseCode": "CS101",
+      "earnedCredits": 4.0,
+      "outcome": "NOT_TAKEN",
+      "completedTerm": "2024-2025-1"
+    }
+  ],
+  "transcriptComplete": true,
+  "sourceKind": "USER_IMPORT",
+  "createdAt": "2026-10-13T01:20:00Z"
+}
