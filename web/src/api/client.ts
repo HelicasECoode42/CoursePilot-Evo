@@ -1,7 +1,18 @@
 import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import domainSchema from "../../../contracts/schemas/domain.schema.json";
-import type { Envelope, SessionResult, SnapshotSummary } from "../contracts";
+import { SCHEMA_VERSION } from "../contracts";
+import type {
+  AcademicRecord,
+  AcademicRecordInput,
+  AcademicRecordList,
+  AuditResult,
+  Envelope,
+  PlanningAnswer,
+  PlanningRequest,
+  SessionResult,
+  SnapshotSummary,
+} from "../contracts";
 
 export type ApiFailureKind =
   | "network"
@@ -37,6 +48,26 @@ export interface CoursePilotApiClient {
   readonly mode: "http" | "fixture";
   createSession(signal?: AbortSignal): Promise<SessionView>;
   listCurricula(signal?: AbortSignal): Promise<CurriculumResult>;
+  /** E2 / E-F1：列出本会话已有的学业记录。items 为空数组是正常业务状态。 */
+  listSessionRecords(signal?: AbortSignal): Promise<AcademicRecordList>;
+  /** E2 / E-F1：缺记录时才补录。academicRecordId 由服务端生成并返回。 */
+  saveSessionRecord(
+    input: AcademicRecordInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<AcademicRecord>;
+  /** E2 / E-F1：学业核对。未知项由服务端在 unknowns 里说明。 */
+  auditRequirements(
+    curriculumSnapshotId: string,
+    academicRecordId: string,
+    signal?: AbortSignal,
+  ): Promise<AuditResult>;
+  /** E2 / E-F4：提交规划请求，返回 CLARIFY / RECOMMENDATIONS / UNABLE_TO_VERIFY。 */
+  submitPlanning(
+    request: PlanningRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<PlanningAnswer>;
   clearSession(): void;
   fixtureAcademicRecordId(): string | null;
 }
@@ -50,6 +81,15 @@ const validateSession = ajv.getSchema(
 );
 const validateSnapshot = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/SnapshotSummary",
+);
+const validateAcademicRecord = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/AcademicRecord",
+);
+const validateAuditResult = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/AuditResult",
+);
+const validatePlanningAnswer = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/PlanningAnswer",
 );
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -221,12 +261,133 @@ export class HttpApiClient implements CoursePilotApiClient {
     };
   }
 
+  private requireSession(): string {
+    if (!this.sessionToken) {
+      throw new ApiFailure("请先建立本次会话。", "http", 401, "UNAUTHORIZED");
+    }
+    return this.sessionToken;
+  }
+
+  async listSessionRecords(signal?: AbortSignal): Promise<AcademicRecordList> {
+    const { response, envelope } = await this.request(
+      "/api/v1/academic-records",
+      { method: "GET", sessionToken: this.requireSession(), signal },
+    );
+    // 空 items 是业务状态，不是错误；只有非 OK 且非 UNKNOWN 才算系统错误。
+    if (envelope.status !== "OK" && envelope.status !== "UNKNOWN") {
+      throw errorForResponse(response.status, envelope);
+    }
+    const data = envelope.data;
+    if (!isObject(data) || !Array.isArray(data.items)) {
+      throw new ApiFailure(
+        "服务返回的学业记录列表格式不完整。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    const items = data.items as unknown[];
+    if (!items.every((item) => Boolean(validateAcademicRecord?.(item)))) {
+      throw new ApiFailure(
+        "服务返回的学业记录不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return { items: items as AcademicRecord[] };
+  }
+
+  async saveSessionRecord(
+    input: AcademicRecordInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<AcademicRecord> {
+    const { response, envelope } = await this.request(
+      "/api/v1/academic-records",
+      {
+        method: "POST",
+        sessionToken: this.requireSession(),
+        signal,
+        body: input,
+        idempotencyKey,
+      },
+    );
+    if (envelope.status !== "OK") {
+      throw errorForResponse(response.status, envelope);
+    }
+    if (!validateAcademicRecord?.(envelope.data)) {
+      throw new ApiFailure(
+        "服务返回的学业记录不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as AcademicRecord;
+  }
+
+  async auditRequirements(
+    curriculumSnapshotId: string,
+    academicRecordId: string,
+    signal?: AbortSignal,
+  ): Promise<AuditResult> {
+    const { response, envelope } = await this.request(
+      "/api/v1/requirements/audit",
+      {
+        method: "POST",
+        sessionToken: this.requireSession(),
+        signal,
+        body: {
+          schemaVersion: SCHEMA_VERSION,
+          curriculumSnapshotId,
+          academicRecordId,
+        },
+      },
+    );
+    if (envelope.status !== "OK") {
+      throw errorForResponse(response.status, envelope);
+    }
+    if (!validateAuditResult?.(envelope.data)) {
+      throw new ApiFailure(
+        "服务返回的学业核对结果不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as AuditResult;
+  }
+
+  async submitPlanning(
+    request: PlanningRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<PlanningAnswer> {
+    const { response, envelope } = await this.request("/api/v1/planning", {
+      method: "POST",
+      sessionToken: this.requireSession(),
+      signal,
+      body: request,
+      idempotencyKey,
+    });
+    if (envelope.status !== "OK") {
+      throw errorForResponse(response.status, envelope);
+    }
+    if (!validatePlanningAnswer?.(envelope.data)) {
+      throw new ApiFailure(
+        "服务返回的规划结果不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as PlanningAnswer;
+  }
+
   private async request(
     path: string,
     options: {
       method: "GET" | "POST";
       sessionToken?: string;
       signal?: AbortSignal;
+      body?: unknown;
+      idempotencyKey?: string;
     },
   ): Promise<{ response: Response; envelope: Envelope<unknown> }> {
     if (options.signal?.aborted)
@@ -246,6 +407,10 @@ export class HttpApiClient implements CoursePilotApiClient {
     });
     if (options.sessionToken)
       headers.set("Authorization", `Bearer ${options.sessionToken}`);
+    if (options.idempotencyKey)
+      headers.set("Idempotency-Key", options.idempotencyKey);
+    if (options.body !== undefined)
+      headers.set("Content-Type", "application/json");
 
     try {
       const response = await this.fetcher(`${this.baseUrl}${path}`, {
@@ -254,6 +419,8 @@ export class HttpApiClient implements CoursePilotApiClient {
         credentials: "omit",
         cache: "no-store",
         signal: controller.signal,
+        body:
+          options.body === undefined ? undefined : JSON.stringify(options.body),
       });
       let body: unknown;
       try {

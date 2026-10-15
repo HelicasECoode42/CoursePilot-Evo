@@ -236,6 +236,19 @@ function scheduleSummary(keys: readonly string[]): string {
 function prepareRequest() {
   store.preparePlanningHandoff();
 }
+
+/** 提交规划并跳到结果页。缺资料时什么都不提交，也不会跳到结果页。 */
+async function submitRequest() {
+  await store.submitPlan();
+  if (store.planningResult || store.submitStatus === "error") {
+    await router.push("/plan/result");
+  }
+}
+
+/** 缺学业记录时把学生送到资料页，那里才有读记录与核对流程。 */
+async function openRecords() {
+  await router.push("/records");
+}
 </script>
 
 <template>
@@ -737,6 +750,27 @@ function prepareRequest() {
         @click="prepareRequest"
       >
         检查下一步资料
+      </button>
+      <button
+        v-if="store.handoffMissing.includes('学业记录')"
+        class="button button--primary"
+        type="button"
+        @click="openRecords"
+      >
+        去补充学业资料
+      </button>
+      <button
+        v-if="store.planningHandoff"
+        class="button button--primary"
+        type="button"
+        :disabled="store.submitStatus === 'submitting'"
+        @click="submitRequest"
+      >
+        {{
+          store.submitStatus === "submitting"
+            ? "正在规划…"
+            : "提交规划并查看结果"
+        }}
       </button>
     </template>
 
