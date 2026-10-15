@@ -1,0 +1,7 @@
+# Which facts/evidence are selected into the model context for one task.
+# The runner must not stuff the whole database or all chat history into the prompt
+# (c-agent.md section 5).
+max_course_facts: 20
+max_review_notes: 10
+max_offerings: 20
+include_unknowns: true

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-runtime"
+version = "0.1.0"
+description = "CoursePilot-Evo module C: Planning Agent, the unique production/evaluation Runner and the runnable Harness"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.143.0",
+    "httpx==0.28.1",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.15.0",
+    "PyYAML==6.0.3",
+    "uvicorn==0.54.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest==9.0.3",
+    "ruff==0.15.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agent_runtime = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent_runtime"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
