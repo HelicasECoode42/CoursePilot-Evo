@@ -16,6 +16,7 @@ from web_checks import (
     check_document,
     check_narrow,
     check_shell,
+    check_stub_path,
     check_unknown,
     plan_rows,
 )
@@ -137,3 +138,33 @@ def test_plan_rows_are_green_and_blocked_rows_are_not():
     assert exit_code(rows) == 0
     assert all(r.verdict == PLAN for r in rows)
     assert exit_code(blocked_rows("web 未就绪", "python integration/start_stack.py --plan")) == 1
+
+
+def test_stub_path_is_blocked_without_a_real_browser():
+    result = check_stub_path(HttpProbeDriver(), URL)
+    assert result.verdict == BLOCKED
+
+
+def test_stub_path_passes_when_the_question_card_renders():
+    html = '<html><body><section class="question-card" aria-labelledby="question-title"><h2 id="question-title">你的目标</h2></section></body></html>'
+    driver = FakeDriver({URL: LoadedPage(URL, 200, html=html, text=SHELL_TEXT)})
+    assert check_stub_path(driver, URL).verdict == PASS
+
+
+def test_stub_path_fails_on_the_missing_curriculum_block():
+    html = '<html><body><section aria-labelledby="missing-curriculum-title"><h2 id="missing-curriculum-title">没有培养方案</h2></section></body></html>'
+    driver = FakeDriver({URL: LoadedPage(URL, 200, html=html, text=SHELL_TEXT)})
+    result = check_stub_path(driver, URL)
+    assert result.verdict == FAIL
+    assert "培养方案" in result.actual
+
+
+def test_run_web_checks_marks_stub_path_blocked_without_the_flag(monkeypatch):
+    from web_checks import run_web_checks
+
+    monkeypatch.setattr("web_checks.http_get", lambda url: (200, "createApp(App)"))
+    driver = FakeDriver({URL: LoadedPage(URL, 200, html=DOC, text=SHELL_TEXT)})
+    rows = run_web_checks(driver, URL, api_reachable=False)
+    stub_row = next(r for r in rows if r.step == "web_stub_path")
+    assert stub_row.verdict == BLOCKED
+    assert "--with-stub" in stub_row.detail

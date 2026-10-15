@@ -7,7 +7,9 @@ name = "coursepilot-integration"
 version = "0.1.0"
 description = "D 模块 D2（D-F3）：全链路集成检查的组合启动脚本与统一配置入口"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "jsonschema==4.26.0",
+]
 
 [project.optional-dependencies]
 test = [
@@ -25,6 +27,8 @@ only-include = [
   "web_checks.py",
   "check_web.py",
   "check_all.py",
+  "stub_upstream.py",
+  "check_stub.py",
 ]
 
 [tool.pytest.ini_options]

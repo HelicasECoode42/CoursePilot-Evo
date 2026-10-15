@@ -27,13 +27,14 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 
-# (步骤名, 失败归属, 脚本, 真跑附加参数)
-STEPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("配置校验", "D", "stack_config.py", ("--check",)),
-    ("组合启动", "B、C、E", "start_stack.py", ()),
-    ("主链路检查", "B、C", "check_stack.py", ()),
-    ("异常与未知覆盖", "B、C", "smoke_stack.py", ()),
-    ("浏览器检查", "E", "check_web.py", ()),
+# (步骤名, 失败归属, 脚本, 真跑附加参数, 计划模式是否运行)
+STEPS: tuple[tuple[str, str, str, tuple[str, ...], bool], ...] = (
+    ("配置校验", "D", "stack_config.py", ("--check",), True),
+    ("组合启动", "B、C、E", "start_stack.py", (), True),
+    ("主链路检查", "B、C", "check_stack.py", (), True),
+    ("异常与未知覆盖", "B、C", "smoke_stack.py", (), True),
+    ("受控假响应", "D", "check_stub.py", (), False),
+    ("浏览器检查", "E", "check_web.py", (), True),
 )
 STOP_STEP = ("收尾：停止服务", "D", "start_stack.py", ("--stop",))
 
@@ -41,8 +42,8 @@ STOP_STEP = ("收尾：停止服务", "D", "start_stack.py", ("--stop",))
 def build_argv(script: str, extra: tuple[str, ...], args: argparse.Namespace) -> list[str]:
     """拼一步的参数：配置校验没有计划/保留模式；其余步骤在 --plan 下加 --plan，真跑时 start_stack 加 --keep。"""
     argv = [sys.executable, str(HERE / script), *extra]
-    if script == "stack_config.py":
-        return argv
+    if script in ("stack_config.py", "check_stub.py"):
+        return argv  # 这两个没有 --plan/--keep 语义
     if args.plan:
         argv.append("--plan")
     elif script == "start_stack.py":
@@ -73,12 +74,26 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     print("D2 集成检查链：" + ("计划模式" if args.plan else "真跑"))
-    print("框架：" + " → ".join(name for name, _owner, _script, _extra in STEPS))
+    print("框架：" + " → ".join(name for name, *_rest in STEPS))
     print()
 
     outcomes: list[dict] = []
-    for name, owner, script, extra in STEPS:
+    for name, owner, script, extra, plan_runs in STEPS:
         step_argv = build_argv(script, extra, args)
+        if args.plan and not plan_runs:
+            outcomes.append(
+                {
+                    "name": name,
+                    "owner": owner,
+                    "argv": step_argv[1:],
+                    "exitCode": 0,
+                    "note": "计划模式跳过（不依赖外部服务）",
+                }
+            )
+            if not args.json:
+                print(f"[{name}] 计划模式跳过：本检查不依赖外部服务，真跑时会执行")
+                print()
+            continue
         print(f"[{name}] " + " ".join(step_argv[1:]))
         code, output = run_step(step_argv, capture=args.json)
         outcomes.append({"name": name, "owner": owner, "argv": step_argv[1:], "exitCode": code})
@@ -111,7 +126,10 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"{'步骤':<16} {'退出码':<6} 失败归属")
     for item in outcomes:
-        print(f"{item['name']:<16} {item['exitCode']:<6} {item['owner'] if item['exitCode'] else '-'}")
+        note = item.get("note", "")
+        print(
+            f"{item['name']:<16} {('PLAN' if note else item['exitCode']):<6} {item['owner'] if item['exitCode'] else '-'} {note}"
+        )
     print()
     if failed:
         print("未通过：" + "、".join(f"{item['name']}({item['exitCode']}) → {item['owner']}" for item in failed))

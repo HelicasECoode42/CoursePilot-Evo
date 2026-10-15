@@ -458,24 +458,108 @@ def check_narrow(driver: PageDriver, url: str) -> StepResult:
     )
 
 
-CHECK_ORDER = ("web_document", "web_bundle", "web_shell", "web_api_down", "web_unknown", "web_narrow")
+def check_stub_path(driver: PageDriver, url: str) -> StepResult:
+    """受控假响应当上游时，页面应进入引导第一问（而不是错误区块）。"""
+    step = "web_stub_path"
+    expect = (
+        "受控假响应当上游时页面进入引导第一问（问题卡渲染、无错误区块）；"
+        "要求页面以 CP_API_BASE_URL（默认 http://127.0.0.1:8000）为上游"
+    )
+    gate = needs_browser(driver, step, expect, "页面渲染只能在真浏览器里判")
+    if gate:
+        return gate
+    page = driver.load(url, screenshot=str(EVIDENCE_DIR / "stub-path.png"))
+    if page.status == 0:
+        return StepResult(
+            step,
+            BLOCKED,
+            "-",
+            expect,
+            f"页面服务未响应（{page.failure}）",
+            detail="先起页面",
+            repro="cd web && npm run dev",
+        )
+    if page.page_errors:
+        return StepResult(
+            step,
+            FAIL,
+            "-",
+            expect,
+            f"页面抛未捕获异常：{page.page_errors[0]}",
+            detail="受控上游下挂载失败",
+            repro=f"浏览器打开 {url}",
+        )
+    if 'id="no-curriculum-title"' in page.html or 'id="missing-curriculum-title"' in page.html:
+        return StepResult(
+            step,
+            FAIL,
+            "-",
+            expect,
+            "页面显示了「没有培养方案」区块",
+            detail="受控上游已提供已发布培养方案，不应落到该分支",
+            repro=f"浏览器打开 {url}",
+        )
+    if 'id="question-title"' not in page.html:
+        return StepResult(
+            step,
+            FAIL,
+            "-",
+            expect,
+            "页面没有渲染问题卡（question-title 缺失）",
+            detail="受控上游下未进入引导流程，可能是错误区块",
+            repro=f"浏览器打开 {url}",
+        )
+    return StepResult(
+        step,
+        PASS,
+        "-",
+        expect,
+        "已进入引导第一问",
+        detail=f"截图：{page.screenshot or '未留存'}",
+        repro=f"浏览器打开 {url}",
+    )
+
+
+CHECK_ORDER = (
+    "web_document",
+    "web_bundle",
+    "web_shell",
+    "web_api_down",
+    "web_unknown",
+    "web_stub_path",
+    "web_narrow",
+)
 CHECK_EXPECT = {
     "web_document": "入口文档 200 且含挂载点与入口脚本引用（HTTP 即可）",
     "web_bundle": "入口脚本 200 且含 createApp（HTTP 即可）",
     "web_shell": "页面挂载成功、外壳齐备、无未捕获 JS 错误（需浏览器）",
     "web_api_down": "Python 不可达时显示错误与重试入口、不白屏（需浏览器）",
     "web_unknown": "接口答未知时如实呈现并可继续（需浏览器 + 受控假响应）",
+    "web_stub_path": "受控假响应当上游时页面进入引导第一问（需浏览器 + 受控响应）",
     "web_narrow": "390x844 无横向溢出（需浏览器）",
 }
 
 
-def run_web_checks(driver: PageDriver, url: str, api_reachable: bool, stub_url: str | None = None) -> list[StepResult]:
+def run_web_checks(
+    driver: PageDriver, url: str, api_reachable: bool, stub_url: str | None = None, with_stub: bool = False
+) -> list[StepResult]:
     return [
         check_document(driver, url),
         check_bundle(url),
         check_shell(driver, url),
         check_api_down(driver, url, api_reachable),
         check_unknown(driver, stub_url),
+        check_stub_path(driver, url)
+        if with_stub
+        else StepResult(
+            "web_stub_path",
+            BLOCKED,
+            "-",
+            CHECK_EXPECT["web_stub_path"],
+            "未启用受控上游（--with-stub）",
+            detail="加 --with-stub 且页面以 CP_API_BASE_URL 为上游时才会跑",
+            repro="python integration/check_web.py --with-stub --driver playwright",
+        ),
         check_narrow(driver, url),
     ]
 

@@ -9,7 +9,7 @@ Issue #12 ｜ 模块 D（验收、评测与策略改进）｜ 功能 D-F3 ｜ �
 
 ```bash
 cp integration/stack.env.example data/private/stack.env   # 真实配置只放这里（.gitignore 已覆盖）
-python integration/check_all.py                           # 配置校验 → 组合启动 → 主链路 → 异常覆盖 → 浏览器检查
+python integration/check_all.py                           # 配置校验 → 组合启动 → 主链路 → 异常覆盖 → 受控假响应 → 浏览器检查
 python integration/check_all.py --plan                    # 只看计划：不起进程、不连服务
 python integration/check_all.py --keep                    # 跑完保留服务，自己排查
 python integration/start_stack.py --stop                  # 随时收掉服务（PID 记在 runs/stack/pids.json）
@@ -28,6 +28,7 @@ python integration/start_stack.py --stop                  # 随时收掉服务�
 | 5 | 浏览器检查 | `integration/check_web.py` + `web_checks.py`（六项） | 框架完成；需执行 JS 的四项等真浏览器 |
 | 6 | 自动检查入口 | `.github/workflows/integration-checks.yml` | 完成（挂法 B：手动 + 每天定时，不进 PR 门禁） |
 | 7 | 交付物 | `integration/check_all.py` + 本文件 | 完成 |
+| 附 | 受控响应可重复（验收条件 2） | `integration/stub_upstream.py` + `check_stub.py` | 完成（7 项自检全 PASS） |
 
 ## mock / 真实 / 未实现分列
 
@@ -35,8 +36,8 @@ python integration/start_stack.py --stop                  # 随时收掉服务�
 | --- | --- | --- |
 | 真实（必须真实，也已真实） | HTTP 与页面：Python 网关按契约真实响应，页面服务真实返回入口文档与入口模块；契约与字段以 `contracts/` 为真源 | 本地实测：配置校验退出码 `0`；页面未起时判 `BLOCKED` 而不是 SKIP |
 | 真实但依赖未到 | MySQL 由 CI 的 `services: mysql:8.4` 提供真实容器；Java 模块尚未落地 | 缺 Java 时 record/audit 判 `DEGRADED`，`java_unwired` 断言「必须报 503」 |
-| 受控假响应 | 模型端点留空时走 C 的 W1 stub（无真实模型调用）；**受控假响应服务本身尚未实现** | C 的 `PlanningRunner` 在有目标时返回 `UNABLE_TO_VERIFY`，不伪造推荐；受控 stub 服务待做 |
-| 未实现 | Java / MySQL 模块本体、受控假响应服务、页面稳定步骤标识、CI 常驻真浏览器 | 逐条登记在 `README.md` 的「与相邻模块的接口缺口」表并注明归属 |
+| 受控假响应（已实现） | `integration/stub_upstream.py`：按 `Envelope` 契约返回**固定**响应，三个场景（只答未知 / 正常 / 上游不可用）；`check_stub.py` 断言契约、可重复（两次响应逐字节相同）与「不得给时间结论」 | 本机实测 7 项全 `PASS`；记录在 `runs/stack/stub/records.jsonl`。模型端点留空时 C 仍走 W1 stub（无真实模型调用） |
+| 未实现 | Java / MySQL 模块本体、页面稳定步骤标识、CI 常驻真浏览器；C 的模型适配器尚未实现（受控假响应对它的接线属 C） | 逐条登记在 `README.md` 的「与相邻模块的接口缺口」表并注明归属 |
 
 ## 判定与转交
 
@@ -53,12 +54,12 @@ python integration/start_stack.py --stop                  # 随时收掉服务�
 ## 已知限制（如实）
 
 - 主链路与浏览器检查里的「正常分支」目前拿不到：Java 未落地，只能取得「缺服务时如实报错」的证据。
-- 受控假响应未实现，因此 planning 的正常推荐分支与 `web_unknown` 无法验证。
+- 受控假响应已实现并自检通过，但 planning 的**真实**正常分支仍要等 C 接上模型与 Java；页面「答未知」分支还需要页面的稳定步骤标识（E）。
 - 真浏览器（playwright + chromium）本机与 CI 都未默认安装：需要执行 JS 的检查一律判 `BLOCKED`，不跳过、不算过。
 - 本模块不实现各模块业务、不替别人修业务 Bug，只提供可复现的失败证据与复测手段。
 
 ## 证据在哪
 
 - 终端输出：五段式失败块（可直接作为 Issue 评论与转交原文）
-- `runs/stack/`：服务日志（`api.log`、`web.log`）、浏览器截图（`web/*.png`）、PID 文件
+- `runs/stack/`：服务日志（`api.log`、`web.log`）、浏览器截图（`web/*.png`）、PID 文件、受控假响应记录（`stub/records.jsonl`）
 - CI：工件 `stack-evidence`，job 名 `integration-checks`

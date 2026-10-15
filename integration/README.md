@@ -10,7 +10,7 @@ Java 与 MySQL 尚未落地，跑起来会如实报缺谁、缺在哪一步，�
 
 ```bash
 cp integration/stack.env.example data/private/stack.env   # 新环境第一步
-python integration/check_all.py                           # 配置校验 → 组合启动 → 主链路 → 异常覆盖 → 浏览器检查
+python integration/check_all.py                           # 配置校验 → 组合启动 → 主链路 → 异常覆盖 → 受控假响应 → 浏览器检查
 ```
 
 `check_all.py` 是本地与 CI 共用的入口：全 PASS 退出码 `0`，其余一律 `1`。
@@ -20,7 +20,7 @@ python integration/check_all.py                           # 配置校验 → 组
 
 | 文件 | 作用 |
 | --- | --- |
-| `check_all.py` | 一条入口：按顺序跑下面五项检查并汇总退出码，真跑时自动 `--stop` 收尾 |
+| `check_all.py` | 一条入口：按顺序跑下面六项检查并汇总退出码，真跑时自动 `--stop` 收尾 |
 | `DELIVERY.md` | 一页交付说明：七件事现状、mock/真实/未实现分列、已知限制、失败归属 |
 | `stack_config.py` | 统一配置入口：读 `data/private/stack.env` 或环境变量，校验缺项/占位密钥/端口冲突/CORS 通配，密钥不回显 |
 | `stack.env.example` | 配置模板（入库，只有占位值），键名与模块 C 的 `agent-runtime/.env.example` 对齐（`CP_` 前缀） |
@@ -32,7 +32,10 @@ python integration/check_all.py                           # 配置校验 → 组
 | `check_web.py` | 浏览器检查 CLI：主路径、答未知、服务失败、窄屏四类观察点，含 `--plan` 与 `--driver` |
 | `tests/test_stack_config.py` | 配置入口自测（缺项、占位值、通配 CORS、端口冲突、来源优先级、掩码） |
 | `tests/test_stack_checks.py` | 判定层自测（缺服务不许算过、DEGRADED 不算绿、编造必须被抓、失败块五段齐） |
+| `stub_upstream.py` | 受控假响应服务：按 `Envelope` 契约返回固定响应，三个场景（只答未知 / 正常 / 上游不可用） |
+| `check_stub.py` | 受控假响应检查：契约（domain schema）、可重复（两次响应逐字节相同）、不许编（不得给时间维度的核验） |
 | `tests/test_web_checks.py` | 浏览器检查自测（页面没起算 BLOCKED、缺浏览器算 BLOCKED、白屏或缺重试入口必须 FAIL） |
+| `tests/test_stub_upstream.py` | 受控假响应自测（可重复、只答未知、课程层核验、503、Envelope、裸奔与未知端点） |
 | `../.github/workflows/integration-checks.yml` | 自动检查入口（CI job）：组合启动 + 主链路 + 异常覆盖 + 浏览器检查，失败工件留存 |
 
 ## 怎么跑
@@ -123,7 +126,7 @@ python -m pip install playwright && python -m playwright install chromium
 | 触发 | Actions 页面手动 `workflow_dispatch`；每天定时 `30 1 * * *`（UTC，即北京时间 09:30） |
 | 权限 | `contents: read`，不碰 Issue/Project |
 | 服务 | MySQL 由 workflow 的 `services: mysql:8.4` 提供（含 healthcheck）；Java 目前没有 → 判 `MISSING` |
-| 步骤 | 装 `integration[test]` 与 `agent-runtime[test]` → `npm ci` → 装 chromium → `check_all.py --driver playwright`（内部按同样的顺序跑五项检查） |
+| 步骤 | 装 `integration[test]` 与 `agent-runtime[test]` → `npm ci` → 装 chromium → `check_all.py --driver playwright`（内部按同样的顺序跑六项检查，含受控假响应） |
 | 门禁 | 全链路检查步骤或浏览器安装步骤不是 success → 末尾门禁步骤失败；不允许 SKIP 算通过 |
 | 证据 | `runs/stack/`（服务日志、`check_web` 截图）上传为 `stack-evidence` 工件；五段式失败块在各步骤输出里 |
 | 配置 | 只用环境变量注入 CI 专用值（`CP_*`），不在仓库里放密钥；缺必填项时 `stack_config` 直接失败 |
@@ -144,6 +147,26 @@ python -m pip install playwright && python -m playwright install chromium
 | `stack_config`、`start_stack`、判定层本身 | D（本模块） | 直接在本分支修 |
 
 「接口问题转交所有者」是 Issue #12 的相邻责任；本模块不替别人修业务 Bug，只提供可复现的失败证据与复测手段。
+
+## 受控假响应（可重复）
+
+```bash
+python integration/check_stub.py                       # 起临时端口自检：契约 / 可重复 / 不许编
+python integration/stub_upstream.py --port 8099        # 手动起一个（默认场景：资料不足只答未知）
+python integration/check_web.py --with-stub --driver playwright   # 用它在 Python 端口当上游，检查页面能否进入引导第一问
+```
+
+| 检查项 | 断言 |
+| --- | --- |
+| stub_sessions / stub_curriculum | 201/200 + `Envelope`，且培养方案过 `$defs/SnapshotSummary` |
+| stub_unknown | 默认场景必须 `decision=UNABLE_TO_VERIFY` 且不带推荐 |
+| stub_repeatable | 同一请求发两次，响应逐字节相同（受控响应可重复） |
+| stub_no_auth / stub_not_found | 无令牌 → 401；未知端点 → 404 |
+| stub_normal | 正常场景给课程层推荐，`verification.scope` 不得是 `REAL_TIMETABLE` / `SIMULATION`，且过 `$defs/PlanningAnswer` |
+| stub_unavailable | 上游不可用时 audit / planning 必须 503 `TOOL_UNAVAILABLE` |
+
+边界：它**不是**真实服务，也不是 C 的模型适配器替身。C 的真实行为仍由 `check_stack.py` 对真实服务验证；
+`--with-stub` 只用于驱动页面行为。每次请求与响应的 sha256 追加到 `runs/stack/stub/records.jsonl`。
 
 ## 服务登记表
 

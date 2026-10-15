@@ -49,6 +49,24 @@ def service_states(plan_only: bool) -> tuple[dict[str, str], dict[str, str]]:
     return values, {svc["name"]: judge(svc, values, probe=not plan_only)["status"] for svc in SERVICES}
 
 
+def start_controlled_stub(args: argparse.Namespace, values: dict) -> tuple[bool, str | None, object | None]:
+    """--with-stub：在 Python 端口（默认 8000）起受控假响应当页面上游；起不来就给出原因。"""
+    if not args.with_stub or args.plan:
+        return True, None, None
+    from urllib.parse import urlparse
+
+    from stub_upstream import serve
+
+    parsed = urlparse(args.api_url or values["CP_API_BASE_URL"])
+    host, port = parsed.hostname or "127.0.0.1", parsed.port or 80
+    try:
+        server, url, _state = serve(port=port, host=host, scenario="normal")
+    except OSError as exc:
+        return False, f"受控假响应起不来（{host}:{port} 被占用：{exc}）→ 先停掉占用该端口的服务再跑本检查", None
+    print(f"受控假响应已启动：{url}（场景 normal；仅用于驱动页面，不作为 C 服务的证据）")
+    return True, None, server
+
+
 def blocked_rows(detail: str, repro: str) -> list[StepResult]:
     return [
         StepResult(name, BLOCKED, "-", CHECK_EXPECT[name], detail, detail=detail, repro=repro) for name in CHECK_ORDER
@@ -63,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--web-url", default=None, help="页面地址，默认取配置 CP_WEB_BASE_URL")
     ap.add_argument("--api-url", default=None, help="Python 地址，默认取配置 CP_API_BASE_URL")
     ap.add_argument("--stub-url", default=None, help="受控假响应页面地址，用于「答未知」分支")
+    ap.add_argument(
+        "--with-stub", action="store_true", help="在 Python 端口起受控假响应当上游，检查页面能否进入引导第一问"
+    )
     args = ap.parse_args(argv)
 
     values, states = service_states(args.plan)
@@ -73,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
 
     web_url = args.web_url or values["CP_WEB_BASE_URL"]
     api_reachable = states.get("api") == "READY"
+    stub_ready, stub_blocked_reason, stub_server = start_controlled_stub(args, values)
     driver = pick_driver(args.driver)
     available, why = driver.available()
 
@@ -84,12 +106,19 @@ def main(argv: list[str] | None = None) -> int:
             else blocked_rows(f"服务 web 状态 {web_state}", "python integration/start_stack.py --plan")
         )
         blocked_reason = None if web_state in ("READY", "PLAN") else f"web 未就绪（{web_state}）"
+    elif args.with_stub and not stub_ready:
+        results = blocked_rows(stub_blocked_reason or "受控假响应未就绪", "python integration/check_web.py --with-stub")
+        blocked_reason = stub_blocked_reason
     elif web_state != "READY":
         results = blocked_rows(f"服务 web 状态 {web_state}，浏览器检查无法开始", START_HINT)
         blocked_reason = f"web 未就绪（{web_state}）"
     else:
-        results = run_web_checks(driver, web_url, api_reachable, args.stub_url)
+        results = run_web_checks(driver, web_url, api_reachable, args.stub_url, with_stub=args.with_stub)
         blocked_reason = None
+
+    if stub_server is not None:
+        stub_server.shutdown()
+        print("受控假响应已停止。")
 
     code = exit_code(results) if results else 1
 
