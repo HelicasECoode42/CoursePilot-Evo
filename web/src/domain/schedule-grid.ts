@@ -135,21 +135,25 @@ function dayPhrase(days: readonly number[]): string {
 }
 
 function sectionPhrase(sections: readonly number[]): string {
+  // Consecutive singles fold into one phrase, but only within their own run of
+  // the sorted list; a phrase must never be hoisted ahead of an earlier range.
   const out: string[] = [];
-  const singles: number[] = [];
-  let singleSlot = -1;
+  let singles: number[] = [];
+  const flushSingles = () => {
+    if (singles.length > 0) {
+      out.push(`第${singles.join("、")}节`);
+      singles = [];
+    }
+  };
   runsOf(sections).forEach((run) => {
     if (run.length >= 2) {
+      flushSingles();
       out.push(`第${run[0]}–${run[run.length - 1]}节`);
     } else {
-      if (singleSlot < 0) {
-        singleSlot = out.length;
-        out.push("");
-      }
       singles.push(run[0]);
     }
   });
-  if (singleSlot >= 0) out[singleSlot] = `第${singles.join("、")}节`;
+  flushSingles();
   return out.join("、");
 }
 

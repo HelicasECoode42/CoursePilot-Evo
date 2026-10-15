@@ -51,6 +51,18 @@ describe("summarizeSlots", () => {
     expect(summarizeSlots(["3-1", "3-3"])).toBe("周三 第1、3节");
   });
 
+  it("keeps list order when a lone section follows a range", () => {
+    expect(summarizeSlots(["1-1", "1-3", "1-4", "1-6"])).toBe(
+      "周一 第1节、第3–4节、第6节",
+    );
+  });
+
+  it("keeps list order when a range follows a lone section", () => {
+    expect(summarizeSlots(["1-1", "1-3", "1-4", "1-6", "1-7"])).toBe(
+      "周一 第1节、第3–4节、第6–7节",
+    );
+  });
+
   it("names a fully selected weekday as a whole day", () => {
     expect(summarizeSlots(dayKeys(1))).toBe("周一（整天）");
   });
