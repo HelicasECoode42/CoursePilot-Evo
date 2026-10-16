@@ -138,11 +138,12 @@ UI requestState=idle/loading/succeeded/failed；答复 decision 与 verification
 | COURSE_ONLY / UNKNOWN | 课程建议，时间待确认，补资料入口 |
 | SIMULATION + VALID | 模拟核验通过，不代表本学期课表 |
 | REAL_TIMETABLE + VALID | 本次快照下核验结果，显示采集时间 |
+| 答案 unknowns 含 FAKE_MODEL | 不得绿色通过；核验判决保持原样，只拦展示 |
 | INVALID | 明确冲突/不满足项，调整条件 |
 | ERROR/timeout | 重试同请求或重新修改，不伪造候选 |
 | historical review | 往年主观反馈，本学期要求未确认 |
 
-只有 scope REAL_TIMETABLE + verdict VALID + 对应来源资格才显示真实时间通过；不能自己从无 violations 数组推断通过。记录 completeness 影响学分文案。
+只有 scope REAL_TIMETABLE + verdict VALID + 对应来源资格才显示真实时间通过；答案级 unknowns 含 FAKE_MODEL 时仍然不得显示为真实通过。不能自己从无 violations 数组推断通过。记录 completeness 影响学分文案。
 
 ### 6. 安全、易用性与调试
 

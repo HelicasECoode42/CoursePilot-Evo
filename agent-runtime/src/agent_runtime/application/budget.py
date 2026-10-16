@@ -8,7 +8,12 @@ from datetime import UTC, datetime
 
 @dataclass(frozen=True)
 class Budget:
-    """Default caps: 8000/2000 tokens, 6 tools, 3 model calls, 45 s."""
+    """Single budget entry for enforcement and RunManifest.
+
+    Defaults match docs/04 section 3 and the RunManifest consts in
+    ``domain.schema.json``. ``build_run_manifest`` reads this object, so the
+    recorded caps stay the ones the runner enforced.
+    """
 
     max_input_tokens: int = 8000
     max_output_tokens: int = 2000

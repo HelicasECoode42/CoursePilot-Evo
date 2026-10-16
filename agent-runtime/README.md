@@ -79,9 +79,10 @@ python -m uvicorn agent_runtime.api.app:app --port 8000
   `CP_JAVA_BASE_URL` 且未开假工具时仍是 `TOOL_UNAVAILABLE`(503)。
 - 配置了 `CP_MODEL_BASE_URL` 与 `CP_MODEL_API_KEY` 时走 OpenAI 兼容
   `/chat/completions`；密钥只放本机 `.env`。只配地址、密钥为空时仍用假模型，并留下
-  `FAKE_MODEL`。
+  `FAKE_MODEL`。地址和密钥都在、但模型名仍是占位符时，进程启动失败。上游 429 是
+  `MODEL_RATE_LIMITED`，5xx 是 `MODEL_UNAVAILABLE`，都不当成非法输出。
 - 会话与幂等是内存实现。相同键执行中返回 `409 REQUEST_IN_PROGRESS`；失败会释放占位以便重试。
 - `planning.openapi.json` 的 12 个端点全部有对应路由；走 Java 的端点未配置 `CP_JAVA_BASE_URL`
   时返回 `TOOL_UNAVAILABLE`(503)，不冒充无冲突。`listSessionRecords` 对应的 Java 列表工具
   （`listAcademicRecords`）尚待模块 B 在 `java.openapi.json` 补齐。
-- 预算默认值（8000/2000 tokens、6 tools、3 model calls、45 s）来自公共契约，未做性能实测。
+- 预算默认值（8000/2000 tokens、6 tools、3 model calls、45 s）只写在 `Budget`，manifest 记录同一份，未做性能实测。页面看到答案级 `FAKE_MODEL` 时不得显示真实通过。

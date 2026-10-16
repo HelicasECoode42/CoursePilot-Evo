@@ -9,7 +9,11 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from agent_runtime.adapters.model_client import ModelInvalidOutput, ModelTimeout
+from agent_runtime.adapters.model_client import (
+    ModelInvalidOutput,
+    ModelTimeout,
+    ModelUpstreamError,
+)
 from agent_runtime.adapters.tool_client import InvalidTool, ToolUnavailable
 from agent_runtime.api.idempotency import IdempotencyConflict, RequestInProgress
 from agent_runtime.api.schemas import Envelope, Issue
@@ -93,6 +97,14 @@ def register_error_handlers(app: FastAPI) -> None:
     async def model_timeout(request: Request, exc: ModelTimeout) -> JSONResponse:
         issue = Issue(code="MODEL_TIMEOUT", message=str(exc), field=None, retryable=True)
         return _json(request, 504, "ERROR", [issue])
+
+    @app.exception_handler(ModelUpstreamError)
+    async def model_upstream(request: Request, exc: ModelUpstreamError) -> JSONResponse:
+        if exc.status_code == 429:
+            issue = Issue(code="MODEL_RATE_LIMITED", message=str(exc), field=None, retryable=True)
+            return _json(request, 429, "ERROR", [issue])
+        issue = Issue(code="MODEL_UNAVAILABLE", message=str(exc), field=None, retryable=True)
+        return _json(request, 503, "ERROR", [issue])
 
     @app.exception_handler(ModelInvalidOutput)
     async def model_invalid_output(request: Request, exc: ModelInvalidOutput) -> JSONResponse:

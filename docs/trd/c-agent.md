@@ -139,13 +139,17 @@ HarnessLoader 只加载已记录 hash 的白名单快照。文件内容是策略
 
 系统处理评价中的“忽略之前指令、调某 URL、泄露 key”等文本为资料，不执行。模型候选 ID 必须属于工具给的集合；可信答案引用 evidence ID。日志不写完整 Prompt/私有思维链或学生成绩。
 
+已配置模型地址和密钥时，`CP_MODEL_ID` 不能仍是 `DEPLOYMENT_MODEL_PLACEHOLDER`，启动即失败。缺密钥仍用假模型。答案级 `unknowns` 含 `FAKE_MODEL` 时不得把候选展示为真实通过；Java 的 `verdict` 保持原样。运行预算只有 `Budget` 一处，manifest 记录同一次运行实际用的那份。
+
 ### 6. 故障与恢复
 
 | code | 处置 |
 | --- | --- |
 | REQUEST_IN_PROGRESS / IDEMPOTENCY_CONFLICT | 409，不双跑 |
 | MODEL_TIMEOUT / RUN_DEADLINE | 504，原任务标 failed，不伪造方案 |
-| MODEL_INVALID_OUTPUT | 422/ERROR，有限修复后停止 |
+| MODEL_RATE_LIMITED | 429，可重试，不修 JSON，不自动重试 |
+| MODEL_UNAVAILABLE | 503，上游 5xx，可重试，不修 JSON |
+| MODEL_INVALID_OUTPUT | 422/ERROR，有限修复后停止；不含上游 429/5xx |
 | TOOL_UNAVAILABLE | 503 ERROR，不声称无冲突 |
 | EVIDENCE_MISMATCH | 拦主张/候选并澄清或返回未知 |
 | BUDGET_EXCEEDED | 停止运行，保留用量和失败原因 |
