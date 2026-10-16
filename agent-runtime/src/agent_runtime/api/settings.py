@@ -6,6 +6,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from agent_runtime.adapters.model_client import PLACEHOLDER_MODEL_ID
+
 _MODULE_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -25,7 +27,7 @@ class Settings(BaseSettings):
     # Controlled model endpoint. Empty -> FakeModelAdapter (W2 typed fake).
     model_base_url: str | None = None
     model_api_key: str = ""
-    model_id: str = "DEPLOYMENT_MODEL_PLACEHOLDER"
+    model_id: str = PLACEHOLDER_MODEL_ID
     temperature: float = 0.0
 
     # Local W2 demo only. True -> TypedFakeToolClient. Never a real verifier.
