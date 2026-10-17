@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from stack_checks import BLOCKED, FAIL, PASS, StepResult
 from stack_config import ROOT
@@ -93,60 +93,155 @@ class HttpProbeDriver:
 
 
 class PlaywrightDriver:
-    """真浏览器驱动；未安装 playwright 或未下载 chromium 时判不可用，由调用方给 BLOCKED。"""
+    """真浏览器驱动。
+
+    默认先试 playwright 自带的 chromium；起不来时依次回落到本机已装的 Edge / Chrome
+    （`channel=msedge` / `channel=chrome`），这样没有 chromium 也能做真实的浏览器检查。
+    """
 
     name = "playwright"
+
+    def __init__(self, channel: str = "") -> None:
+        self.channel = channel
+        self.resolved_channel = channel
+        self._pw: Any = None
+        self._browser: Any = None
+
+    def _ensure_browser(self) -> Any:
+        """复用同一个浏览器实例：每次检查都新起一个要 30 秒以上，七项就是四分钟。"""
+        if self._browser is None:
+            from playwright.sync_api import sync_playwright
+
+            self._pw = sync_playwright().start()
+            self._browser = self._launch(self._pw)
+        return self._browser
+
+    def close(self) -> None:
+        if self._browser is not None:
+            self._browser.close()
+            self._browser = None
+        if self._pw is not None:
+            self._pw.stop()
+            self._pw = None
 
     def available(self) -> tuple[bool, str]:
         if importlib.util.find_spec("playwright") is None:
             return False, f"未安装 playwright（{PLAYWRIGHT_HINT}）"
         return True, "可用"
 
-    def load(self, url: str, *, viewport: tuple[int, int] | None = None, screenshot: str = "") -> LoadedPage:
-        from playwright.sync_api import sync_playwright
+    def note(self) -> str:
+        used = self.resolved_channel or "自带 chromium"
+        return used if self.resolved_channel else "自带 chromium（未回落到本机浏览器）"
 
+    def click_text(self, url: str, text: str, *, screenshot: str = "") -> LoadedPage:
+        """打开页面后点一次名为 text 的按钮（没有就点唯一的按钮），再收观察结果。"""
         console_errors: list[str] = []
         page_errors: list[str] = []
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch()
-            page = browser.new_page(viewport={"width": viewport[0], "height": viewport[1]} if viewport else None)
-            page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
-            page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        browser = self._ensure_browser()
+        page = browser.new_page()
+        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            clicked = False
             try:
-                response = page.goto(url, wait_until="networkidle", timeout=20000)
-                status = response.status if response else 0
-                html = page.content()
-                text = page.inner_text("body")
-                overflow = int(
-                    page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
-                )
-                scripts = list(page.evaluate("[...document.scripts].map((s) => s.src)"))
-                shot = ""
-                if screenshot:
-                    Path(screenshot).parent.mkdir(parents=True, exist_ok=True)
-                    page.screenshot(path=screenshot, full_page=True)
-                    shot = screenshot
-                return LoadedPage(
-                    url,
-                    status,
-                    html=html,
-                    text=text,
-                    scripts=scripts,
-                    console_errors=console_errors,
-                    page_errors=page_errors,
-                    overflow_px=overflow,
-                    screenshot=shot,
-                )
-            except Exception as exc:  # noqa: BLE001 — 浏览器侧失败同样折算成 status=0
-                return LoadedPage(url, 0, console_errors=console_errors, page_errors=[f"{type(exc).__name__}: {exc}"])
-            finally:
-                browser.close()
+                page.get_by_role("button", name=text).first.click(timeout=3000)
+                clicked = True
+            except Exception:  # noqa: BLE001 — 文字不匹配时退化为唯一按钮
+                buttons = page.query_selector_all("button")
+                if len(buttons) == 1:
+                    buttons[0].click()
+                    clicked = True
+            if not clicked:
+                page_errors.append(f"没有找到可点的按钮（{text}）")
+            page.wait_for_timeout(1500)
+            html = page.content()
+            body_text = page.inner_text("body")
+            overflow = int(page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth"))
+            shot = ""
+            if screenshot:
+                Path(screenshot).parent.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=screenshot, full_page=True)
+                shot = screenshot
+            return LoadedPage(
+                url,
+                200,
+                html=html,
+                text=body_text,
+                console_errors=console_errors,
+                page_errors=page_errors,
+                overflow_px=overflow,
+                screenshot=shot,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return LoadedPage(url, 0, console_errors=console_errors, page_errors=[f"{type(exc).__name__}: {exc}"])
+        finally:
+            page.close()
+
+    def _launch(self, pw: Any) -> Any:
+        candidates = [self.channel] if self.channel else ["", "msedge", "chrome"]
+        last: Exception | None = None
+        for candidate in candidates:
+            try:
+                browser = pw.chromium.launch(channel=candidate) if candidate else pw.chromium.launch()
+                self.resolved_channel = candidate
+                return browser
+            except Exception as exc:  # noqa: BLE001 — 逐个通道尝试，全部失败才报错
+                last = exc
+        raise RuntimeError(f"没有可用浏览器（自带 chromium 未下载，Edge/Chrome 也起不来）：{last}")
+
+    def load(self, url: str, *, viewport: tuple[int, int] | None = None, screenshot: str = "") -> LoadedPage:
+        console_errors: list[str] = []
+        page_errors: list[str] = []
+        browser = self._ensure_browser()
+        page = browser.new_page(viewport={"width": viewport[0], "height": viewport[1]} if viewport else None)
+        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            response = page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            status = response.status if response else 0
+            html = page.content()
+            text = page.inner_text("body")
+            overflow = int(page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth"))
+            scripts = list(page.evaluate("[...document.scripts].map((s) => s.src)"))
+            shot = ""
+            if screenshot:
+                Path(screenshot).parent.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=screenshot, full_page=True)
+                shot = screenshot
+            return LoadedPage(
+                url,
+                status,
+                html=html,
+                text=text,
+                scripts=scripts,
+                console_errors=console_errors,
+                page_errors=page_errors,
+                overflow_px=overflow,
+                screenshot=shot,
+            )
+        except Exception as exc:  # noqa: BLE001 — 浏览器侧失败同样折算成 status=0
+            return LoadedPage(url, 0, console_errors=console_errors, page_errors=[f"{type(exc).__name__}: {exc}"])
+        finally:
+            page.close()
 
 
-def pick_driver(prefer: str = "auto") -> PageDriver:
+def click_first_action(driver: PageDriver, url: str, *, screenshot: str = "") -> LoadedPage | None:
+    """点一次页面主操作按钮（如「开始」），把页面推到会发请求的那一步。
+
+    只有真浏览器驱动支持；HTTP 探针返回 None，由调用方判 BLOCKED。
+    选择器优先按可见文字「开始」，否则退化为页面上唯一的按钮（依赖 E 的文案，属可转交的脆弱点）。
+    """
+    click = getattr(driver, "click_text", None)
+    if click is None:
+        return None
+    return click(url, "开始", screenshot=screenshot)
+
+
+def pick_driver(prefer: str = "auto", channel: str = "") -> PageDriver:
     if prefer == "http":
         return HttpProbeDriver()
-    browser = PlaywrightDriver()
+    browser = PlaywrightDriver(channel=channel)
     if prefer == "playwright":
         return browser
     return browser if browser.available()[0] else HttpProbeDriver()
@@ -300,7 +395,7 @@ def check_shell(driver: PageDriver, url: str) -> StepResult:
     )
 
 
-def check_api_down(driver: PageDriver, url: str, api_reachable: bool) -> StepResult:
+def check_api_down(driver: PageDriver, url: str, api_reachable: bool, stub_active: bool = False) -> StepResult:
     step = "web_api_down"
     expect = "Python 不可达时页面给出错误与重试入口，不白屏、不切换演示数据"
     gate = needs_browser(driver, step, expect, "页面行为只能在真浏览器里判")
@@ -338,15 +433,28 @@ def check_api_down(driver: PageDriver, url: str, api_reachable: bool) -> StepRes
             repro=f"浏览器打开 {url}",
         )
     if not any(marker in page.text for marker in RETRY_MARKERS):
-        return StepResult(
-            step,
-            FAIL,
-            "-",
-            expect,
-            "正文没有错误提示与重试入口",
-            detail="服务失败时页面未给出可操作提示",
-            repro=f"浏览器打开 {url}",
-        )
+        pushed = click_first_action(driver, url, screenshot=str(EVIDENCE_DIR / "api-down-after-click.png"))
+        if pushed is None:
+            return StepResult(
+                step,
+                BLOCKED,
+                "-",
+                expect,
+                "首屏没有错误提示，且当前驱动不支持点按钮",
+                detail="需要真浏览器：页面要先点「开始」才会发请求",
+                repro="python integration/check_web.py --driver playwright",
+            )
+        page = pushed
+        if not any(marker in page.text for marker in RETRY_MARKERS):
+            return StepResult(
+                step,
+                FAIL,
+                "-",
+                expect,
+                "点了主操作之后仍没有错误提示与重试入口",
+                detail="服务失败时页面未给出可操作提示",
+                repro=f"浏览器打开 {url}",
+            )
     if page.page_errors:
         return StepResult(
             step,
@@ -500,6 +608,10 @@ def check_stub_path(driver: PageDriver, url: str) -> StepResult:
             repro=f"浏览器打开 {url}",
         )
     if 'id="question-title"' not in page.html:
+        pushed = click_first_action(driver, url, screenshot=str(EVIDENCE_DIR / "stub-path-after-click.png"))
+        if pushed is not None:
+            page = pushed
+    if 'id="question-title"' not in page.html:
         return StepResult(
             step,
             FAIL,
@@ -540,14 +652,35 @@ CHECK_EXPECT = {
 }
 
 
+def reconcile(rows: list[StepResult]) -> list[StepResult]:
+    """跨项一致性：`web_stub_path` 失败说明页面连不上可用上游，那 `web_api_down` 的通过不能算数。"""
+    by_step = {row.step: row for row in rows}
+    stub = by_step.get("web_stub_path")
+    down = by_step.get("web_api_down")
+    if stub and down and stub.verdict == FAIL and down.verdict == PASS:
+        replacement = StepResult(
+            "web_api_down",
+            BLOCKED,
+            down.request_id,
+            down.expect,
+            "页面与可用上游的通信本身有故障（见 web_stub_path）",
+            detail="本条只能证明页面会报错，不能证明失败分支；先修 web_stub_path",
+            repro="python integration/check_web.py --with-stub --driver playwright",
+        )
+        for index, row in enumerate(rows):  # 必须替换列表里的那一项，只改字典不会生效
+            if row.step == "web_api_down":
+                rows[index] = replacement
+    return rows
+
+
 def run_web_checks(
     driver: PageDriver, url: str, api_reachable: bool, stub_url: str | None = None, with_stub: bool = False
 ) -> list[StepResult]:
-    return [
+    rows = [
         check_document(driver, url),
         check_bundle(url),
         check_shell(driver, url),
-        check_api_down(driver, url, api_reachable),
+        check_api_down(driver, url, api_reachable, stub_active=with_stub and not api_reachable),
         check_unknown(driver, stub_url),
         check_stub_path(driver, url)
         if with_stub
@@ -562,6 +695,7 @@ def run_web_checks(
         ),
         check_narrow(driver, url),
     ]
+    return reconcile(rows)
 
 
 def plan_rows() -> list[StepResult]:

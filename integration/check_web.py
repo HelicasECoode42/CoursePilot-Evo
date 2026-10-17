@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -63,6 +64,8 @@ def start_controlled_stub(args: argparse.Namespace, values: dict) -> tuple[bool,
         server, url, _state = serve(port=port, host=host, scenario="normal")
     except OSError as exc:
         return False, f"受控假响应起不来（{host}:{port} 被占用：{exc}）→ 先停掉占用该端口的服务再跑本检查", None
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
     print(f"受控假响应已启动：{url}（场景 normal；仅用于驱动页面，不作为 C 服务的证据）")
     return True, None, server
 
@@ -78,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--plan", action="store_true", help="只判定与打印计划，不连页面")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     ap.add_argument("--driver", choices=("auto", "http", "playwright"), default="auto", help="驱动选择")
+    ap.add_argument(
+        "--browser-channel", default="", help="浏览器通道（如 msedge / chrome）；留空先试自带 chromium 再回落本机浏览器"
+    )
     ap.add_argument("--web-url", default=None, help="页面地址，默认取配置 CP_WEB_BASE_URL")
     ap.add_argument("--api-url", default=None, help="Python 地址，默认取配置 CP_API_BASE_URL")
     ap.add_argument("--stub-url", default=None, help="受控假响应页面地址，用于「答未知」分支")
@@ -95,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     web_url = args.web_url or values["CP_WEB_BASE_URL"]
     api_reachable = states.get("api") == "READY"
     stub_ready, stub_blocked_reason, stub_server = start_controlled_stub(args, values)
-    driver = pick_driver(args.driver)
+    driver = pick_driver(args.driver, channel=args.browser_channel)
     available, why = driver.available()
 
     web_state = states.get("web", "MISSING")
@@ -116,8 +122,12 @@ def main(argv: list[str] | None = None) -> int:
         results = run_web_checks(driver, web_url, api_reachable, args.stub_url, with_stub=args.with_stub)
         blocked_reason = None
 
+    if hasattr(driver, "close"):
+        driver.close()
+
     if stub_server is not None:
         stub_server.shutdown()
+        stub_server.server_close()
         print("受控假响应已停止。")
 
     code = exit_code(results) if results else 1

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from check_web import blocked_rows
-from stack_checks import BLOCKED, FAIL, PASS, PLAN, exit_code
+from stack_checks import BLOCKED, FAIL, PASS, PLAN, StepResult, exit_code
 from web_checks import (
     HttpProbeDriver,
     LoadedPage,
@@ -19,6 +19,7 @@ from web_checks import (
     check_stub_path,
     check_unknown,
     plan_rows,
+    reconcile,
 )
 
 URL = "http://127.0.0.1:5173/"
@@ -107,9 +108,25 @@ def test_api_down_fails_on_blank_page():
     assert check_api_down(driver, URL, api_reachable=False).verdict == FAIL
 
 
-def test_api_down_fails_without_retry_entry():
+class ClickableFakeDriver(FakeDriver):
+    """会「点一次主操作」的假浏览器，用来验证点完之后仍无提示要判 FAIL。"""
+
+    def click_text(self, url: str, text: str, *, screenshot: str = "") -> LoadedPage:
+        return self.load(url)
+
+
+def test_api_down_blocks_when_driver_cannot_click():
     driver = FakeDriver({URL: LoadedPage(URL, 200, text=SHELL_TEXT)})
-    assert check_api_down(driver, URL, api_reachable=False).verdict == FAIL
+    result = check_api_down(driver, URL, api_reachable=False)
+    assert result.verdict == BLOCKED
+    assert "点按钮" in result.actual
+
+
+def test_api_down_fails_when_clicking_still_shows_no_retry_entry():
+    driver = ClickableFakeDriver({URL: LoadedPage(URL, 200, text=SHELL_TEXT)})
+    result = check_api_down(driver, URL, api_reachable=False)
+    assert result.verdict == FAIL
+    assert "点了主操作" in result.actual
 
 
 def test_api_down_passes_with_retry_hint():
@@ -168,3 +185,21 @@ def test_run_web_checks_marks_stub_path_blocked_without_the_flag(monkeypatch):
     stub_row = next(r for r in rows if r.step == "web_stub_path")
     assert stub_row.verdict == BLOCKED
     assert "--with-stub" in stub_row.detail
+
+
+def test_reconcile_downgrades_api_down_when_the_page_cannot_reach_a_working_upstream():
+    rows = [
+        StepResult("web_api_down", PASS, "-", "期望", "实际"),
+        StepResult("web_stub_path", FAIL, "-", "期望", "实际"),
+    ]
+    out = reconcile(rows)
+    assert next(r for r in out if r.step == "web_api_down").verdict == BLOCKED
+
+
+def test_reconcile_keeps_api_down_when_stub_path_was_not_attempted():
+    rows = [
+        StepResult("web_api_down", PASS, "-", "期望", "实际"),
+        StepResult("web_stub_path", BLOCKED, "-", "期望", "实际"),
+    ]
+    out = reconcile(rows)
+    assert next(r for r in out if r.step == "web_api_down").verdict == PASS

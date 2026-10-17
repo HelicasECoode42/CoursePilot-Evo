@@ -13,6 +13,10 @@
   normal                   规划请求返回一条带核验的推荐（`scope=COURSE_ONLY`、`verdict=UNKNOWN`，不编时间结论）
   tool_unavailable         audit 与 planning 返回 `503 TOOL_UNAVAILABLE`（模拟上游依赖不可用）
 
+跨源：页面（5173）打上游（8000）属跨源请求，本服务回 `Access-Control-Allow-Origin` 等 CORS 头并支持
+`OPTIONS` 预检（只对 `http://127.0.0.1:*` 与 `http://localhost:*` 回源）；没有这层，浏览器会直接拦掉请求，
+页面上只会看到「暂时无法连接服务」。
+
 可重复的定义：同一（场景、方法、路径、请求体）必须得到**逐字节相同**的响应。
 `requestId` 取请求头 `X-Request-Id`（缺省用固定值 `req-stub`），所以重复请求的响应完全一致；
 每次请求与响应的 sha256 追加到 `runs/stack/stub/records.jsonl`。
@@ -203,10 +207,31 @@ def make_handler(state: StubState):
         def log_message(self, *args: Any) -> None:
             return
 
+        def _cors_origin(self) -> str:
+            """页面在 5173、上游在 8000，属跨源请求：必须回 CORS 头，否则浏览器直接拦掉。"""
+            origin = self.headers.get("Origin") or ""
+            if origin.startswith(("http://127.0.0.1:", "http://localhost:")):
+                return origin
+            return ""
+
+        def _cors_headers(self) -> None:
+            origin = self._cors_origin()
+            if not origin:
+                return
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Authorization, Content-Type, Idempotency-Key, X-Request-Id, X-Admin-Key",
+            )
+            self.send_header("Access-Control-Max-Age", "600")
+
         def _respond(self, status: int, body: bytes) -> None:
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self._cors_headers()
             self.end_headers()
             self.wfile.write(body)
 
@@ -230,6 +255,12 @@ def make_handler(state: StubState):
             # 先落记录再回包：否则客户端可能在记录写入前就拿到响应，读记录时会缺最后一条
             state.record(method, path, raw, status, body)
             self._respond(status, body)
+
+        def do_OPTIONS(self) -> None:
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.send_header("Content-Length", "0")
+            self._cors_headers()
+            self.end_headers()
 
         def do_GET(self) -> None:
             self._handle("GET")

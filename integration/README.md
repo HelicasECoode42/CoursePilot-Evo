@@ -102,12 +102,15 @@ cd integration && python -m pytest -q                      # 自测（不联网�
 | web_document | 入口文档 `200` 且含挂载点与入口脚本引用 | HTTP 即可 | 起页面后可过 |
 | web_bundle | `/src/main.ts` 返回 `200` 且含 `createApp` | HTTP 即可 | 起页面后可过 |
 | web_shell | 页面挂载成功、品牌/模式徽标/footer 齐备、无未捕获 JS 错误 | 需浏览器 | 缺 playwright 判 `BLOCKED` |
-| web_api_down | Python 不可达时给出错误提示与重试入口、不白屏 | 需浏览器 | 需先停掉 Python 再跑 |
-| web_unknown | 接口答未知/无法核验时如实呈现并可继续 | 需浏览器 + 受控假响应 | 假响应未做，判 `BLOCKED` |
+| web_api_down | Python 不可达时给出错误提示与重试入口、不白屏 | 需浏览器 | 需先停掉 Python 再跑；若 `web_stub_path` 失败则本条降级为 `BLOCKED`（页面连不上可用上游时，它只能证明页面会报错） |
+| web_unknown | 接口答未知/无法核验时如实呈现并可继续 | 需浏览器 + 受控假响应 | 缺页面的稳定步骤标识，判 `BLOCKED`（转交 E） |
+| web_stub_path | 受控假响应当上游时页面进入引导第一问 | 需浏览器 + `--with-stub` | 本机实测 `FAIL`：页面真实模式无法连接后端，定位见下方「已知故障」 |
 | web_narrow | `390x844` 视口无横向溢出（`scrollWidth - clientWidth <= 2px`） | 需浏览器 | 缺 playwright 判 `BLOCKED` |
 
 驱动两档：`--driver http` 只用标准库取文档与脚本；`--driver auto`（默认）在装了 playwright 时用真浏览器，
-否则退回 HTTP 探针并把需要 JS 的检查判 `BLOCKED`。真浏览器装法：
+否则退回 HTTP 探针并把需要 JS 的检查判 `BLOCKED`。浏览器通道默认先试 playwright 自带的 chromium，起不来时
+依次回落到本机已装的 Edge / Chrome（`channel=msedge` / `channel=chrome`），可用 `--browser-channel` 指定；
+同一驱动实例复用同一个浏览器，避免每项检查都重启（七项从 256 秒降到 60 秒上下）。真浏览器装法（CI 用这条）：
 
 ```bash
 python -m pip install playwright && python -m playwright install chromium
@@ -167,6 +170,22 @@ python integration/check_web.py --with-stub --driver playwright   # 用它在 Py
 
 边界：它**不是**真实服务，也不是 C 的模型适配器替身。C 的真实行为仍由 `check_stack.py` 对真实服务验证；
 `--with-stub` 只用于驱动页面行为。每次请求与响应的 sha256 追加到 `runs/stack/stub/records.jsonl`。
+
+## 已知故障：页面真实模式无法连接后端（转交代定）
+
+本机实测：页面点「开始」后一律显示「暂时无法连接服务，请确认服务已启动后重试」，而受控假响应就在
+`127.0.0.1:8000`、CORS 已放行、页面内直接 `fetch` 能拿到 `201`。最小对照（浏览器控制台）：
+
+| 写法 | 结果 |
+| --- | --- |
+| `window.fetch('/api/v1/sessions', {method: 'POST'})` | 通 |
+| `({fetcher: window.fetch}).fetcher('/api/v1/sessions', {method: 'POST'})` | `TypeError: Failed to execute 'fetch' on 'Window': Illegal invocation` |
+| 先 `const f = window.fetch.bind(window)` 再当方法调 | 通 |
+
+`web/src/api/client.ts` 把原生 `fetch` 存成类字段（`private readonly fetcher: typeof fetch = fetch`），
+随后以 `this.fetcher(...)` 调用 —— 方法调用会把 `this` 绑成客户端实例，浏览器据此判定 `Illegal invocation`，
+异常被其自身 `catch` 折成 `network` 失败。页面自身的单元测试注入的是 mock fetcher，所以测不到。
+影响：真实服务模式在任何后端下都连不上。定位归本模块，修复归 E；本条只登记现象与最小复现，不改对方代码。
 
 ## 服务登记表
 

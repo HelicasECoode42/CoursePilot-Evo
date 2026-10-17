@@ -116,3 +116,26 @@ def test_snapshot_and_planning_answer_pass_the_domain_schema(stub):
     answer = TRANSPORT.request("POST", url + "/api/v1/planning", auth(url), {"schemaVersion": "1.0"}).payload["data"]
     assert validate_answer(answer) == []
     assert jsonschema.__name__ == "jsonschema"
+
+
+def test_cors_headers_are_echoed_for_local_origins(stub):
+    import urllib.request
+
+    url, _state = stub
+    request = urllib.request.Request(url + "/api/v1/sessions", method="POST")
+    request.add_header("Origin", "http://127.0.0.1:5173")
+    request.add_header("X-Request-Id", DEFAULT_REQUEST_ID)
+    with urllib.request.urlopen(request, timeout=10) as response:
+        assert response.headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:5173"
+        assert "OPTIONS" in response.headers["Access-Control-Allow-Methods"]
+
+
+def test_options_preflight_is_answered(stub):
+    import urllib.request
+
+    url, _state = stub
+    request = urllib.request.Request(url + "/api/v1/planning", method="OPTIONS")
+    request.add_header("Origin", "http://127.0.0.1:5173")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        assert response.status == 204
+        assert response.headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:5173"

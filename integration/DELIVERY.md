@@ -25,7 +25,7 @@ python integration/start_stack.py --stop                  # 随时收掉服务�
 | 2 | 统一配置入口 | `integration/stack_config.py` + `stack.env.example` | 完成（15 条自测） |
 | 3 | 集成测试 | `integration/check_stack.py`（建会话 → record → audit → planning → replan） | 框架完成；Java 未落地时 record/audit 判 `DEGRADED` |
 | 4 | 异常与未知覆盖 | `integration/smoke_stack.py`（四条） | 框架完成 |
-| 5 | 浏览器检查 | `integration/check_web.py` + `web_checks.py`（六项） | 框架完成；需执行 JS 的四项等真浏览器 |
+| 5 | 浏览器检查 | `integration/check_web.py` + `web_checks.py`（七项） | 本机已真跑：4 项 `PASS`、2 项 `BLOCKED`、1 项 `FAIL`（后者是页面缺陷，见「已知限制」） |
 | 6 | 自动检查入口 | `.github/workflows/integration-checks.yml` | 完成（挂法 B：手动 + 每天定时，不进 PR 门禁） |
 | 7 | 交付物 | `integration/check_all.py` + 本文件 | 完成 |
 | 附 | 受控响应可重复（验收条件 2） | `integration/stub_upstream.py` + `check_stub.py` | 完成（7 项自检全 PASS） |
@@ -55,7 +55,8 @@ python integration/start_stack.py --stop                  # 随时收掉服务�
 
 - 主链路与浏览器检查里的「正常分支」目前拿不到：Java 未落地，只能取得「缺服务时如实报错」的证据。
 - 受控假响应已实现并自检通过，但 planning 的**真实**正常分支仍要等 C 接上模型与 Java；页面「答未知」分支还需要页面的稳定步骤标识（E）。
-- 真浏览器（playwright + chromium）本机与 CI 都未默认安装：需要执行 JS 的检查一律判 `BLOCKED`，不跳过、不算过。
+- 真浏览器：本机复用已装的 Edge（`channel=msedge`），CI 里装 chromium；装了 playwright 才有真跑，否则判 `BLOCKED`，不跳过、不算过。
+- **页面真实模式无法连接后端**（`web/src/api/client.ts` 把原生 `fetch` 当方法调用 → `Illegal invocation`）：`web_stub_path` 因此 `FAIL`，`web_api_down` 相应降级为 `BLOCKED`。定位见 `README.md`「已知故障」，修复归 E。
 - 本模块不实现各模块业务、不替别人修业务 Bug，只提供可复现的失败证据与复测手段。
 
 ## 证据在哪

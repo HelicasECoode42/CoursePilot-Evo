@@ -85,6 +85,16 @@ jobs:
         continue-on-error: true
         run: python integration/check_all.py --driver playwright
 
+      - name: 浏览器检查（受控上游：页面能否进入引导第一问）
+        id: web-stub
+        continue-on-error: true
+        run: |
+          python integration/start_stack.py --only web --keep || true
+          code=0
+          python integration/check_web.py --driver playwright --with-stub || code=$?
+          python integration/start_stack.py --stop || true
+          exit $code
+
       - name: 证据留存（五段式失败块、服务日志与截图）
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -97,7 +107,7 @@ jobs:
         if: always()
         run: |
           failed=""
-          for pair in "浏览器安装:${{ steps.browser.outcome }}" "全链路检查:${{ steps.stack.outcome }}"; do
+          for pair in "浏览器安装:${{ steps.browser.outcome }}" "全链路检查:${{ steps.stack.outcome }}" "受控上游浏览器:${{ steps.web-stub.outcome }}"; do
             name="${pair%%:*}"
             outcome="${pair#*:}"
             if [ "$outcome" != "success" ]; then
