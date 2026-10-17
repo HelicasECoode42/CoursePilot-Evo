@@ -25,7 +25,7 @@ def main():
         run(['./mvnw', '-B', 'verify'], java)
     else:
         print('SKIP Java: no implementation manifest')
-    for name in ['agent-runtime', 'evo-harness', 'benchmark']:
+    for name in ['agent-runtime', 'evo-harness', 'benchmark', 'integration']:
         module = ROOT / name
         require_manifest(module, "pyproject.toml", {".py"})
         if (module / 'pyproject.toml').exists():
