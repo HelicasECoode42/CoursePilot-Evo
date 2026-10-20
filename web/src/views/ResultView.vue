@@ -9,7 +9,7 @@
 import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api";
-import type { PlanningAnswer } from "../contracts";
+import type { PlanningAnswer, PlanValidation } from "../contracts";
 import {
   collectUnknowns,
   describeVerification,
@@ -43,6 +43,11 @@ const unknowns = computed(() =>
         result.value.recommendations.map((item) => item.verification),
       ),
 );
+
+/** 展示门禁：把本次答复的未知项一并交给 describeVerification，带受控缺口标记时降级。 */
+function verificationView(validation: PlanValidation) {
+  return describeVerification(validation, unknowns.value);
+}
 
 async function goBackToQuestions() {
   await router.push("/plan/questions/ready");
@@ -109,19 +114,17 @@ async function goBackToQuestions() {
           <p
             class="notice"
             :class="{
-              'notice--success': describeVerification(
-                recommendation.verification,
-              ).allowGreenPass,
-              'notice--warning': !describeVerification(
-                recommendation.verification,
-              ).allowGreenPass,
+              'notice--success': verificationView(recommendation.verification)
+                .allowGreenPass,
+              'notice--warning': !verificationView(recommendation.verification)
+                .allowGreenPass,
             }"
             role="status"
           >
             <strong>
-              {{ describeVerification(recommendation.verification).label }}
+              {{ verificationView(recommendation.verification).label }}
             </strong>
-            —— {{ describeVerification(recommendation.verification).detail }}
+            —— {{ verificationView(recommendation.verification).detail }}
           </p>
           <ul class="summary-list">
             <li v-for="item in recommendation.items" :key="item.courseCode">

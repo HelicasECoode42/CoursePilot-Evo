@@ -27,7 +27,40 @@ export interface VerificationView {
 
 const PENDING_DETAIL = "补齐资料后可以再核验，现在不能算通过。";
 
+/**
+ * 表示本次答复走过受控缺口的标记。C 在未接真实 Java 或真实模型时会把它们放进
+ * unknowns（见 agent-runtime 的假工具与假模型）。只要出现任意一个，这一轮就不是
+ * 真实结果，页面一律不许显示「真实通过」——`AGENTS.md` 的「不把计划/fixture 写成
+ * 真实能力」。只看 verdict/scope 会漏掉这种情况：核验本身可以是 VALID +
+ * REAL_TIMETABLE，而候选其实来自假模型。
+ */
+const SIMULATION_MARKERS = new Set(["FAKE_MODEL", "FAKE_TOOL"]);
+
+/** 答复里是否带了受控缺口标记。 */
+export function hasSimulationMarker(issues: readonly Issue[]): boolean {
+  return issues.some((issue) => SIMULATION_MARKERS.has(issue.code));
+}
+
 export function describeVerification(
+  validation: PlanValidation,
+  /** 本次答复汇总后的未知项；带受控缺口标记时强制降级。 */
+  answerIssues: readonly Issue[] = [],
+): VerificationView {
+  if (hasSimulationMarker(answerIssues)) {
+    const base = describeVerificationByVerdict(validation);
+    if (!base.allowGreenPass) return base;
+    return {
+      tone: "simulated",
+      label: "演示链路结果，不代表真实核验",
+      detail:
+        "本次答复带有受控缺口标记（假模型或假工具），即使核验判决通过也不能算真实通过。",
+      allowGreenPass: false,
+    };
+  }
+  return describeVerificationByVerdict(validation);
+}
+
+function describeVerificationByVerdict(
   validation: PlanValidation,
 ): VerificationView {
   if (validation.verdict === "INVALID") {

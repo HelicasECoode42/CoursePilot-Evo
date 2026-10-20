@@ -308,6 +308,53 @@ describe("HTTP API client", () => {
     });
   });
 
+  it("gives the planning request a timeout longer than the 45s server budget", async () => {
+    // C 的 Budget.deadline_ms 是 45000。页面若沿用默认 8 秒，真实规划会被自己掐断，
+    // 而且症状看起来像后端太慢。这里断言规划请求用的是更长的超时。
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi
+        .fn()
+        .mockResolvedValueOnce(response(201, envelope("OK", session)))
+        .mockImplementationOnce(() => new Promise(() => {}));
+      const client = new HttpApiClient("http://127.0.0.1:8000", fetcher);
+      await client.createSession();
+      void client.submitPlanning(planningRequest, "key-1").catch(() => {});
+      await Promise.resolve();
+
+      const [, planningOptions] = fetcher.mock.calls[1] as [
+        string,
+        RequestInit,
+      ];
+
+      // 默认超时是 8 秒：走到 9 秒还没被掐断，说明规划请求没有沿用默认值。
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(planningOptions.signal?.aborted).toBe(false);
+
+      // 服务端预算 45 秒：走到 46 秒仍未被掐断，正常规划才不会被页面自己截断。
+      await vi.advanceTimersByTimeAsync(37_000);
+      expect(planningOptions.signal?.aborted).toBe(false);
+
+      // 但也不是永不超时。
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(planningOptions.signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("treats a business UNKNOWN envelope as success, not as an error", async () => {
+    // docs/04：成功响应是「成功或业务 UNKNOWN」。UNKNOWN 是数据缺失不是查询失败，
+    // 页面要照常读 data 再按未知展示。
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(response(201, envelope("UNKNOWN", session)));
+    const client = new HttpApiClient("http://127.0.0.1:8000", fetcher);
+    await expect(client.createSession()).resolves.toMatchObject({
+      sessionId: session.sessionId,
+    });
+  });
+
   it("calls fetch with a global this so a browser native fetch is not rejected", async () => {
     // 浏览器的 window.fetch 会校验调用时的 this 必须是 window，否则抛
     // TypeError: Illegal invocation。Node 的 fetch 和 vi.fn() 都不做这个校验，

@@ -153,6 +153,21 @@ function errorForResponse(
   );
 }
 
+/**
+ * 契约（docs/04）规定成功响应是「成功或业务 UNKNOWN」。UNKNOWN 表示数据缺失，
+ * 不是查询失败，页面要照常读 data 再按未知展示，不能当成错误抛出去。
+ */
+function isSuccessEnvelope(envelope: Envelope<unknown>): boolean {
+  return envelope.status === "OK" || envelope.status === "UNKNOWN";
+}
+
+/**
+ * 规划请求的超时。C 的运行预算是 45 秒（agent-runtime 的 Budget.deadline_ms），
+ * 页面若沿用默认的 8 秒，接上真实服务后会把正常规划自己掐断，而且症状看起来
+ * 像后端太慢。留出余量取 50 秒；查询类请求仍用默认超时。
+ */
+const PLANNING_TIMEOUT_MS = 50_000;
+
 export class HttpApiClient implements CoursePilotApiClient {
   readonly mode = "http" as const;
   private readonly baseUrl: string;
@@ -187,13 +202,13 @@ export class HttpApiClient implements CoursePilotApiClient {
     });
     if (
       response.status !== 201 ||
-      envelope.status !== "OK" ||
+      !isSuccessEnvelope(envelope) ||
       !validateSession?.(envelope.data)
     ) {
       if (
         response.status < 200 ||
         response.status >= 300 ||
-        envelope.status !== "OK"
+        !isSuccessEnvelope(envelope)
       ) {
         throw errorForResponse(response.status, envelope);
       }
@@ -317,7 +332,7 @@ export class HttpApiClient implements CoursePilotApiClient {
         idempotencyKey,
       },
     );
-    if (envelope.status !== "OK") {
+    if (!isSuccessEnvelope(envelope)) {
       throw errorForResponse(response.status, envelope);
     }
     if (!validateAcademicRecord?.(envelope.data)) {
@@ -348,7 +363,7 @@ export class HttpApiClient implements CoursePilotApiClient {
         },
       },
     );
-    if (envelope.status !== "OK") {
+    if (!isSuccessEnvelope(envelope)) {
       throw errorForResponse(response.status, envelope);
     }
     if (!validateAuditResult?.(envelope.data)) {
@@ -372,8 +387,9 @@ export class HttpApiClient implements CoursePilotApiClient {
       signal,
       body: request,
       idempotencyKey,
+      timeoutMs: PLANNING_TIMEOUT_MS,
     });
-    if (envelope.status !== "OK") {
+    if (!isSuccessEnvelope(envelope)) {
       throw errorForResponse(response.status, envelope);
     }
     if (!validatePlanningAnswer?.(envelope.data)) {
@@ -394,6 +410,8 @@ export class HttpApiClient implements CoursePilotApiClient {
       signal?: AbortSignal;
       body?: unknown;
       idempotencyKey?: string;
+      /** 覆盖默认超时。规划请求要等服务端跑完预算，见 PLANNING_TIMEOUT_MS。 */
+      timeoutMs?: number;
     },
   ): Promise<{ response: Response; envelope: Envelope<unknown> }> {
     if (options.signal?.aborted)
@@ -403,7 +421,7 @@ export class HttpApiClient implements CoursePilotApiClient {
     const timeout = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, this.timeoutMs);
+    }, options.timeoutMs ?? this.timeoutMs);
     const abortFromCaller = () => controller.abort();
     options.signal?.addEventListener("abort", abortFromCaller, { once: true });
     const requestId = `web-${crypto.randomUUID().replaceAll("-", "")}`;

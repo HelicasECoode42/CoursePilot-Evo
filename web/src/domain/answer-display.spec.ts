@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Issue, PlanValidation } from "../contracts";
-import { collectUnknowns, describeVerification } from "./answer-display";
+import {
+  collectUnknowns,
+  describeVerification,
+  hasSimulationMarker,
+} from "./answer-display";
 
 const issue = (code: string, message: string): Issue => ({
   code,
@@ -122,5 +126,52 @@ describe("collectUnknowns", () => {
       [validation({ unknownChecks: [issue("TIME", "周二未知")] })],
     );
     expect(merged).toHaveLength(2);
+  });
+});
+
+describe("受控缺口标记的展示门禁", () => {
+  it("答复带 FAKE_MODEL 时，即使核验是 VALID+REAL_TIMETABLE 也不给绿色通过", () => {
+    const view = describeVerification(
+      validation({ verdict: "VALID", scope: "REAL_TIMETABLE" }),
+      [issue("FAKE_MODEL", "本轮使用假模型")],
+    );
+    expect(view.allowGreenPass).toBe(false);
+    expect(view.tone).toBe("simulated");
+    expect(view.label).toContain("不代表真实核验");
+  });
+
+  it("FAKE_TOOL 同样降级", () => {
+    const view = describeVerification(
+      validation({ verdict: "VALID", scope: "REAL_TIMETABLE" }),
+      [issue("FAKE_TOOL", "Java 未接线")],
+    );
+    expect(view.allowGreenPass).toBe(false);
+  });
+
+  it("没有受控缺口标记时，真实通过仍然是绿色", () => {
+    const view = describeVerification(
+      validation({ verdict: "VALID", scope: "REAL_TIMETABLE" }),
+      [issue("TIME", "某节次未知")],
+    );
+    expect(view.allowGreenPass).toBe(true);
+    expect(view.tone).toBe("real-pass");
+  });
+
+  it("本来就不该绿的结论不会被标记改写成 simulated", () => {
+    const view = describeVerification(
+      validation({ verdict: "UNKNOWN", scope: "COURSE_ONLY" }),
+      [issue("FAKE_MODEL", "本轮使用假模型")],
+    );
+    expect(view.allowGreenPass).toBe(false);
+    expect(view.tone).toBe("pending");
+  });
+
+  it("hasSimulationMarker 只认登记过的标记", () => {
+    expect(hasSimulationMarker([issue("FAKE_MODEL", "x")])).toBe(true);
+    expect(hasSimulationMarker([issue("FAKE_TOOL", "x")])).toBe(true);
+    expect(hasSimulationMarker([issue("OFFERING_UNAVAILABLE", "x")])).toBe(
+      false,
+    );
+    expect(hasSimulationMarker([])).toBe(false);
   });
 });
