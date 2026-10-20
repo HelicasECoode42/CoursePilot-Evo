@@ -1,0 +1,11 @@
+{
+  "caseId": "G3-001",
+  "groupId": "G3",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G3-001-course-selection.json",
+  "userQuery": "这学期我想选《数据结构(1-2)》和《Python计算》，这两门的上课时间撞不撞？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学2 的课程行（课程编号、学分、建议学期）。一门是学科基础课（必修性质）、一门是专业选修课，两门都排在二年级春季学期，所以「这学期同时修这两门」是成立的前提。刻意不绑 offeringSnapshotId：考的是「没有班次数据时以未知为正确行为」。"
+}

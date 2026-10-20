@@ -1,0 +1,11 @@
+{
+  "caseId": "G1-003",
+  "groupId": "G1",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G1-003-academic-record.json",
+  "userQuery": "我大二春季学期修了《大数据：从理论到实践A》，这门算培养方案要求的全英语授课课程吗？我的全英语要求算满足了吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 A53 的规定文字，计科学2 A26 的课程行与 M26 的 ★ 标注、A41 的图例。成绩为虚构 fixture，刻意留空以考「未知」。"
+}

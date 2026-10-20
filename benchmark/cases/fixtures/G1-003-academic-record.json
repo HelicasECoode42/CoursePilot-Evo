@@ -1,0 +1,26 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的已修记录：该课已修，但学生未提供成绩是否合格。",
+  "termId": "2025-2026-2",
+  "termLabel": "二(春)",
+  "studentTerm": 5,
+  "majorId": "CS-2024",
+  "completedCourses": [
+    {
+      "courseCode": "08306145",
+      "courseName": "大数据：从理论到实践A",
+      "credits": 3.0,
+      "category": "专业选修课",
+      "termIndex": 5,
+      "scorePassed": null
+    }
+  ],
+  "englishTaughtCourse": {
+    "courseCode": "08306145",
+    "courseName": "大数据：从理论到实践A",
+    "declaredByStudent": true,
+    "scorePassed": null
+  },
+  "overseasExchangeCredits": null,
+  "internationalSummerSchool": null
+}

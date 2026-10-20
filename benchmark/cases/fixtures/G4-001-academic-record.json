@@ -1,0 +1,9 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "学生没有提供已修记录：academicRecordId 为空，completedCourses 为空（本题考的就是缺资料）。",
+  "promptText": "帮我看看我的专业选修还差多少学分才能毕业？",
+  "academicRecordId": null,
+  "completedCourses": null,
+  "transcriptComplete": false,
+  "sourceKind": "SYNTHETIC"
+}

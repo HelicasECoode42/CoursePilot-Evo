@@ -1,0 +1,21 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的选课请求：一门学科基础课（必修性质）配一门专业选修课，两门都排在二年级春季学期；没有班次数据。",
+  "promptText": "这学期我想选《数据结构(1-2)》和《Python计算》，这两门的上课时间撞不撞？",
+  "desiredCourses": [
+    {
+      "courseCode": "08305009~010",
+      "courseName": "数据结构(1-2)",
+      "category": "学科基础课",
+      "plannedTerm": "二(春1-8)\n二(春9-16)"
+    },
+    {
+      "courseCode": "08306128",
+      "courseName": "Python计算",
+      "category": "专业选修课",
+      "plannedTerm": "二(春9-16)"
+    }
+  ],
+  "categoryNote": "分类依据：计科学1 A43「学科基础课(见续表)」、A45「选修课」/B45「专业选修课(见续表)」，以及计科学2 的区块划分",
+  "offeringSnapshotId": null
+}

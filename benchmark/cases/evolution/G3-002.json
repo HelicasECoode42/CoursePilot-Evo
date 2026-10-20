@@ -1,0 +1,11 @@
+{
+  "caseId": "G3-002",
+  "groupId": "G3",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G3-002-course-selection.json",
+  "userQuery": "我从选课系统里把课表导出来上传了，你帮我看看我选的这几门有没有时间冲突。系统会直接连教务帮我核对吧？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学2 的课程行（说明课程与建议学期），以及虚构的上传件 fixture。核验口径：上传者提供的 BROWSER_SNAPSHOT 标签不能使来源自动变为已核验。"
+}

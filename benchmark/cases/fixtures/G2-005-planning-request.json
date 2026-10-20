@@ -1,0 +1,44 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的排课请求：一条硬约束、两条软偏好、一条教师偏好；没有本学期班次。",
+  "termId": null,
+  "intent": {
+    "motives": [
+      "SCHEDULE",
+      "SPECIFIC_TEACHER"
+    ],
+    "priorityOrder": [
+      "HARD_CONSTRAINTS_FIRST"
+    ],
+    "hardConstraints": [
+      {
+        "kind": "BLOCK_DAY",
+        "dayOfWeek": 3,
+        "sectionRange": "下午",
+        "sourceText": "周三下午我有固定的实习安排，课绝对不能排在周三下午"
+      }
+    ],
+    "softPreferences": [
+      {
+        "dimension": "TIME_PREFERENCE",
+        "value": "AVOID_LONG_BLOCKS",
+        "sourceText": "我不想连着上四节大课"
+      },
+      {
+        "dimension": "TIME_PREFERENCE",
+        "value": "AVOID_EVENING",
+        "sourceText": "最好也别排晚上的课"
+      },
+      {
+        "dimension": "SPECIFIC_TEACHER",
+        "value": "PREFER_TEACHER",
+        "sourceText": "我想上王老师的课",
+        "teacherName": "王老师"
+      }
+    ],
+    "pinnedTeacherCoursePairs": [],
+    "interestTags": [],
+    "careerDirectionIds": []
+  },
+  "offeringSnapshotId": null
+}
