@@ -17,6 +17,7 @@ from agent_runtime.api.idempotency import IdempotencyStore
 from agent_runtime.api.routes import academic_records, gateway, planning, reports, sessions
 from agent_runtime.api.session_store import SessionStore
 from agent_runtime.api.settings import Settings, load_settings
+from agent_runtime.application.budget import Budget
 from agent_runtime.application.run_manifest import RunIdentity
 from agent_runtime.application.runner import PlanningRunner
 
@@ -49,6 +50,7 @@ def create_app(
     verifier_version = (
         "verifier:fake" if isinstance(tool_client, TypedFakeToolClient) else "verifier:local-unset"
     )
+    budget = Budget()
     app.state.runner = runner or PlanningRunner(
         tool_client=tool_client,
         harness=harness,
@@ -60,6 +62,7 @@ def create_app(
         ),
         result_repository=result_repository,
         run_identity=RunIdentity(verifier_version=verifier_version),
+        budget=budget,
     )
 
     app.add_middleware(

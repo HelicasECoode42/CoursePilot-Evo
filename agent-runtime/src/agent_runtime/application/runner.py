@@ -60,10 +60,12 @@ class PlanningRunner:
         candidate_guard: CandidateGuard | None = None,
         result_repository: FileResultRepository | None = None,
         run_identity: RunIdentity | None = None,
+        budget: Budget | None = None,
     ) -> None:
         self._tools = tool_client
         self._harness = harness
         self._model = model_adapter or FakeModelAdapter()
+        self._budget = budget or Budget()
         self._intent_resolver = intent_resolver or IntentResolver()
         self._clarification = clarification_policy or ClarificationPolicy()
         self._answer = answer_compiler or AnswerCompiler()
@@ -81,7 +83,7 @@ class PlanningRunner:
             curriculum_snapshot_id=request.curriculumSnapshotId,
             offering_snapshot_id=request.offeringSnapshotId,
         )
-        budget = BudgetTracker(Budget())
+        budget = BudgetTracker(self._budget)
         started = datetime.now(UTC)
 
         trace.emit("USER_INPUT", input_digest=digest(request.promptText))
@@ -321,7 +323,9 @@ class PlanningRunner:
             self._results.save(
                 answer=answer,
                 events=trace.events,
-                manifest=build_run_manifest(context=context, identity=self._run_identity),
+                manifest=build_run_manifest(
+                    context=context, identity=self._run_identity, budget=self._budget
+                ),
             )
         return answer
 

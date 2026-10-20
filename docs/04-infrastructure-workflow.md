@@ -77,7 +77,7 @@ sourceUrl 只接受 http/https 可点击引用；后端不为用户任意 URL �
 
 ## 7. PlanningAnswer 与学生页面
 
-decision=CLARIFY 时 clarification 必须存在，recommendations 为空；RECOMMENDATIONS 的每份方案都有完整 PlanValidation 与 evidence IDs；UNABLE_TO_VERIFY 可以提供已核验课程建议，但不得包装成真实有效课表。
+decision=CLARIFY 时 clarification 必须存在，recommendations 为空；RECOMMENDATIONS 的每份方案都有完整 PlanValidation 与 evidence IDs；UNABLE_TO_VERIFY 可以提供已核验课程建议，但不得包装成真实有效课表。答案级 `unknowns` 含 `FAKE_MODEL` 时，页面不得把任何候选展示为真实通过，即使该候选 `verification.verdict` 为 `VALID`；不改写 Java 判决。
 
 规划事实引用 SourceRef/verifierResultId，说明不能把语言流畅等同正确。无新数据时重复追问上限两次，仍不足则解释缺什么；不能无限循环耗预算。系统 ERROR 显示重试，业务 UNKNOWN 显示补资料，两种操作不混用。
 
@@ -85,7 +85,7 @@ decision=CLARIFY 时 clarification 必须存在，recommendations 为空；RECOM
 
 TraceEvent 必填见 Schema，seq 在 trace 内递增，provider 缺 token 使用 null，不能写 0。只留阶段、标识、摘要/hash、耗时、用量、有限错误码；不得留完整 Prompt、私有推理链、成绩、身份、Cookie/Token。
 
-RunManifest 固定模型、温度、累计预算、API/数据/评分器/题集与 Harness hash。不同 manifest 不直接比较版本分数。Evolver 仅可写运行 Harness 白名单；目标 Agent 与评测共用 C Runner，D 独立挂载 held-out/gold/evaluator。
+RunManifest 固定模型、温度、累计预算、API/数据/评分器/题集与 Harness hash。预算数字来自同一次运行的 `Budget`，不在 manifest 里另写一套。不同 manifest 不直接比较版本分数。Evolver 仅可写运行 Harness 白名单；目标 Agent 与评测共用 C Runner，D 独立挂载 held-out/gold/evaluator。
 
 正式 promotion 门槛与重复运行策略见 [Benchmark 协议](07-benchmark-protocol.md)。隔离不靠一句 Prompt；用文件权限/进程边界和隔离测试保证可见性。老师报告只有聚合分数、成本、失败类别与 lineage，不公开持出题面和私人 Trace。
 

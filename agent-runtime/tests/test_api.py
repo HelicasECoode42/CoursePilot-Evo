@@ -4,10 +4,16 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_runtime.adapters.fake_tools import TypedFakeToolClient
-from agent_runtime.adapters.model_client import ModelInvalidOutput, ModelTimeout
+from agent_runtime.adapters.model_client import (
+    ModelConfigError,
+    ModelInvalidOutput,
+    ModelTimeout,
+    ModelUpstreamError,
+)
 from agent_runtime.adapters.tool_client import ToolUnavailable
 from agent_runtime.api.app import create_app
 from agent_runtime.api.schemas import AcademicRecord, AuditResult, PlanningRequest
@@ -245,6 +251,73 @@ def test_planning_invalid_model_output_returns_422() -> None:
     assert response.status_code == 422
     assert response.json()["issues"][0]["code"] == "MODEL_INVALID_OUTPUT"
     assert response.json()["issues"][0]["retryable"] is False
+
+
+def test_planning_model_rate_limit_returns_429() -> None:
+    class Limited:
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            raise ModelUpstreamError("模型端点限流", status_code=429)
+
+    app = create_app(tool_client=TypedFakeToolClient())
+    app.state.runner = PlanningRunner(
+        tool_client=app.state.tool_client,
+        harness=app.state.harness,
+        model_adapter=Limited(),
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/planning",
+        json=_request_body(),
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "Idempotency-Key": "k-rate",
+            "X-Request-Id": "req:rate",
+        },
+    )
+    assert response.status_code == 429
+    issue = response.json()["issues"][0]
+    assert issue["code"] == "MODEL_RATE_LIMITED"
+    assert issue["retryable"] is True
+
+
+def test_planning_model_unavailable_returns_503() -> None:
+    class Down:
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            raise ModelUpstreamError("模型端点不可用", status_code=503)
+
+    app = create_app(tool_client=TypedFakeToolClient())
+    app.state.runner = PlanningRunner(
+        tool_client=app.state.tool_client,
+        harness=app.state.harness,
+        model_adapter=Down(),
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/planning",
+        json=_request_body(),
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "Idempotency-Key": "k-down",
+            "X-Request-Id": "req:down",
+        },
+    )
+    assert response.status_code == 503
+    issue = response.json()["issues"][0]
+    assert issue["code"] == "MODEL_UNAVAILABLE"
+    assert issue["retryable"] is True
+
+
+def test_create_app_rejects_placeholder_model_when_endpoint_is_configured() -> None:
+    with pytest.raises(ModelConfigError):
+        create_app(
+            Settings(
+                model_base_url="https://api.deepseek.com",
+                model_api_key="test-key",
+                model_id="DEPLOYMENT_MODEL_PLACEHOLDER",
+            )
+        )
 
 
 def test_planning_model_timeout_returns_504() -> None:

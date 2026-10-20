@@ -8,8 +8,10 @@ import pytest
 
 from agent_runtime.adapters.model_client import (
     HttpModelAdapter,
+    ModelConfigError,
     ModelInvalidOutput,
     ModelTimeout,
+    ModelUpstreamError,
     build_model_adapter,
 )
 from agent_runtime.application.context import ExecutionContext
@@ -26,6 +28,16 @@ def _context() -> ExecutionContext:
         deadline=datetime.now(UTC) + timedelta(seconds=20),
         harness_version="harness:v0",
     )
+
+
+def test_build_model_adapter_rejects_placeholder_when_endpoint_is_set() -> None:
+    with pytest.raises(ModelConfigError):
+        build_model_adapter(
+            model_base_url="https://api.deepseek.com",
+            model_api_key="test-key",
+            model_id="DEPLOYMENT_MODEL_PLACEHOLDER",
+            temperature=0.0,
+        )
 
 
 def test_build_model_adapter_stays_fake_without_key() -> None:
@@ -161,6 +173,40 @@ def test_http_model_empty_items_is_not_invalid_output() -> None:
     reply = adapter.generate(context=_context(), messages=[], tool_schemas=[])
     assert reply.items == []
     assert reply.clarify is None
+
+
+def test_http_model_rate_limit_is_not_invalid_output() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(429, json={"error": "slow down"})
+
+    adapter = HttpModelAdapter(
+        "https://api.deepseek.com",
+        "test-key",
+        "deepseek-chat",
+        0.0,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ModelUpstreamError) as caught:
+        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+    assert caught.value.status_code == 429
+
+
+def test_http_model_server_error_is_not_invalid_output() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(503, json={"error": "down"})
+
+    adapter = HttpModelAdapter(
+        "https://api.deepseek.com",
+        "test-key",
+        "deepseek-chat",
+        0.0,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ModelUpstreamError) as caught:
+        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+    assert caught.value.status_code == 503
 
 
 def test_http_model_invalid_json_raises() -> None:
