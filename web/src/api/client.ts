@@ -116,13 +116,19 @@ function errorForResponse(
 export class HttpApiClient implements CoursePilotApiClient {
   readonly mode = "http" as const;
   private readonly baseUrl: string;
+  private readonly fetcher: typeof fetch;
   private sessionToken: string | null = null;
 
   constructor(
     baseUrl: string,
-    private readonly fetcher: typeof fetch = fetch,
+    fetcher: typeof fetch = globalThis.fetch,
     private readonly timeoutMs = 8_000,
   ) {
+    // 浏览器的 window.fetch 是原生方法，调用时会校验 this 必须是 window。
+    // 存成实例字段后用 this.fetcher(...) 调用，this 变成本实例，浏览器直接抛
+    // TypeError: Illegal invocation，请求根本发不出去。Node 与 mock 都不做这个
+    // 校验，所以单测全绿而真实浏览器全部失败。构造时绑定一次即可。
+    this.fetcher = fetcher.bind(globalThis);
     this.baseUrl = baseUrl.replace(/\/+$/, "");
   }
 

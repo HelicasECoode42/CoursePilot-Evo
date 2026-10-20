@@ -306,4 +306,47 @@ describe("HTTP API client", () => {
       sessionId: "fixture-session-e1",
     });
   });
+
+  it("calls fetch with a global this so a browser native fetch is not rejected", async () => {
+    // 浏览器的 window.fetch 会校验调用时的 this 必须是 window，否则抛
+    // TypeError: Illegal invocation。Node 的 fetch 和 vi.fn() 都不做这个校验，
+    // 所以这里用一个会自行检查 this 的假 fetch 来重建浏览器的行为；否则这类
+    // 回归在 Node 下永远测不出来。
+    const seenThis: unknown[] = [];
+    const nativeLike = function (this: unknown) {
+      seenThis.push(this);
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError(
+          "Failed to execute 'fetch' on 'Window': Illegal invocation",
+        );
+      }
+      return Promise.resolve(response(201, envelope("OK", session)));
+    } as unknown as typeof fetch;
+
+    const client = new HttpApiClient("http://127.0.0.1:8000", nativeLike);
+
+    await expect(client.createSession()).resolves.toMatchObject({
+      sessionId: session.sessionId,
+    });
+    expect(seenThis).toHaveLength(1);
+    expect(seenThis[0]).toBe(globalThis);
+  });
+
+  it("defaults to the global fetch rather than an unbound reference", async () => {
+    const original = globalThis.fetch;
+    const calls: unknown[] = [];
+    globalThis.fetch = function (this: unknown) {
+      calls.push(this);
+      return Promise.resolve(response(201, envelope("OK", session)));
+    } as unknown as typeof fetch;
+    try {
+      const client = new HttpApiClient("http://127.0.0.1:8000");
+      await expect(client.createSession()).resolves.toMatchObject({
+        sessionId: session.sessionId,
+      });
+      expect(calls[0]).toBe(globalThis);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });
