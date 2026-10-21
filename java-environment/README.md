@@ -64,3 +64,5 @@ COURSEPILOT_SERVICE_KEY=local-dev-key ./mvnw spring-boot:run \
 
 日志只记录定位 ID、阶段、状态与耗时，不记密钥、成绩与请求体；用 `requestId` /
 `traceId` 对齐一次调用。
+
+A 模块的本地 `.xlsx` 培养计划导入器说明见 [`importer/README.md`](importer/README.md)。

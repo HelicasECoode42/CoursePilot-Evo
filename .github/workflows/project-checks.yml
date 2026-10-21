@@ -31,3 +31,4 @@ jobs:
       - run: python scripts/test_self_check.py
       - run: python scripts/self_check.py
       - run: python scripts/check_modules.py
+      - run: ./java-environment/importer/mvnw -B verify
