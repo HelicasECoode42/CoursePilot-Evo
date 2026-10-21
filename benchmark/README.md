@@ -14,3 +14,41 @@ G1 培养要求；G2 hard/soft 偏好；G3 规划/冲突/replan；G4 缺信息�
 | 事实等级 | `REAL` = 培养要求事实；`SIMULATION` = 人造班次；无班次 = 语料确实没有排课时间 |
 
 case 文件只引用 `curriculumSnapshotId`，不写"老师给的那张表"。
+
+## 基线测量入口（D-F2 骨架）
+
+`run_benchmark.py` 逐例驱动 C 侧的 `/api/v1/planning`（被测 Agent 只有这一个，本模块不另写 Agent），
+把每例的判定、结构化答复、用量、耗时、评分写成一条 JSONL，并按 contracts 出 `RunReport`。
+
+```text
+python benchmark/run_benchmark.py --manifest benchmark/manifests/example.json --plan
+python benchmark/run_benchmark.py --manifest benchmark/manifests/example.json \
+    --base-url http://127.0.0.1:8000 --gold-root ../restricted/gold
+```
+
+退出码：`0` 全部 PASS（或 `--plan`）；`1` 存在 DEGRADED / FAIL / BLOCKED；`2` manifest 不符合 `RunManifest`。
+
+`manifests/example.json` 只是字段示例（`modelId`、`javaToolApiVersion`、`verifierVersion` 未定），不是任何一次真实运行记录；实跑前按当次配置另存一份，manifest 一旦运行就不该再改。
+
+判定语义（一例一判）
+
+| 判定 | 含义 |
+| --- | --- |
+| PASS | HTTP 200、评分未 blocked、答案没有占位或缺失标记 |
+| DEGRADED | HTTP 200 但答案带 FAKE_MODEL / FAKE_TOOL / OFFERING_UNAVAILABLE，只证明链路通 |
+| FAIL | HTTP 200 但评分 blocked（命中禁止结论或引用核验不通过） |
+| BLOCKED | 用例按契约构造不出请求，或上游 503、缺依赖，本例没有有效结果 |
+| PLAN | 只登记不执行 |
+
+成本口径：Provider 没给 token 用量时记 `null`，不记 0、不估算；`summary.json` 另报成本可用样本覆盖率。
+
+输出（默认 `runs/benchmark/<runId>/`）：`run-manifest.json`、`cases.jsonl`、`run-report.json`、`summary.json`。
+`RunReport` 字段固定（`additionalProperties=false`），所以分组等权分数、覆盖率、matcher 名、held-out 状态写在 `summary.json`。
+
+当前限制
+
+* 语义匹配仍是 `scoring/scorer.py` 的 `keyword_matcher` 占位基线，分数偏低不代表模型差；接 C 的匹配器后应换掉。
+* 引用核验未接线（`JavaVerifier` 为 `None`），逐条记 `unverified`，不折算成通过。
+* held-out 未接入，`heldOutScore` 恒为 `None`，本轮只跑 evolution。
+* G1/G4 的题面走 `academic-records` 与 `requirements/audit` 路径，本骨架只接 `/planning`，这些用例判 `BLOCKED` 并写明原因。
+* fixture 里 `08305009~010` 一类课程编号过不了契约 `Id` 字符集，无法折成 `PIN_COURSE` 约束，同样判 `BLOCKED` 而不是改写编号。

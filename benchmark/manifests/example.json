@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.0",
+  "runId": "baseline-v0-local-example",
+  "benchmarkSetVersion": "d1-24cases-rubric-v1",
+  "evaluatorVersion": "scorer-keyword-baseline-v0",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "javaToolApiVersion": "unset",
+  "verifierVersion": "unset",
+  "harnessVersion": "w2-local",
+  "parentVersion": null,
+  "modelId": "unset-placeholder",
+  "temperature": 0.0,
+  "maxInputTokens": 8000,
+  "maxOutputTokens": 2000,
+  "maxToolCalls": 6,
+  "maxModelCalls": 3,
+  "deadlineMs": 45000,
+  "repeatCount": 1,
+  "seed": 0,
+  "createdAt": "2026-10-21T00:00:00Z"
+}
