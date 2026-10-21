@@ -54,6 +54,13 @@ PLAN = "PLAN"
 #: 答案里出现这些 code 说明走的是占位实现或缺上游数据，只能算链路通。
 PLACEHOLDER_CODES = ("FAKE_MODEL", "FAKE_TOOL", "OFFERING_UNAVAILABLE")
 
+#: 端点 → contracts 里对应的请求体定义。请求体先过一遍契约，避免折错了还发给上游。
+REQUEST_SCHEMAS = {
+    "/api/v1/planning": "PlanningRequest",
+    "/api/v1/academic-records": "AcademicRecordInput",
+    "/api/v1/requirements/audit": "AuditRequest",
+}
+
 __all__ = [
     "AUDIT",
     "BLOCKED",
@@ -241,6 +248,10 @@ class BenchmarkRunner:
         self.mode = mode
         self.missing_outcome = missing_outcome
         self.session_path = session_path
+        self._defs: dict[str, Any] = {}
+        if contracts_root is not None:
+            domain = json.loads((contracts_root / "schemas" / "domain.schema.json").read_text(encoding="utf-8"))
+            self._defs = domain.get("$defs", {})
 
     # -- 读取 -------------------------------------------------------------
     def load_cases(self) -> list[dict[str, Any]]:
@@ -265,6 +276,17 @@ class BenchmarkRunner:
         return json.loads(path.read_text(encoding="utf-8"))
 
     # -- 跑 ---------------------------------------------------------------
+    def check_request(self, path: str, body: dict[str, Any]) -> list[str]:
+        """按 contracts 校验请求体：折错了就在这里挡住，不发给上游。"""
+        name = REQUEST_SCHEMAS.get(path)
+        if not name or name not in self._defs:
+            return []
+        schema = {"$defs": self._defs, "$ref": f"#/$defs/{name}"}
+        return [
+            f"{'/'.join(str(part) for part in error.path) or '<root>'}: {error.message}"
+            for error in sorted(Draft202012Validator(schema).iter_errors(body), key=lambda item: list(item.path))
+        ]
+
     def _new_session(self) -> str:
         status, payload = self.transport.post(self.session_path, {}, {})
         token = (payload.get("data") or {}).get("sessionToken")
@@ -297,6 +319,11 @@ class BenchmarkRunner:
         started = time.perf_counter()
         for index, step in enumerate(plan.steps, 1):
             body = step.body(payload) if callable(step.body) else step.body
+            problems = self.check_request(step.path, body)
+            if problems:
+                outcome.error = f"构造：第 {index} 步 {step.label} 的请求体不符合契约 —— " + "; ".join(problems[:3])
+                outcome.measured_latency_ms = int((time.perf_counter() - started) * 1000)
+                return outcome
             status, payload = self.transport.post(step.path, body, headers)
             outcome.http_status = status
             if status != 200 and status != 201:
@@ -425,8 +452,12 @@ class BenchmarkRunner:
             status_counts[outcome.status] = status_counts.get(outcome.status, 0) + 1
             key = outcome.route or "unknown"
             route_counts[key] = route_counts.get(key, 0) + 1
+        upstream = [outcome.case_id for outcome in outcomes if any("依赖上游" in note for note in outcome.notes)]
+        fallbacks = sum(1 for outcome in outcomes for note in outcome.notes if "兜底" in note)
         return {
             "caseCount": total,
+            "upstreamDependent": upstream,
+            "fallbackAssumptions": fallbacks,
             "statusCounts": status_counts,
             "routeCounts": route_counts,
             "groupMeans": group_means,

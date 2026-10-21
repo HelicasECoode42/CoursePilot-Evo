@@ -160,10 +160,8 @@ def record_body(
         elif outcome not in OUTCOMES:
             raise UnsupportedCase(f"outcome {outcome!r} 不在契约枚举内")
         term = course.get("completedTerm")
-        if term is None and isinstance(course.get("termIndex"), int):
-            term = f"term-{course['termIndex']}"
         if term is not None and not _id_ok(term):
-            term = None
+            raise UnsupportedCase(f"completedTerm {term!r} 不符合契约 Id 字符集")
         courses.append(
             {
                 "courseCode": code,
@@ -174,10 +172,10 @@ def record_body(
         )
     if filled_outcome:
         notes.append(
-            f"{filled_outcome} 门已修课程 fixture 未写 outcome，按 {missing_outcome} 折算（折算假设，待编写人确认）"
+            f"{filled_outcome} 门已修课程 fixture 未写 outcome，按 {missing_outcome} 兜底（应在 fixture 补字段，不靠这条）"
         )
-    if fixture.get("termIndex") is not None:
-        notes.append("completedTerm 由 fixture.termIndex 折成 term-<n>")
+    if any("completedTerm" in course for course in fixture.get("completedCourses") or []):
+        notes.append("completedTerm 取 fixture 字段；fixture 没写就不传（契约允许 null，不自行编学期编号）")
     unsent = [
         key for key in ("englishTaughtCourse", "overseasExchangeCredits", "majorId", "studentTerm") if key in fixture
     ]
@@ -206,6 +204,22 @@ def empty_record_body(case: dict[str, Any]) -> dict[str, Any]:
         "transcriptComplete": False,
         "sourceKind": "SYNTHETIC",
     }
+
+
+def upstream_dependent(fixture: dict[str, Any]) -> bool:
+    """题面是否依赖上游解析快照（班次容量、采集时间这类只存在于快照里的事实）。"""
+    return isinstance(fixture.get("offering"), dict)
+
+
+def _upstream_notes(fixture: dict[str, Any]) -> list[str]:
+    if not upstream_dependent(fixture):
+        return []
+    return [
+        (
+            "依赖上游：容量与采集时间只存在于 offering 快照里，契约的 PlanningRequest 没有承载字段，"
+            "没有 Java/数据集解析时这条判据记为依赖上游"
+        )
+    ]
 
 
 def classify(case: dict[str, Any], fixture: dict[str, Any]) -> tuple[str, str]:
@@ -246,9 +260,11 @@ def build_plan(
         body, notes = planning_body(case, fixture, mode=mode)
         plan.notes = notes
         if body.get("academicRecordId"):
+            plan.notes = [*notes, *_upstream_notes(fixture)]
             plan.steps = [Step("规划请求", "/api/v1/planning", body)]
             return plan
         plan.notes = [*notes, "先落一条空记录（transcriptComplete=false）拿 id，再发规划请求"]
+        plan.notes += _upstream_notes(fixture)
         plan.steps = [
             Step("落空记录", "/api/v1/academic-records", empty_record_body(case)),
             Step(
