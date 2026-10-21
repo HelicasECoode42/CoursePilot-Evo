@@ -43,7 +43,7 @@ from case_adapters import (
 from case_adapters import (
     planning_body as _adapter_planning_body,
 )
-from scoring.scorer import ScoreReport, score
+from scoring.judge import JudgeReport, judge
 
 PASS = "PASS"
 DEGRADED = "DEGRADED"
@@ -205,6 +205,8 @@ def answer_text(data: dict[str, Any]) -> str:
         for unknown in holder.get("unknowns") or []:
             if unknown.get("message"):
                 parts.append(str(unknown["message"]))
+    if data.get("decision"):
+        parts.append(f"结论 {data['decision']}")
     return "\n".join(part for part in parts if part).strip()
 
 
@@ -348,11 +350,17 @@ class BenchmarkRunner:
         outcome.reported_elapsed_ms = usage.get("elapsedMs")
 
         gold = self.load_gold(case_id)
-        report: ScoreReport | None = None
+        report: JudgeReport | None = None
         if gold is None:
             outcome.notes.append("缺少判据文件，未评分（判据在仓库外的标注目录）")
         else:
-            report = score(answer_text(data), gold, matcher=self.matcher, java_verifier=self.java_verifier)
+            report = judge(
+                data,
+                gold,
+                answer=answer_text(data),
+                matcher=self.matcher,
+                java_verifier=self.java_verifier,
+            )
             outcome.score = report.score
             outcome.blocked = report.blocked
             outcome.score_report = report.as_dict()
@@ -452,6 +460,15 @@ class BenchmarkRunner:
             status_counts[outcome.status] = status_counts.get(outcome.status, 0) + 1
             key = outcome.route or "unknown"
             route_counts[key] = route_counts.get(key, 0) + 1
+        claim_modes = {"structured": 0, "text": 0, "unwired": 0}
+        text_shares: list[float] = []
+        for outcome in outcomes:
+            report = outcome.score_report or {}
+            for key, value in (report.get("modeCounts") or {}).items():
+                claim_modes[key] = claim_modes.get(key, 0) + value
+            if report.get("textShare") is not None:
+                text_shares.append(report["textShare"])
+        judged = sum(claim_modes.values())
         upstream = [outcome.case_id for outcome in outcomes if any("依赖上游" in note for note in outcome.notes)]
         fallbacks = sum(1 for outcome in outcomes for note in outcome.notes if "兜底" in note)
         return {
@@ -469,6 +486,11 @@ class BenchmarkRunner:
                 "inputTokens": round(with_input / total, 4) if total else None,
                 "outputTokens": round(with_output / total, 4) if total else None,
             },
+            "claimModes": claim_modes,
+            "textShare": round(sum(text_shares) / len(text_shares), 4) if text_shares else None,
+            "textShareNote": (
+                None if not judged else f"{claim_modes['text']}/{judged} 条判据靠文本匹配，不能当语义正确率读"
+            ),
             "matcher": getattr(
                 self.matcher, "__name__", "keyword_matcher" if self.matcher is None else type(self.matcher).__name__
             ),
