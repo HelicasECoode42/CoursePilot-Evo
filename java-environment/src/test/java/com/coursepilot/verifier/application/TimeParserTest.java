@@ -95,6 +95,50 @@ class TimeParserTest {
   }
 
   @Test
+  @DisplayName("一周上两次的课要解析出两段，不能只认第一段")
+  void parsesMultipleBlocks() {
+    // 回归：原先分别 find 星期/节次/周次各取第一个匹配，周三那段被静默丢掉
+    // 还返回 ok，冲突检查就会把实际撞课的两门课判成不冲突。
+    TimeParser.ParseOutcome outcome = parser.parse("星期一第1-2节{1-16周},星期三第3-4节{1-16周}");
+    assertTrue(outcome.isOk(), outcome.getReason());
+    assertEquals(2, outcome.getMeetings().size());
+    assertEquals(1, outcome.getMeetings().get(0).getDayOfWeek());
+    assertEquals(3, outcome.getMeetings().get(1).getDayOfWeek());
+    assertEquals(3, outcome.getMeetings().get(1).getStartSection());
+    assertEquals(4, outcome.getMeetings().get(1).getEndSection());
+  }
+
+  @Test
+  @DisplayName("分号、顿号、无分隔符的多段写法都要认全")
+  void parsesMultipleBlocksWithVariousSeparators() {
+    assertEquals(2, parser.parse("周一第1-2节{第1-16周};周四第7-8节{第1-16周}")
+        .getMeetings().size());
+    assertEquals(2, parser.parse("周一第1-2节{第1-16周}、周四第7-8节{第1-16周}")
+        .getMeetings().size());
+    assertEquals(2, parser.parse("周一第1-2节{第1-16周}周四第7-8节{第1-16周}")
+        .getMeetings().size());
+  }
+
+  @Test
+  @DisplayName("多段里各段的单双周独立生效")
+  void parityAppliesPerBlock() {
+    TimeParser.ParseOutcome outcome =
+        parser.parse("周一第1-2节{1-8周(单)},周三第1-2节{1-8周(双)}");
+    assertTrue(outcome.isOk(), outcome.getReason());
+    assertEquals(List.of(1, 3, 5, 7), List.copyOf(outcome.getMeetings().get(0).getWeeks()));
+    assertEquals(List.of(2, 4, 6, 8), List.copyOf(outcome.getMeetings().get(1).getWeeks()));
+  }
+
+  @Test
+  @DisplayName("认出一段但还剩看不懂的文本时报未知，不返回残缺课表")
+  void partialRecognitionIsUnknown() {
+    // 少一段时间会让冲突检查漏判，比直接说未知危险。docs/09：解析失败不得被当「无冲突」。
+    TimeParser.ParseOutcome outcome = parser.parse("周一第1-2节{1-16周},周三第3-4节待定");
+    assertFalse(outcome.isOk());
+    assertTrue(outcome.getMeetings().isEmpty());
+  }
+
+  @Test
   @DisplayName("无法识别的残余片段不被静默丢掉")
   void unparsedRemainderIsUnknown() {
     assertFalse(parser.parse("周一第1-2节{待定}").isOk());
