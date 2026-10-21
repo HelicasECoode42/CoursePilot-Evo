@@ -60,20 +60,38 @@ class TimeParserTest {
   }
 
   @Test
-  @DisplayName("真实快照用「星期三」而非「周三」，当前解析不了，必须报未知不能静默当无课")
-  void realSnapshotDayWordIsUnknownForNow() {
-    // docs/course-offering-snapshot.example.json 的实际写法：星期三第3-4节{1-16周(单)}
-    // 现在 DAY 正则只认「周X」，这条应当返回未知而不是漏解析。接入真实班次前需要支持。
-    TimeParser.ParseOutcome outcome = parser.parse("星期三第3-4节{1-16周}");
-    assertFalse(outcome.isOk(), "若将来支持「星期X」写法，请把这条改成正例");
+  @DisplayName("真实快照的完整写法：星期三第3-4节{1-16周(单)}")
+  void parsesRealSnapshotForm() {
+    // docs/course-offering-snapshot.example.json 里的实际写法。
+    TimeParser.ParseOutcome outcome = parser.parse("星期三第3-4节{1-16周(单)}");
+    assertTrue(outcome.isOk(), outcome.getReason());
+    MeetingTime m = outcome.getMeetings().get(0);
+    assertEquals(3, m.getDayOfWeek());
+    assertEquals(3, m.getStartSection());
+    assertEquals(4, m.getEndSection());
+    assertEquals(List.of(1, 3, 5, 7, 9, 11, 13, 15), List.copyOf(m.getWeeks()));
   }
 
   @Test
-  @DisplayName("单双周标记当前解析不了，必须报未知")
-  void alternatingWeekMarkerIsUnknownForNow() {
-    // 真实写法带 (单)/(双)。docs/04：单双周不交不冲突，所以这个标记不能丢。
-    TimeParser.ParseOutcome outcome = parser.parse("周三第3-4节{1-16周(单)}");
-    assertFalse(outcome.isOk(), "若将来支持单双周，请把这条改成正例并断言周次只剩奇数");
+  @DisplayName("双周标记只保留偶数周")
+  void parsesEvenWeeks() {
+    TimeParser.ParseOutcome outcome = parser.parse("星期二第1-2节{1-8周(双)}");
+    assertTrue(outcome.isOk(), outcome.getReason());
+    assertEquals(List.of(2, 4, 6, 8), List.copyOf(outcome.getMeetings().get(0).getWeeks()));
+  }
+
+  @Test
+  @DisplayName("「星期日」与「星期天」都是 7")
+  void sundayBothSpellings() {
+    assertEquals(7, parser.parse("星期日第1节{1周}").getMeetings().get(0).getDayOfWeek());
+    assertEquals(7, parser.parse("星期天第1节{1周}").getMeetings().get(0).getDayOfWeek());
+  }
+
+  @Test
+  @DisplayName("单双周过滤后周次为空时报未知，不返回空课表")
+  void emptyAfterParityFilterIsUnknown() {
+    // 2-2 周只有第 2 周，取单周后为空；这时不能说「没课」，要说未知。
+    assertFalse(parser.parse("周一第1节{2-2周(单)}").isOk());
   }
 
   @Test
