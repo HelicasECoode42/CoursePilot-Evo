@@ -1,0 +1,3 @@
+# 本地运行产物：H2 文件库、Maven 构建输出
+data/
+target/
