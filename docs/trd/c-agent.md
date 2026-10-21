@@ -88,6 +88,10 @@ PlanningRequest 必填 schemaVersion、curriculumSnapshotId、academicRecordId�
 
 PlanningAnswer decision=CLARIFY 必须有 Question 且无 recommendations；每份 recommendation 有 PlanValidation，最多 3 份。UNKNOWN 可保留课程层建议，不能返回真实合格课表。usage 未取得 token 用 null。
 
+`POST /api/v1/planning` 带 `previousPlanId` 时，先确认该方案属于当前会话，不属于就返回 404，文案与其他「不在本会话」一致。确认之后按这次请求里的硬条件重新核验，不把旧 `verifierResultId` 当成新结果，也不因为重规划删掉请求里仍在的必须项。
+
+会话内换班先用已有 Java 工具，不新造字段：`GET /api/v1/session-offerings` 按当前会话里的 `previousPlanId` 和 `courseCode` 调 `listOfferings`；`POST /api/v1/session-plans/replace` 只替换这一门，其余课程和 `hardConstraints` 原样交给 `validatePlan`。旧 `verifierResultId` 不复用。这两条路径还没写入 `planning.openapi.json`，要等 B、E 确认后再改契约。没有班次快照或 Java 不可用时拒绝，不把结果写成 `VALID`。
+
 ### 4. 正常与重规划时序
 
 ```mermaid
