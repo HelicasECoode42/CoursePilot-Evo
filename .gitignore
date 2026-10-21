@@ -28,3 +28,6 @@ docs/team/*filled*
 
 # Local editor/session scratch
 .claude/
+
+# Reviewed A1 derived curriculum output; original school workbook remains local.
+!data/curriculum/2024-computer-college-curricula.xlsx

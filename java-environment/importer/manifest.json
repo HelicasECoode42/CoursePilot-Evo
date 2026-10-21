@@ -1,0 +1,9 @@
+{
+  "module": "java-environment/importer",
+  "language": "Java",
+  "java": "21",
+  "build": "./mvnw.cmd verify",
+  "test": "./mvnw.cmd test",
+  "status": "initial importer implementation; no HTTP endpoint or persistence provider",
+  "private_inputs": "data/curriculum/2024-computer-college-curricula.xlsx is local integration input and is not a test fixture"
+}

@@ -15,6 +15,7 @@ SECRET = re.compile(
     r"sk-(?:proj-)?[A-Za-z0-9_-]{35,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)"
 )
 PRIVATE_EXTENSIONS = {".xls", ".xlsx", ".pdf", ".log"}
+APPROVED_DERIVED_WORKBOOK = "data/curriculum/2024-computer-college-curricula.xlsx"
 
 
 def git_bytes(*args: str) -> bytes:
@@ -37,10 +38,13 @@ def staged_paths() -> list[str]:
 def forbidden_path(relative: str) -> bool:
     path = Path(relative)
     parts = path.parts
-    return (
-        parts[:2] in (("data", "raw"), ("data", "private"))
-        or path.suffix.lower() in PRIVATE_EXTENSIONS
-        or (path.name.startswith(".env") and path.name != ".env.example")
+    if parts[:2] in (("data", "raw"), ("data", "private")):
+        return True
+    # Allow only the reviewed A1 derivative; raw/private inputs remain blocked above.
+    if relative.replace("\\", "/") == APPROVED_DERIVED_WORKBOOK:
+        return False
+    return path.suffix.lower() in PRIVATE_EXTENSIONS or (
+        path.name.startswith(".env") and path.name != ".env.example"
     )
 
 
