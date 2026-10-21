@@ -1,8 +1,10 @@
 """D-F2 基线测量骨架：逐例驱动 C 的唯一 Runner，落 RunManifest、逐例记录与 RunReport。
 
 职责边界
-  本模块只做「跑一例、记账、汇总」三件事，不判断语义、不另写 Agent：
-  * 被测对象只能是通过 HTTP 调用的 C 侧 /api/v1/planning，本模块不实现第二个 Agent；
+  本模块只做「按题面打对端点、跑一例、记账、汇总」，不判断语义、不另写 Agent：
+  * 被测对象只能是通过 HTTP 调用的 C 侧服务（/planning、/academic-records、/requirements/audit），
+    本模块不实现第二个 Agent；
+  * 题面怎么折成请求体放在 case_adapters，折算的每处假设都跟着逐例记录落盘；
   * 语义匹配由 scorer 注入，默认 keyword_matcher 是占位基线，报告里必须写明用了哪个 matcher；
   * 引用核验由 B 的 JavaVerifier 注入，未接线时逐条记 unverified，不折算成通过。
 
@@ -11,7 +13,7 @@
   DEGRADED  HTTP 200 但答案带 FAKE_MODEL / FAKE_TOOL / OFFERING_UNAVAILABLE 一类标记，
             只能证明链路通，不能证明真实能力
   FAIL      HTTP 200 但评分 blocked（命中 forbiddenClaims、引用核验不通过）
-  BLOCKED   用例按契约构造不出请求，或上游 503 或缺依赖，本例没有有效结果
+  BLOCKED   题面按契约构造不出请求（构造），或上游 503 与缺依赖（上游），本例没有有效结果
   PLAN      只登记不执行
 
 成本口径（docs/07 第 2 节）
@@ -22,7 +24,6 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 import urllib.error
 import urllib.request
@@ -32,6 +33,16 @@ from typing import Any, Protocol
 
 from jsonschema import Draft202012Validator
 
+from case_adapters import (
+    AUDIT,
+    CATALOG,
+    MISSING_OUTCOME_DEFAULT,
+    UnsupportedCase,
+    build_plan,
+)
+from case_adapters import (
+    planning_body as _adapter_planning_body,
+)
 from scoring.scorer import ScoreReport, score
 
 PASS = "PASS"
@@ -43,11 +54,25 @@ PLAN = "PLAN"
 #: 答案里出现这些 code 说明走的是占位实现或缺上游数据，只能算链路通。
 PLACEHOLDER_CODES = ("FAKE_MODEL", "FAKE_TOOL", "OFFERING_UNAVAILABLE")
 
-_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
-
-
-class UnsupportedCase(Exception):
-    """用例无法按契约构造请求：不是失败，是没有有效结果。"""
+__all__ = [
+    "AUDIT",
+    "BLOCKED",
+    "CATALOG",
+    "DEGRADED",
+    "FAIL",
+    "PASS",
+    "PLAN",
+    "BenchmarkRunner",
+    "CaseOutcome",
+    "CaseRequest",
+    "HttpTransport",
+    "UnsupportedCase",
+    "answer_text",
+    "load_manifest_schema",
+    "planning_body",
+    "unknown_codes",
+    "validate_manifest",
+]
 
 
 @dataclass
@@ -61,6 +86,7 @@ class CaseOutcome:
     case_id: str
     group_id: str
     status: str
+    route: str | None = None
     http_status: int | None = None
     decision: str | None = None
     placeholders: list[str] = field(default_factory=list)
@@ -81,6 +107,7 @@ class CaseOutcome:
             "caseId": self.case_id,
             "groupId": self.group_id,
             "status": self.status,
+            "route": self.route,
             "httpStatus": self.http_status,
             "decision": self.decision,
             "placeholders": self.placeholders,
@@ -130,35 +157,6 @@ class HttpTransport:
                 return exc.code, {"_raw": raw[:400]}
 
 
-def _id_ok(value: Any) -> bool:
-    return isinstance(value, str) and bool(_ID_PATTERN.fullmatch(value))
-
-
-def _constraints_from_desired(courses: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """把 fixture 里「想选的课」折成 PIN_COURSE 硬约束。
-
-    PIN_COURSE 是契约里唯一表达「这门课必须在方案里」的结构；courseCode 必须过契约 Id 字符集，
-    过不了就如实报 Unsupported，不换成别的字段绕过去。
-    """
-    constraints: list[dict[str, Any]] = []
-    for course in courses:
-        code = course.get("courseCode")
-        if not _id_ok(code):
-            raise UnsupportedCase(f"fixture 的 courseCode {code!r} 不符合契约 Id 字符集，无法构造 PIN_COURSE 约束")
-        constraints.append(
-            {
-                "kind": "PIN_COURSE",
-                "courseCode": code,
-                "teacherKey": None,
-                "dayOfWeek": None,
-                "section": None,
-                "value": None,
-                "sourceText": course.get("courseName") or code,
-            }
-        )
-    return constraints
-
-
 def planning_body(
     case: dict[str, Any],
     fixture: dict[str, Any],
@@ -166,54 +164,15 @@ def planning_body(
     academic_record_id: str | None = None,
     mode: str = "SIMULATION",
 ) -> CaseRequest:
-    """把一个题面加 fixture 折成 PlanningRequest 请求体。
-
-    折出来的 intent 属于「题面输入」，不是标准答案：判据仍只在 gold 里。
-    """
-    notes: list[str] = []
-    intent = fixture.get("intent")
-    if isinstance(intent, dict):
-        body_intent = intent
-        notes.append("intent 取 fixture 的 intent 字段（题面输入）")
-    elif isinstance(fixture.get("desiredCourses"), list):
-        courses = fixture["desiredCourses"]
-        body_intent = {
-            "motives": ["SCHEDULE"],
-            "priorityOrder": [],
-            "hardConstraints": _constraints_from_desired(courses),
-            "softPreferences": [],
-            "pinnedTeacherCoursePairs": [],
-            "interestTags": [],
-            "careerDirectionIds": [],
-        }
-        notes.append("intent 由 fixture.desiredCourses 派生：每门课记为 PIN_COURSE（题面输入）")
-    else:
-        raise UnsupportedCase(
-            "fixture 既没有 intent 也没有 desiredCourses：该用例走 academic-records 或 requirements/audit 路径，本骨架未接"
-        )
-
-    record_id = academic_record_id or fixture.get("academicRecordId")
-    if not _id_ok(record_id):
-        record_id = "rec-not-provided"
-        notes.append("fixture 没有合法 academicRecordId，按缺资料场景用占位符 rec-not-provided（不伪造已修记录）")
-
-    prompt = fixture.get("promptText") or case.get("userQuery") or ""
-    body = {
-        "schemaVersion": "1.0",
-        "curriculumSnapshotId": case.get("curriculumSnapshotId"),
-        "offeringSnapshotId": case.get("offeringSnapshotId") or fixture.get("offeringSnapshotId"),
-        "academicRecordId": record_id,
-        "mode": mode,
-        "promptText": prompt,
-        "intent": body_intent,
-        "previousPlanId": None,
-    }
+    """兼容入口：折 PlanningRequest。折算规则在 case_adapters。"""
+    body, notes = _adapter_planning_body(case, fixture, academic_record_id=academic_record_id, mode=mode)
     return CaseRequest(body=body, notes=notes)
 
 
 def answer_text(data: dict[str, Any]) -> str:
     """把结构化答复压成一段文本，交给 scorer 的文本匹配基线。
 
+    规划分支拼推荐、澄清、未知；核查分支拼培养要求各条的状态、缺口学分与未知。
     这一步是有损投影：接 C 的匹配器之后应改用结构化逐项判定，报告里必须写明当轮用的是哪种。
     """
     parts: list[str] = []
@@ -223,12 +182,22 @@ def answer_text(data: dict[str, Any]) -> str:
     clarification = data.get("clarification") or {}
     if clarification.get("text"):
         parts.append(str(clarification["text"]))
-    for unknown in data.get("unknowns") or []:
-        if unknown.get("message"):
-            parts.append(str(unknown["message"]))
-    for unknown in (data.get("academicAudit") or {}).get("unknowns") or []:
-        if unknown.get("message"):
-            parts.append(str(unknown["message"]))
+    for requirement in data.get("requirements") or []:
+        fields = [
+            requirement.get("requirementId"),
+            requirement.get("state"),
+            requirement.get("requiredCredits"),
+            requirement.get("earnedCredits"),
+            requirement.get("gapCredits"),
+            " ".join(str(code) for code in requirement.get("courseCodes") or []),
+        ]
+        parts.append(" ".join(str(value) for value in fields if value is not None))
+    if data.get("suggestedCourseCodes"):
+        parts.append("建议课程 " + " ".join(str(code) for code in data["suggestedCourseCodes"]))
+    for holder in (data, data.get("academicAudit") or {}):
+        for unknown in holder.get("unknowns") or []:
+            if unknown.get("message"):
+                parts.append(str(unknown["message"]))
     return "\n".join(part for part in parts if part).strip()
 
 
@@ -260,8 +229,8 @@ class BenchmarkRunner:
         matcher=None,
         java_verifier=None,
         mode: str = "SIMULATION",
+        missing_outcome: str = MISSING_OUTCOME_DEFAULT,
         session_path: str = "/api/v1/sessions",
-        planning_path: str = "/api/v1/planning",
     ) -> None:
         self.transport = transport
         self.cases_root = cases_root
@@ -270,8 +239,8 @@ class BenchmarkRunner:
         self.matcher = matcher
         self.java_verifier = java_verifier
         self.mode = mode
+        self.missing_outcome = missing_outcome
         self.session_path = session_path
-        self.planning_path = planning_path
 
     # -- 读取 -------------------------------------------------------------
     def load_cases(self) -> list[dict[str, Any]]:
@@ -308,29 +277,40 @@ class BenchmarkRunner:
         group_id = str(case.get("groupId") or "unknown")
         try:
             fixture = self.load_fixture(str(case.get("inputFixtureRef") or ""), repo_root)
-            request = planning_body(case, fixture, mode=self.mode)
+            plan = build_plan(case, fixture, mode=self.mode, missing_outcome=self.missing_outcome)
         except (UnsupportedCase, OSError, json.JSONDecodeError) as exc:
-            return CaseOutcome(case_id, group_id, BLOCKED, error=f"{type(exc).__name__}: {exc}")
+            return CaseOutcome(case_id, group_id, BLOCKED, error=f"构造：{type(exc).__name__}: {exc}")
 
+        outcome = CaseOutcome(case_id, group_id, BLOCKED, route=plan.route, notes=[plan.reason, *plan.notes])
+        if not plan.steps:
+            outcome.error = f"本轮未接（{plan.route}）：{plan.reason}"
+            return outcome
         token = self._new_session()
         headers = {
             "Authorization": f"Bearer {token}",
             "X-Request-Id": f"req-{case_id}-bench",
             "Idempotency-Key": f"idem-{case_id}-bench",
         }
-        started = time.perf_counter()
-        status, payload = self.transport.post(self.planning_path, request.body, headers)
-        latency_ms = int((time.perf_counter() - started) * 1000)
 
-        outcome = CaseOutcome(case_id, group_id, BLOCKED, http_status=status, notes=list(request.notes))
-        outcome.measured_latency_ms = latency_ms
-        if status != 200:
-            issues = payload.get("issues") or []
-            codes = [str(item.get("code")) for item in issues if item.get("code")]
-            outcome.error = "上游拒绝或不可用：" + (", ".join(codes) or f"HTTP {status}")
+        payload: dict[str, Any] = {}
+        data: dict[str, Any] = {}
+        started = time.perf_counter()
+        for index, step in enumerate(plan.steps, 1):
+            body = step.body(payload) if callable(step.body) else step.body
+            status, payload = self.transport.post(step.path, body, headers)
+            outcome.http_status = status
+            if status != 200 and status != 201:
+                issues = payload.get("issues") or []
+                codes = [str(item.get("code")) for item in issues if item.get("code")]
+                outcome.error = f"上游不可用（第 {index} 步 {step.label}）：" + (", ".join(codes) or f"HTTP {status}")
+                outcome.measured_latency_ms = int((time.perf_counter() - started) * 1000)
+                return outcome
+            data = payload.get("data") or {}
+        outcome.measured_latency_ms = int((time.perf_counter() - started) * 1000)
+        if not data:
+            outcome.error = "上游返回了空 data"
             return outcome
 
-        data = payload.get("data") or {}
         usage = data.get("usage") or {}
         outcome.decision = data.get("decision")
         outcome.unknown_codes = unknown_codes(data)
@@ -363,7 +343,26 @@ class BenchmarkRunner:
     ) -> dict[str, Any]:
         cases = self.load_cases()
         if plan_only:
-            outcomes = [CaseOutcome(str(case.get("caseId")), str(case.get("groupId")), PLAN) for case in cases]
+            outcomes = []
+            for case in cases:
+                try:
+                    fixture = self.load_fixture(str(case.get("inputFixtureRef") or ""), repo_root)
+                    plan = build_plan(case, fixture, mode=self.mode, missing_outcome=self.missing_outcome)
+                    outcome = CaseOutcome(
+                        case_id=str(case.get("caseId")),
+                        group_id=str(case.get("groupId")),
+                        status=PLAN,
+                        route=plan.route,
+                        notes=[plan.reason, *plan.notes],
+                    )
+                except (UnsupportedCase, OSError, json.JSONDecodeError) as exc:
+                    outcome = CaseOutcome(
+                        case_id=str(case.get("caseId")),
+                        group_id=str(case.get("groupId")),
+                        status=PLAN,
+                        error=f"构造：{type(exc).__name__}: {exc}",
+                    )
+                outcomes.append(outcome)
         else:
             outcomes = [self.run_case(case, repo_root=repo_root) for case in cases]
         return {
@@ -403,7 +402,7 @@ class BenchmarkRunner:
         }
 
     def build_summary(self, outcomes: list[CaseOutcome]) -> dict[str, Any]:
-        """RunReport 装不下的东西放这里：分组等权分数、成本覆盖率、每例备注。
+        """RunReport 装不下的东西放这里：分组等权分数、成本覆盖率、路线分布、每例备注。
 
         协议要求「平均 token 不能把 unavailable 算零，报告有效样本覆盖率」，覆盖率只能放在这个文件里，
         因为 RunReport 的字段是固定的（additionalProperties=false）。
@@ -421,11 +420,15 @@ class BenchmarkRunner:
         with_input = sum(1 for outcome in outcomes if outcome.input_tokens is not None)
         with_output = sum(1 for outcome in outcomes if outcome.output_tokens is not None)
         status_counts: dict[str, int] = {}
+        route_counts: dict[str, int] = {}
         for outcome in outcomes:
             status_counts[outcome.status] = status_counts.get(outcome.status, 0) + 1
+            key = outcome.route or "unknown"
+            route_counts[key] = route_counts.get(key, 0) + 1
         return {
             "caseCount": total,
             "statusCounts": status_counts,
+            "routeCounts": route_counts,
             "groupMeans": group_means,
             "macroScore": macro,
             "macroComparable": comparable,
