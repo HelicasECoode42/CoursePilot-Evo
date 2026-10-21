@@ -15,21 +15,29 @@ public class VerificationController {
     private final AuditEvaluator auditEvaluator;
     private final TimeParser timeParser;
     private final ConflictChecker conflictChecker;
+    private final SubjectGuard subjects;
 
     public VerificationController(AuditEvaluator auditEvaluator,
                                   TimeParser timeParser,
-                                  ConflictChecker conflictChecker) {
+                                  ConflictChecker conflictChecker,
+                                  SubjectGuard subjects) {
         this.auditEvaluator = auditEvaluator;
         this.timeParser = timeParser;
         this.conflictChecker = conflictChecker;
+        this.subjects = subjects;
     }
 
+    /**
+     * 本地排查用的缺口查询。这里**不再**接受 studentId 查询参数：原先谁都能
+     * 传任意学号读别人的缺口，和 listAcademicRecords 是同一个越权面
+     * （b-verifier.md B-F6）。主体一律取 X-Subject-Id。
+     */
     @GetMapping("/credit-gap")
     public Envelope<AuditOutcome> creditGap(
         @RequestHeader(value = "X-Request-Id", required = false) String requestId,
-        @RequestParam String studentId,
+        @RequestHeader(value = "X-Subject-Id", required = false) String subjectId,
         @RequestParam String planId) {
-        AuditOutcome outcome = auditEvaluator.evaluate(studentId, planId);
+        AuditOutcome outcome = auditEvaluator.evaluate(subjects.require(subjectId), planId);
         return wrap(requestId, outcome, outcome.getStatus() == AuditOutcome.Status.UNKNOWN,
             String.join("；", outcome.getReasons()));
     }

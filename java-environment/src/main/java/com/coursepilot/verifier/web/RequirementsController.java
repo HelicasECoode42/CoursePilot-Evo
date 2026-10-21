@@ -20,15 +20,22 @@ import org.springframework.web.bind.annotation.RestController;
 public class RequirementsController {
 
     private final AuditResultAssembler assembler;
+    private final SubjectGuard subjects;
 
-    public RequirementsController(AuditResultAssembler assembler) {
+    public RequirementsController(AuditResultAssembler assembler, SubjectGuard subjects) {
         this.assembler = assembler;
+        this.subjects = subjects;
     }
 
     @PostMapping("/audit")
     public Envelope<AuditDtos.AuditResult> audit(
         @RequestHeader(value = "X-Request-Id", required = false) String requestId,
+        @RequestHeader(value = "X-Subject-Id", required = false) String subjectId,
         @RequestBody AuditDtos.AuditRequest request) {
+
+        // 先判归属再核对：请求体里的 academicRecordId 必须属于当前主体，
+        // 否则别人只要知道一个记录 ID 就能核对出对方的已修课程清单。
+        subjects.requireOwnRecord(subjectId, request.academicRecordId());
 
         AuditDtos.AuditResult result =
             assembler.assemble(request.curriculumSnapshotId(), request.academicRecordId());
