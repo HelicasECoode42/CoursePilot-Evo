@@ -1,3 +1,5 @@
-# System 1：Java Environment / Truth / Verifier（待实现）
+# System 1：Java Environment / Truth / Verifier
 
-Java 21、Spring Boot、Apache POI、Spring Data JPA、MySQL/Flyway、JUnit 5。首版处理通过自动校验门槛的培养计划和 `SYNTHETIC` 班次 fixture，提供课程/要求/学分/冲突算法/计划核验/偏好指标和 typed Tool API；面向学生没有真实班次时返回 UNKNOWN。按 `../docs/trd/a-data.md`、`../docs/trd/b-verifier.md` 与[实施方案](../docs/10-java-import-and-rules.md)开发，未来浏览器采集边界见 `../docs/09-browser-adapter.md`。
+Java 21、Spring Boot、Apache POI、Spring Data JPA、MySQL/Flyway、JUnit 5。当前仅 A 的 `.xlsx` 培养计划导入器有初始可运行实现；B 的持久化、事务发布、认证、核验与业务 API 尚未实现。导入器只生成 draft 和质量问题，通过 `PublishPort` 接入 B；不会自行保存或声称已发布。首版其余范围和真实班次限制按 `../docs/trd/a-data.md`、`../docs/trd/b-verifier.md` 与[实施方案](../docs/10-java-import-and-rules.md)。
+
+导入器使用说明见 [`importer/README.md`](importer/README.md)。
