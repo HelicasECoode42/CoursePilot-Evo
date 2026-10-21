@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Run module checks once a module has a build manifest."""
+import os
+import shutil
 import subprocess
 from pathlib import Path
 import sys
@@ -22,14 +24,21 @@ def main():
     if (java / 'pom.xml').exists():
         if not (java / 'mvnw').exists():
             raise RuntimeError('Java module requires Maven Wrapper')
-        run(['./mvnw', '-B', 'verify'], java)
+        if os.name == 'nt':
+            run(['cmd.exe', '/c', 'mvnw.cmd', '-B', 'verify'], java)
+        else:
+            run(['./mvnw', '-B', 'verify'], java)
     else:
         print('SKIP Java: no implementation manifest')
     for name in ['agent-runtime', 'evo-harness', 'benchmark', 'integration']:
         module = ROOT / name
         require_manifest(module, "pyproject.toml", {".py"})
         if (module / 'pyproject.toml').exists():
-            run([sys.executable, '-m', 'pip', 'install', '-e', '.[test]'], module)
+            uv = shutil.which('uv')
+            if uv:
+                run([uv, 'pip', 'install', '--python', sys.executable, '-e', '.[test]'], module)
+            else:
+                run([sys.executable, '-m', 'pip', 'install', '-e', '.[test]'], module)
             run([sys.executable, '-m', 'ruff', 'format', '--check', '.'], module)
             run([sys.executable, '-m', 'ruff', 'check', '.'], module)
             run([sys.executable, '-m', 'pytest', '-q'], module)
@@ -40,9 +49,10 @@ def main():
     if (web / 'package.json').exists():
         if not (web / 'package-lock.json').exists():
             raise RuntimeError('Web module requires package-lock.json for npm ci')
-        run(['npm', 'ci'], web)
+        npm = ['cmd.exe', '/c', 'npm.cmd'] if os.name == 'nt' else ['npm']
+        run([*npm, 'ci'], web)
         for name in ['lint', 'typecheck', 'test:unit', 'build']:
-            run(['npm', 'run', name], web)
+            run([*npm, 'run', name], web)
     else:
         print('SKIP Web: no implementation manifest')
 
