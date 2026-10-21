@@ -45,6 +45,22 @@ python benchmark/run_benchmark.py --manifest benchmark/manifests/example.json \
 输出（默认 `runs/benchmark/<runId>/`）：`run-manifest.json`、`cases.jsonl`、`run-report.json`、`summary.json`。
 `RunReport` 字段固定（`additionalProperties=false`），所以分组等权分数、覆盖率、matcher 名、held-out 状态写在 `summary.json`。
 
+### 判据怎么判（分层）
+
+`scoring/judge.py` 把判据分成三层判，跑基线时用的是它，不是纯文本匹配：
+
+| 层 | 判哪些 | 口径 |
+| --- | --- | --- |
+| structured | 必须未知、必须反问 | 对答案的 `unknowns` / `clarification` 字段判，不看整段文本 |
+| text | 必须答到的事实、不许说的结论 | 全文匹配；默认 `keyword_matcher` 占位基线 |
+| unwired | 引用核验 | 没有 JavaVerifier 时记 `unwired`，既不算通过也不判 blocked |
+
+「不许说的结论」另有一条启发式：命中句如果全是"无法判断／是否／未知"这类不确定措辞，不算违反，
+否则正确答案说「全英语要求是否满足无法判断」会被误判成「声称已满足」。这条的已知风险是：
+答案用"未满足"下断言时仍算命中，但同一段里若夹带不确定措辞可能被放过，复核时要抽查。
+
+`summary.json` 会报 `claimModes` 与 `textShare`：文本判占比越高，这份分数越不能当语义正确率读。
+
 当前限制
 
 * 语义匹配仍是 `scoring/scorer.py` 的 `keyword_matcher` 占位基线，分数偏低不代表模型差；接 C 的匹配器后应换掉。
