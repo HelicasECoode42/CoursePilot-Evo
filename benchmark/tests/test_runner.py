@@ -72,6 +72,9 @@ class FakeTransport:
         self.calls.append((path, body, headers))
         if path.endswith("/sessions"):
             return 201, {"data": {"sessionToken": "token-1"}}
+        if path.endswith("/academic-records"):
+            # 落记录不受被测行为影响，固定回一条 id，让用例只关心目标端点的响应。
+            return 201, envelope({"academicRecordId": "record:1"})
         status, payload = self.planning.pop(0)
         return status, payload
 
@@ -167,12 +170,24 @@ def test_planning_body_uses_fixture_intent() -> None:
     assert any("intent 取 fixture" in note for note in request.notes)
 
 
-def test_planning_body_missing_record_uses_placeholder() -> None:
+def test_planning_body_without_record_leaves_id_empty() -> None:
+    """契约的 academicRecordId 必填，适配层不能编一个占位字符串，只能让上层先落空记录。"""
     case = {"caseId": "G2-001", "groupId": "G2", "curriculumSnapshotId": "3c405feaa6d7"}
     fixture = {"intent": {"motives": ["SCHEDULE"]}, "academicRecordId": None}
     request = planning_body(case, fixture)
-    assert request.body["academicRecordId"] == "rec-not-provided"
-    assert any("占位符" in note for note in request.notes)
+    assert request.body["academicRecordId"] is None
+    assert any("空记录" in note for note in request.notes)
+
+
+def test_planning_without_record_prepends_empty_record_step() -> None:
+    from case_adapters import build_plan
+
+    case = {"caseId": "G2-001", "groupId": "G2", "curriculumSnapshotId": "3c405feaa6d7"}
+    fixture = {"intent": {"motives": ["SCHEDULE"]}, "academicRecordId": None}
+    plan = build_plan(case, fixture)
+    assert [step.path for step in plan.steps] == ["/api/v1/academic-records", "/api/v1/planning"]
+    assert plan.steps[0].body["transcriptComplete"] is False
+    assert plan.steps[0].body["completedCourses"] == []
 
 
 def test_desired_courses_become_pin_course() -> None:
@@ -193,9 +208,23 @@ def test_course_code_outside_contract_charset_is_unsupported() -> None:
         planning_body(case, fixture)
 
 
-def test_fixture_without_intent_or_courses_is_unsupported() -> None:
+def test_fixture_with_only_record_keys_goes_audit_route() -> None:
+    """缺资料类题面（G4-001）不是构造失败：落一条空记录再核查，让系统自己答未知。"""
+    from case_adapters import build_plan
+
+    plan = build_plan(
+        {"caseId": "G4-001", "groupId": "G4", "curriculumSnapshotId": "3c405feaa6d7"},
+        {"academicRecordId": None, "completedCourses": None},
+    )
+    assert plan.route == "AUDIT"
+    assert plan.steps[0].body["completedCourses"] == []
+
+
+def test_empty_fixture_is_unsupported() -> None:
+    from case_adapters import build_plan
+
     with pytest.raises(UnsupportedCase):
-        planning_body({"caseId": "G1-001"}, {"academicRecordId": None, "completedCourses": None})
+        build_plan({"caseId": "GX-001", "groupId": "GX"}, {})
 
 
 def test_answer_text_collects_structured_fields() -> None:
@@ -302,3 +331,97 @@ def test_write_outputs_writes_one_line_per_case(tmp_path: Path) -> None:
     assert len(lines) == 1
     assert json.loads(lines[0])["caseId"] == "G2-001"
     assert json.loads(paths["report"].read_text(encoding="utf-8"))["decision"] == "BASELINE"
+
+
+# -- 核查路线（academic-records + requirements/audit）----------------------
+def write_audit_case(tmp_path: Path) -> Path:
+    cases = tmp_path / "audit_cases"
+    cases.mkdir(exist_ok=True)
+    (cases / "G1-001.json").write_text(
+        json.dumps(
+            {
+                "caseId": "G1-001",
+                "groupId": "G1",
+                "curriculumSnapshotId": "3c405feaa6d7",
+                "inputFixtureRef": "audit_fixtures/G1-001.json",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    fixtures = tmp_path / "audit_fixtures"
+    fixtures.mkdir(exist_ok=True)
+    (fixtures / "G1-001.json").write_text(
+        json.dumps(
+            {
+                "promptText": "我还差多少学分",
+                "completedCourses": [{"courseCode": "08305011", "credits": 5.0, "termIndex": 1}],
+                "transcriptComplete": True,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return cases
+
+
+AUDIT_DATA = {
+    "curriculumSnapshotId": "3c405feaa6d7",
+    "academicRecordId": "record:1",
+    "recordRevision": 1,
+    "transcriptComplete": True,
+    "requirements": [
+        {
+            "requirementId": "req:1",
+            "courseCodes": ["08305011"],
+            "requiredCredits": 4,
+            "earnedCredits": 2,
+            "gapCredits": 2,
+            "state": "UNSATISFIED",
+            "sourceRefIds": ["cs2024-s1-A49"],
+        }
+    ],
+    "suggestedCourseCodes": [],
+    "unknowns": [{"code": "OFFERING_UNAVAILABLE", "message": "本学期班次不可核验"}],
+}
+
+
+def test_audit_route_runs_two_steps(tmp_path: Path) -> None:
+    cases = write_audit_case(tmp_path)
+    gold = tmp_path / "gold_audit"
+    gold.mkdir()
+    (gold / "G1-001.json").write_text(json.dumps(GOLD, ensure_ascii=False), encoding="utf-8")
+    transport = FakeTransport([(200, envelope(AUDIT_DATA))])
+    runner = BenchmarkRunner(transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts")
+    outcome = runner.run_case({"caseId": "G1-001", "groupId": "G1", "inputFixtureRef": "audit_fixtures/G1-001.json"})
+    assert outcome.route == "AUDIT"
+    assert outcome.status in (PASS, DEGRADED, FAIL)
+    paths = [call[0] for call in transport.calls]
+    assert paths[1].endswith("/academic-records")
+    assert paths[2].endswith("/requirements/audit")
+    assert transport.calls[2][1]["academicRecordId"] == "record:1"
+
+
+def test_audit_second_step_failure_names_the_step(tmp_path: Path) -> None:
+    cases = write_audit_case(tmp_path)
+    gold = tmp_path / "gold_audit"
+    gold.mkdir()
+    (gold / "G1-001.json").write_text(json.dumps(GOLD, ensure_ascii=False), encoding="utf-8")
+    transport = FakeTransport([(503, {"issues": [{"code": "TOOL_UNAVAILABLE"}]})])
+    runner = BenchmarkRunner(transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts")
+    outcome = runner.run_case({"caseId": "G1-001", "groupId": "G1", "inputFixtureRef": "audit_fixtures/G1-001.json"})
+    assert outcome.status == BLOCKED
+    assert "第 2 步" in (outcome.error or "")
+    assert "TOOL_UNAVAILABLE" in (outcome.error or "")
+
+
+def test_audit_body_records_outcome_assumption(tmp_path: Path) -> None:
+    cases = write_audit_case(tmp_path)
+    runner = BenchmarkRunner(FakeTransport([]), cases_root=cases, gold_root=tmp_path, contracts_root=ROOT / "contracts")
+    fixture = runner.load_fixture("audit_fixtures/G1-001.json", tmp_path)
+    from case_adapters import build_plan
+
+    plan = build_plan({"caseId": "G1-001", "groupId": "G1", "curriculumSnapshotId": "3c405feaa6d7"}, fixture)
+    body = plan.steps[0].body
+    assert body["completedCourses"][0]["outcome"] == "PASSED"
+    assert any("折算" in note for note in plan.notes)

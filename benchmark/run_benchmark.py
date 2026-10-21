@@ -49,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", default="SIMULATION", choices=("SIMULATION", "REAL"))
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--plan", action="store_true", help="只列用例与判定计划，不连服务")
+    parser.add_argument(
+        "--missing-outcome",
+        default="PASSED",
+        choices=("PASSED", "FAILED", "IN_PROGRESS", "UNKNOWN"),
+        help="fixture 未写 outcome 时按什么折算（会写进逐例备注）",
+    )
     return parser
 
 
@@ -73,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         gold_root=Path(args.gold_root),
         contracts_root=REPO_ROOT / "contracts",
         mode=args.mode,
+        missing_outcome=args.missing_outcome,
     )
     result = runner.run(manifest, repo_root=REPO_ROOT, plan_only=args.plan)
 
@@ -80,13 +87,14 @@ def main(argv: list[str] | None = None) -> int:
     paths = runner.write_outputs(result, out_dir)
 
     summary = result["summary"]
-    print(f"{'用例':<10}{'组':<5}{'判定':<10}说明")
-    print("-" * 78)
+    print(f"{'用例':<10}{'组':<5}{'路线':<9}{'判定':<10}说明")
+    print("-" * 86)
     for outcome in result["outcomes"]:
         note = outcome.error or ", ".join(outcome.placeholders) or ", ".join(outcome.notes[:1]) or ""
-        print(f"{outcome.case_id:<10}{outcome.group_id:<5}{outcome.status:<10}{note[:44]}")
+        print(f"{outcome.case_id:<10}{outcome.group_id:<5}{outcome.route or '-':<9}{outcome.status:<10}{note[:40]}")
     print("-" * 78)
     print(f"用例数 {summary['caseCount']}，判定分布 {summary['statusCounts']}")
+    print(f"路线分布 {summary['routeCounts']}")
     print(f"分组均值 {summary['groupMeans']}，宏平均 {summary['macroScore']}")
     if not summary["macroComparable"]:
         print(
