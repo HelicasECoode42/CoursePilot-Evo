@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApiClient } from "./index";
 import { ApiFailure, HttpApiClient } from "./client";
+import type { PlanningRequest } from "../contracts";
 
 function envelope(status: string, data: unknown, issues: unknown[] = []) {
   return {
@@ -305,5 +306,302 @@ describe("HTTP API client", () => {
     await expect(fixtureClient.createSession()).resolves.toMatchObject({
       sessionId: "fixture-session-e1",
     });
+  });
+
+  it("gives the planning request a timeout longer than the 45s server budget", async () => {
+    // C 的 Budget.deadline_ms 是 45000。页面若沿用默认 8 秒，真实规划会被自己掐断，
+    // 而且症状看起来像后端太慢。这里断言规划请求用的是更长的超时。
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi
+        .fn()
+        .mockResolvedValueOnce(response(201, envelope("OK", session)))
+        .mockImplementationOnce(() => new Promise(() => {}));
+      const client = new HttpApiClient("http://127.0.0.1:8000", fetcher);
+      await client.createSession();
+      void client.submitPlanning(planningRequest, "key-1").catch(() => {});
+      await Promise.resolve();
+
+      const [, planningOptions] = fetcher.mock.calls[1] as [
+        string,
+        RequestInit,
+      ];
+
+      // 默认超时是 8 秒：走到 9 秒还没被掐断，说明规划请求没有沿用默认值。
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(planningOptions.signal?.aborted).toBe(false);
+
+      // 服务端预算 45 秒：走到 46 秒仍未被掐断，正常规划才不会被页面自己截断。
+      await vi.advanceTimersByTimeAsync(37_000);
+      expect(planningOptions.signal?.aborted).toBe(false);
+
+      // 但也不是永不超时。
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(planningOptions.signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("treats a business UNKNOWN envelope as success, not as an error", async () => {
+    // docs/04：成功响应是「成功或业务 UNKNOWN」。UNKNOWN 是数据缺失不是查询失败，
+    // 页面要照常读 data 再按未知展示。
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(response(201, envelope("UNKNOWN", session)));
+    const client = new HttpApiClient("http://127.0.0.1:8000", fetcher);
+    await expect(client.createSession()).resolves.toMatchObject({
+      sessionId: session.sessionId,
+    });
+  });
+
+  it("calls fetch with a global this so a browser native fetch is not rejected", async () => {
+    // 浏览器的 window.fetch 会校验调用时的 this 必须是 window，否则抛
+    // TypeError: Illegal invocation。Node 的 fetch 和 vi.fn() 都不做这个校验，
+    // 所以这里用一个会自行检查 this 的假 fetch 来重建浏览器的行为；否则这类
+    // 回归在 Node 下永远测不出来。
+    const seenThis: unknown[] = [];
+    const nativeLike = function (this: unknown) {
+      seenThis.push(this);
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError(
+          "Failed to execute 'fetch' on 'Window': Illegal invocation",
+        );
+      }
+      return Promise.resolve(response(201, envelope("OK", session)));
+    } as unknown as typeof fetch;
+
+    const client = new HttpApiClient("http://127.0.0.1:8000", nativeLike);
+
+    await expect(client.createSession()).resolves.toMatchObject({
+      sessionId: session.sessionId,
+    });
+    expect(seenThis).toHaveLength(1);
+    expect(seenThis[0]).toBe(globalThis);
+  });
+
+  it("defaults to the global fetch rather than an unbound reference", async () => {
+    const original = globalThis.fetch;
+    const calls: unknown[] = [];
+    globalThis.fetch = function (this: unknown) {
+      calls.push(this);
+      return Promise.resolve(response(201, envelope("OK", session)));
+    } as unknown as typeof fetch;
+    try {
+      const client = new HttpApiClient("http://127.0.0.1:8000");
+      await expect(client.createSession()).resolves.toMatchObject({
+        sessionId: session.sessionId,
+      });
+      expect(calls[0]).toBe(globalThis);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+const record = {
+  academicRecordId: "record-1",
+  revision: 1,
+  curriculumSnapshotId: "curriculum-2026",
+  completedCourses: [],
+  transcriptComplete: false,
+  sourceKind: "USER_IMPORT",
+  createdAt: "2026-10-01T00:00:00Z",
+};
+
+const audit = {
+  curriculumSnapshotId: "curriculum-2026",
+  academicRecordId: "record-1",
+  recordRevision: 1,
+  transcriptComplete: false,
+  requirements: [],
+  suggestedCourseCodes: [],
+  unknowns: [],
+};
+
+const answer = {
+  taskId: "task-1",
+  traceId: "trace-1",
+  decision: "UNABLE_TO_VERIFY",
+  academicAudit: audit,
+  recommendations: [],
+  clarification: null,
+  unknowns: [],
+  usage: { inputTokens: null, outputTokens: null, toolCalls: 0, elapsedMs: 5 },
+};
+
+const planningRequest: PlanningRequest = {
+  schemaVersion: "1.0",
+  curriculumSnapshotId: "curriculum-2026",
+  offeringSnapshotId: null,
+  academicRecordId: "record-1",
+  mode: "REAL",
+  promptText: "",
+  intent: {
+    motives: ["GPA"],
+    priorityOrder: ["GPA"],
+    hardConstraints: [],
+    softPreferences: [],
+    pinnedTeacherCoursePairs: [],
+    interestTags: [],
+    careerDirectionIds: [],
+  },
+  previousPlanId: null,
+};
+
+async function authedClient(fetcher: ReturnType<typeof vi.fn>) {
+  const client = new HttpApiClient("http://127.0.0.1:8000", fetcher);
+  await client.createSession();
+  return client;
+}
+
+describe("HTTP API client · E2 academic records, audit and planning", () => {
+  it("treats an empty session record list as a normal state, not an error", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValue(response(200, envelope("OK", { items: [] })));
+    const client = await authedClient(fetcher);
+
+    await expect(client.listSessionRecords()).resolves.toEqual({ items: [] });
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/academic-records");
+    expect(options.method).toBe("GET");
+    expect((options.headers as Headers).get("Authorization")).toBe(
+      `Bearer ${session.sessionToken}`,
+    );
+    expect((options.headers as Headers).get("Idempotency-Key")).toBeNull();
+  });
+
+  it("returns session records and rejects ones that break the contract", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValue(response(200, envelope("OK", { items: [record] })));
+    const client = await authedClient(fetcher);
+    await expect(client.listSessionRecords()).resolves.toEqual({
+      items: [record],
+    });
+
+    const badFetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValue(
+        response(200, envelope("OK", { items: [{ ...record, revision: 0 }] })),
+      );
+    const badClient = await authedClient(badFetcher);
+    await expect(badClient.listSessionRecords()).rejects.toMatchObject({
+      kind: "invalid_response",
+    });
+  });
+
+  it("saves a record with an Idempotency-Key and returns the server-issued id", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValue(response(201, envelope("OK", record)));
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.saveSessionRecord(
+        {
+          schemaVersion: "1.0",
+          curriculumSnapshotId: "curriculum-2026",
+          completedCourses: [],
+          transcriptComplete: false,
+          sourceKind: "USER_IMPORT",
+        },
+        "key-record-1",
+      ),
+    ).resolves.toMatchObject({ academicRecordId: "record-1" });
+
+    const [, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(options.method).toBe("POST");
+    expect((options.headers as Headers).get("Idempotency-Key")).toBe(
+      "key-record-1",
+    );
+    expect(JSON.parse(String(options.body))).toMatchObject({
+      schemaVersion: "1.0",
+      curriculumSnapshotId: "curriculum-2026",
+    });
+  });
+
+  it("posts the documented AuditRequest shape", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValue(response(200, envelope("OK", audit)));
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.auditRequirements("curriculum-2026", "record-1"),
+    ).resolves.toMatchObject({ academicRecordId: "record-1" });
+
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/requirements/audit");
+    expect(JSON.parse(String(options.body))).toEqual({
+      schemaVersion: "1.0",
+      curriculumSnapshotId: "curriculum-2026",
+      academicRecordId: "record-1",
+    });
+  });
+
+  it("submits planning with an Idempotency-Key and passes the decision through unchanged", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValue(response(200, envelope("OK", answer)));
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.submitPlanning(planningRequest, "key-plan-1"),
+    ).resolves.toMatchObject({ decision: "UNABLE_TO_VERIFY" });
+
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/planning");
+    expect((options.headers as Headers).get("Idempotency-Key")).toBe(
+      "key-plan-1",
+    );
+    expect(JSON.parse(String(options.body))).toMatchObject({
+      academicRecordId: "record-1",
+      mode: "REAL",
+    });
+  });
+
+  it("surfaces a planning conflict as a non-retryable http failure", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValue(
+        response(
+          409,
+          envelope("CONFLICT", {}, [
+            {
+              code: "REQUEST_IN_PROGRESS",
+              message: "同一请求仍在执行",
+              field: "Idempotency-Key",
+              retryable: true,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.submitPlanning(planningRequest, "key-plan-2"),
+    ).rejects.toMatchObject({ kind: "http", status: 409 });
+  });
+
+  it("refuses to call E2 endpoints before a session exists", async () => {
+    const fetcher = vi.fn();
+    const client = new HttpApiClient("http://127.0.0.1:8000", fetcher);
+    await expect(client.listSessionRecords()).rejects.toMatchObject({
+      status: 401,
+      code: "UNAUTHORIZED",
+    });
+    await expect(
+      client.submitPlanning(planningRequest, "key-plan-3"),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

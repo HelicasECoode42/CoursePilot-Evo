@@ -1,6 +1,14 @@
 import { createPinia, disposePinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SnapshotSummary } from "../contracts";
+import type {
+  AcademicRecord,
+  AcademicRecordInput,
+  AuditResult,
+  CompletedCourse,
+  PlanningAnswer,
+  PlanningRequest,
+  SnapshotSummary,
+} from "../contracts";
 import { ApiFailure, type CoursePilotApiClient } from "../api/client";
 import { createPlanningStore } from "./planning";
 
@@ -31,6 +39,30 @@ function fakeClient(
     })),
     clearSession: vi.fn(),
     fixtureAcademicRecordId: vi.fn(() => null),
+    listSessionRecords: vi.fn(async () => ({ items: [] })),
+    saveSessionRecord: vi.fn(async (input) => ({
+      academicRecordId: "record-1",
+      revision: 1,
+      curriculumSnapshotId: input.curriculumSnapshotId,
+      completedCourses: input.completedCourses,
+      transcriptComplete: input.transcriptComplete,
+      sourceKind: input.sourceKind,
+      createdAt: "2026-10-01T00:00:00Z",
+    })),
+    auditRequirements: vi.fn(
+      async (curriculumSnapshotId, academicRecordId) => ({
+        curriculumSnapshotId,
+        academicRecordId,
+        recordRevision: 1,
+        transcriptComplete: false,
+        requirements: [],
+        suggestedCourseCodes: [],
+        unknowns: [],
+      }),
+    ),
+    submitPlanning: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现规划", "invalid_response");
+    }),
     ...overrides,
   };
 }
@@ -507,5 +539,365 @@ describe("planning session store", () => {
       expect(store.planningHandoff).toBeNull();
       expect(store.handoffMissing).toEqual([]);
     }
+  });
+
+  describe("submitPlan", () => {
+    const answer: PlanningAnswer = {
+      taskId: "task-1",
+      traceId: "trace-1",
+      decision: "UNABLE_TO_VERIFY",
+      academicAudit: {
+        curriculumSnapshotId: "curriculum-1",
+        academicRecordId: "record-1",
+        recordRevision: 1,
+        transcriptComplete: false,
+        requirements: [],
+        suggestedCourseCodes: [],
+        unknowns: [],
+      },
+      recommendations: [],
+      clarification: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 1,
+      },
+    };
+
+    /** Ready session + verified curriculum + complete answers + a record id. */
+    function submittableStore(overrides: Partial<CoursePilotApiClient> = {}) {
+      const client = fakeClient({
+        fixtureAcademicRecordId: vi.fn(() => "record-1"),
+        ...overrides,
+      });
+      const store = createPlanningStore(client)();
+      store.$patch({
+        sessionStatus: "ready",
+        sessionId: "real-session",
+        expiresAt: "2099-01-01T00:00:00Z",
+        curricula: [curriculum],
+        selectedCurriculumId: curriculum.snapshotId,
+        draft: {
+          ...store.draft,
+          motives: ["GPA"],
+          priorityOrder: ["GPA"],
+          classPreferencesReviewed: true,
+          prioritiesConfirmed: true,
+          mustReviewed: true,
+          preferReviewed: true,
+        },
+      });
+      return store;
+    }
+
+    /** 记录每次提交的请求与幂等键，供断言使用。 */
+    function recordingSubmitter() {
+      const calls: Array<{ request: PlanningRequest; key: string }> = [];
+      const mock = vi.fn(async (request: PlanningRequest, key: string) => {
+        calls.push({ request, key });
+        return answer;
+      });
+      return { mock, calls };
+    }
+
+    it("submits the built request once and keeps the answer", async () => {
+      const { mock, calls } = recordingSubmitter();
+      const store = submittableStore({ submitPlanning: mock });
+
+      await store.submitPlan();
+
+      expect(mock).toHaveBeenCalledTimes(1);
+      expect(calls[0].request.mode).toBe("REAL");
+      expect(calls[0].request.academicRecordId).toBe("record-1");
+      expect(calls[0].key).toMatch(/^web-[A-Za-z0-9]+$/);
+      expect(store.submitStatus).toBe("ready");
+      expect(store.planningResult).toEqual(answer);
+    });
+
+    it("ignores a repeated click while a submission is in flight", async () => {
+      const pending = deferred<PlanningAnswer>();
+      const submitPlanning = vi.fn(() => pending.promise);
+      const store = submittableStore({ submitPlanning });
+
+      const inFlight = store.submitPlan();
+      await store.submitPlan();
+      expect(submitPlanning).toHaveBeenCalledTimes(1);
+      expect(store.submitStatus).toBe("submitting");
+
+      pending.resolve(answer);
+      await inFlight;
+      expect(store.submitStatus).toBe("ready");
+    });
+
+    it("submits nothing while required context is missing", async () => {
+      const submitPlanning = vi.fn();
+      const store = createPlanningStore(fakeClient({ submitPlanning }))();
+
+      await store.submitPlan();
+
+      expect(submitPlanning).not.toHaveBeenCalled();
+      expect(store.planningHandoff).toBeNull();
+      expect(store.submitStatus).toBe("idle");
+    });
+
+    it("reuses the idempotency key on retry and rotates it after a change", async () => {
+      const { mock, calls } = recordingSubmitter();
+      const store = submittableStore({ submitPlanning: mock });
+
+      await store.submitPlan();
+      await store.submitPlan();
+      expect(calls[1].key).toBe(calls[0].key);
+
+      store.updateDraft("careerText", "改成数据方向");
+      await store.submitPlan();
+      expect(calls[2].key).not.toBe(calls[0].key);
+    });
+
+    it("discards a late answer once the student changes a condition", async () => {
+      const pending = deferred<PlanningAnswer>();
+      const submitPlanning = vi.fn(() => pending.promise);
+      const store = submittableStore({ submitPlanning });
+
+      const inFlight = store.submitPlan();
+      store.updateDraft("careerText", "换一个方向");
+      pending.resolve(answer);
+      await inFlight;
+
+      expect(store.planningResult).toBeNull();
+      expect(store.submitStatus).toBe("idle");
+    });
+
+    it("surfaces a failed submission without keeping a stale answer", async () => {
+      const submitPlanning = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiFailure(
+            "服务暂时不可用，请稍后重试。",
+            "http",
+            503,
+            null,
+            true,
+          ),
+        );
+      const store = submittableStore({ submitPlanning });
+
+      await store.submitPlan();
+
+      expect(store.submitStatus).toBe("error");
+      expect(store.submitError).toContain("稍后重试");
+      expect(store.planningResult).toBeNull();
+    });
+
+    it("expires the session when planning answers 401", async () => {
+      const submitPlanning = vi
+        .fn()
+        .mockRejectedValue(
+          new ApiFailure("会话不存在或已过期", "http", 401, "UNAUTHORIZED"),
+        );
+      const store = submittableStore({ submitPlanning });
+
+      await store.submitPlan();
+
+      expect(store.sessionStatus).toBe("expired");
+      expect(store.planningResult).toBeNull();
+    });
+  });
+
+  describe("academic records and audit", () => {
+    const savedRecord: AcademicRecord = {
+      academicRecordId: "record-1",
+      revision: 1,
+      curriculumSnapshotId: curriculum.snapshotId,
+      completedCourses: [],
+      transcriptComplete: false,
+      sourceKind: "USER_IMPORT",
+      createdAt: "2026-10-01T00:00:00Z",
+    };
+
+    const auditResult: AuditResult = {
+      curriculumSnapshotId: curriculum.snapshotId,
+      academicRecordId: "record-1",
+      recordRevision: 1,
+      transcriptComplete: false,
+      requirements: [
+        {
+          requirementId: "req:major-core",
+          courseCodes: ["CS101"],
+          requiredCredits: 4,
+          earnedCredits: 4,
+          gapCredits: 0,
+          state: "SATISFIED",
+          sourceRefIds: [],
+        },
+        {
+          requirementId: "req:physics",
+          courseCodes: ["PHYS110"],
+          requiredCredits: 3,
+          earnedCredits: null,
+          gapCredits: null,
+          state: "UNKNOWN",
+          sourceRefIds: [],
+        },
+      ],
+      suggestedCourseCodes: [],
+      unknowns: [],
+    };
+
+    function readyStore(overrides: Partial<CoursePilotApiClient> = {}) {
+      const client = fakeClient(overrides);
+      const store = createPlanningStore(client)();
+      store.$patch({
+        sessionStatus: "ready",
+        sessionId: "real-session",
+        expiresAt: "2099-01-01T00:00:00Z",
+        curricula: [curriculum],
+        selectedCurriculumId: curriculum.snapshotId,
+      });
+      return { client, store };
+    }
+
+    /** 一份答完的问卷，用来让 preparePlanningHandoff 真的能产出请求。 */
+    function answerEveryQuestion(
+      store: ReturnType<typeof readyStore>["store"],
+    ) {
+      store.$patch({
+        draft: {
+          ...store.draft,
+          motives: ["GPA"],
+          priorityOrder: ["GPA"],
+          classPreferencesReviewed: true,
+          prioritiesConfirmed: true,
+          mustReviewed: true,
+          preferReviewed: true,
+        },
+      });
+    }
+
+    it("treats an empty record list as ready, not as a failure", async () => {
+      const { store } = readyStore();
+
+      await store.loadRecords();
+
+      expect(store.recordsStatus).toBe("ready");
+      expect(store.records).toEqual([]);
+      expect(store.recordsError).toBe("");
+      expect(store.selectedRecord).toBeNull();
+    });
+
+    it("selects the first record returned for this session", async () => {
+      const { store } = readyStore({
+        listSessionRecords: vi.fn(async () => ({ items: [savedRecord] })),
+      });
+
+      await store.loadRecords();
+
+      expect(store.selectedRecordId).toBe("record-1");
+      expect(store.selectedRecord?.revision).toBe(1);
+    });
+
+    it("expires the session when the record list answers 401", async () => {
+      const { store } = readyStore({
+        listSessionRecords: vi
+          .fn()
+          .mockRejectedValue(
+            new ApiFailure("会话不存在或已过期", "http", 401, "UNAUTHORIZED"),
+          ),
+      });
+
+      await store.loadRecords();
+
+      expect(store.sessionStatus).toBe("expired");
+      expect(store.records).toEqual([]);
+    });
+
+    it("saves a new record and makes it the selected one", async () => {
+      const courses: CompletedCourse[] = [
+        {
+          courseCode: "CS101",
+          earnedCredits: 4,
+          outcome: "PASSED",
+          completedTerm: "2024-2025-1",
+        },
+      ];
+      const saveSessionRecord = vi.fn<
+        (input: AcademicRecordInput, key: string) => Promise<AcademicRecord>
+      >(async () => savedRecord);
+      const { store } = readyStore({ saveSessionRecord });
+
+      await expect(store.saveRecord(courses, false)).resolves.toBe(true);
+
+      expect(saveSessionRecord).toHaveBeenCalledTimes(1);
+      const [input, key] = saveSessionRecord.mock.calls[0];
+      expect(input.sourceKind).toBe("USER_IMPORT");
+      expect(input.completedCourses).toEqual(courses);
+      expect(key).toMatch(/^web-[A-Za-z0-9]+$/);
+      expect(store.selectedRecordId).toBe("record-1");
+      expect(store.recordsStatus).toBe("ready");
+    });
+
+    it("ignores selecting a record that is not in this session", () => {
+      const { store } = readyStore();
+      store.$patch({ records: [savedRecord], selectedRecordId: "record-1" });
+
+      store.selectRecord("record-other");
+
+      expect(store.selectedRecordId).toBe("record-1");
+    });
+
+    it("refuses to audit without a selected record", async () => {
+      const auditRequirements = vi.fn();
+      const { store } = readyStore({ auditRequirements });
+
+      await store.runAudit();
+
+      expect(auditRequirements).not.toHaveBeenCalled();
+      expect(store.auditStatus).toBe("error");
+      expect(store.auditError).toContain("请先选择");
+    });
+
+    it("keeps the audit result and drops the previous handoff", async () => {
+      const { store } = readyStore({
+        listSessionRecords: vi.fn(async () => ({ items: [savedRecord] })),
+        auditRequirements: vi.fn(async () => auditResult),
+      });
+      await store.loadRecords();
+      answerEveryQuestion(store);
+      store.preparePlanningHandoff();
+      const before = store.planningHandoff;
+
+      await store.runAudit();
+
+      expect(before).not.toBeNull();
+      expect(store.auditStatus).toBe("ready");
+      expect(store.audit?.requirements).toHaveLength(2);
+      expect(store.planningHandoff).toBeNull();
+    });
+
+    it("feeds the real record id into the planning request", async () => {
+      const { store } = readyStore({
+        listSessionRecords: vi.fn(async () => ({ items: [savedRecord] })),
+      });
+      answerEveryQuestion(store);
+      await store.loadRecords();
+
+      expect(store.preparePlanningHandoff()).toMatchObject({ ok: true });
+      expect(store.planningHandoff?.academicRecordId).toBe("record-1");
+    });
+
+    it("drops records when the curriculum changes", async () => {
+      const { store } = readyStore({
+        listSessionRecords: vi.fn(async () => ({ items: [savedRecord] })),
+      });
+      await store.loadRecords();
+      expect(store.records).toHaveLength(1);
+
+      store.chooseCurriculum(curriculum.snapshotId);
+
+      expect(store.records).toEqual([]);
+      expect(store.selectedRecordId).toBeNull();
+      expect(store.audit).toBeNull();
+    });
   });
 });
