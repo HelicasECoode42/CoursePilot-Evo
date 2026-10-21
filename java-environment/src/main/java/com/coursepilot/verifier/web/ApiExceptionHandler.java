@@ -60,8 +60,8 @@ public class ApiExceptionHandler {
     }
 
     /** 身份头缺失或格式不合法，例如没有 X-Subject-Id */
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Envelope<Void>> badSubject(IllegalArgumentException ex) {
+    @ExceptionHandler(InvalidSubject.class)
+    public ResponseEntity<Envelope<Void>> badSubject(InvalidSubject ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
             .body(Envelope.error(null, "INVALID_SUBJECT", ex.getMessage(), "X-Subject-Id", false));
     }

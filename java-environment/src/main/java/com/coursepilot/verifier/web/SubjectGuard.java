@@ -24,7 +24,7 @@ public class SubjectGuard {
     /** 取出并校验主体标识；缺失或格式不合法都是 400，不往下走。 */
     public String require(String subjectId) {
         if (subjectId == null || !SUBJECT_ID.matcher(subjectId).matches()) {
-            throw new IllegalArgumentException("X-Subject-Id 缺失或格式不合法");
+            throw new InvalidSubject("X-Subject-Id 缺失或格式不合法");
         }
         return subjectId;
     }

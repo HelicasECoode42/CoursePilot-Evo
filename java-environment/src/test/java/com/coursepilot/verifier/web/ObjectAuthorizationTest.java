@@ -2,6 +2,8 @@ package com.coursepilot.verifier.web;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -137,6 +139,49 @@ class ObjectAuthorizationTest {
             .andExpect(status().isOk())
             .andExpect(content().string(org.hamcrest.Matchers.not(
                 org.hamcrest.Matchers.containsString("\"studentId\""))));
+    }
+
+    /**
+     * 路径写法差异不能绕过密钥校验。
+     *
+     * 这组是真实故障的回归：早先 ServiceKeyFilter 用
+     * getRequestURI().startsWith("/api/v1/") 决定要不要校验，而
+     * /api/v1;x=1/courses 的原始路径带着分号后的矩阵变量，不匹配前缀于是
+     * 跳过校验，Spring 的路径匹配却会剥掉这段照样路由到控制器。结果不带
+     * 密钥、只自报 X-Subject-Id 就能读到任意主体的缺口与完整核对结果。
+     *
+     * 现在过滤器不按路径开豁免口，这些写法一律 401。
+     */
+    @ParameterizedTest(name = "[{index}] {0} 必须 401")
+    @ValueSource(strings = {
+        "/api/v1/courses",
+        "/api/v1;x=1/courses",
+        "/api/v1;x=1/academic-records/S001",
+        "/api/v1;x=1/verification/credit-gap?planId=PLAN_CS_2025",
+        "/api/v1/courses;x=1",
+        "/./api/v1/courses",
+        "/foo/../api/v1/courses",
+        "/api/v1/./courses",
+        "/api/v1/cour%73es",
+        "/api/v1/courses/",
+    })
+    @DisplayName("路径写法差异不能绕过密钥校验")
+    void pathVariantsCannotBypassServiceKey(String path) throws Exception {
+        // 刻意只自报身份、不带密钥：这正是绕过时用的请求。
+        mvc.perform(get(path).header(SUBJECT, "S001"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("分号路径 + 自报身份读不到任何学业数据")
+    void semicolonPathLeaksNothing() throws Exception {
+        mvc.perform(get("/api/v1;x=1/verification/credit-gap?planId=PLAN_CS_2025")
+                .header(SUBJECT, "S001"))
+            .andExpect(status().isUnauthorized())
+            // 绕过时这里会出现「还差 N 学分」。
+            .andExpect(content().string(org.hamcrest.Matchers.not(
+                org.hamcrest.Matchers.containsString("学分"))))
+            .andExpect(jsonPath("$.data").value(org.hamcrest.Matchers.nullValue()));
     }
 
     @Test

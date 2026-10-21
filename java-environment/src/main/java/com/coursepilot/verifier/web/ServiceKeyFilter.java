@@ -24,8 +24,18 @@ import java.nio.charset.StandardCharsets;
  * SubjectGuard 能成立的前提：先证明调用方是 C，X-Subject-Id 才有意义。
  *
  * docs/04：密钥仅在环境变量，不进仓库。所以这里没有内置默认值——
- * 没配 COURSEPILOT_SERVICE_KEY 时整个 /api/v1 以 503 拒服务，而不是放行。
+ * 没配 COURSEPILOT_SERVICE_KEY 时一律以 503 拒服务，而不是放行。
  * 失败路径只记录阶段和状态，不记录密钥本身，也不记录比对到的值。
+ *
+ * 这道过滤器**不按路径开豁免口**，对所有请求生效。早先的版本用
+ * request.getRequestURI().startsWith("/api/v1/") 判断「是不是 API 请求」，
+ * 结果可以被 /api/v1;x=1/courses 绕过：getRequestURI() 返回的原始路径带着
+ * 分号后的矩阵变量，不匹配前缀于是跳过校验，而 Spring 的路径匹配会把
+ * 这段剥掉照样路由到控制器。于是不带密钥、只自报 X-Subject-Id 就能读到
+ * 任意主体的学业数据。编码、点段、双斜杠同理都是这一类写法差异。
+ *
+ * 所以这里不再做任何路径判断：凡是进到 Servlet 的请求都要有正确的密钥。
+ * 代价是未知路径现在回 401 而不是 404——这反而更好，不暴露有哪些路径。
  */
 @Component
 public class ServiceKeyFilter extends OncePerRequestFilter {
@@ -41,11 +51,6 @@ public class ServiceKeyFilter extends OncePerRequestFilter {
         if (this.expectedKey.isEmpty()) {
             log.warn("未配置 COURSEPILOT_SERVICE_KEY，/api/v1 将一律以 503 拒服务");
         }
-    }
-
-    @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/api/v1/");
     }
 
     @Override
