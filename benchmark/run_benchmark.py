@@ -95,6 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     print("-" * 78)
     print(f"用例数 {summary['caseCount']}，判定分布 {summary['statusCounts']}")
     print(f"路线分布 {summary['routeCounts']}")
+    if summary["upstreamDependent"]:
+        print(f"依赖上游（本轮只标记不判定）{summary['upstreamDependent']}")
+    print(f"折叠兜底条数 {summary['fallbackAssumptions']}（应为 0：有兜底说明 fixture 缺字段）")
     print(f"分组均值 {summary['groupMeans']}，宏平均 {summary['macroScore']}")
     if not summary["macroComparable"]:
         print(

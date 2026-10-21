@@ -51,6 +51,16 @@ MANIFEST = {
     "createdAt": "2026-10-21T00:00:00Z",
 }
 
+INTENT = {
+    "motives": ["SCHEDULE"],
+    "priorityOrder": [],
+    "hardConstraints": [],
+    "softPreferences": [],
+    "pinnedTeacherCoursePairs": [],
+    "interestTags": [],
+    "careerDirectionIds": [],
+}
+
 GOLD = {
     "caseId": "G2-001",
     "requiredFacts": ["不要早八"],
@@ -162,9 +172,9 @@ def make_runner(tmp_path: Path, transport, cases: Path) -> BenchmarkRunner:
 # -- 请求构造 -------------------------------------------------------------
 def test_planning_body_uses_fixture_intent() -> None:
     case = {"caseId": "G2-001", "groupId": "G2", "curriculumSnapshotId": "3c405feaa6d7", "userQuery": "别给我排早八"}
-    fixture = {"promptText": "别给我排早八", "intent": {"motives": ["SCHEDULE"]}}
+    fixture = {"promptText": "别给我排早八", "intent": INTENT}
     request = planning_body(case, fixture)
-    assert request.body["intent"] == {"motives": ["SCHEDULE"]}
+    assert request.body["intent"] == INTENT
     assert request.body["mode"] == "SIMULATION"
     assert request.body["offeringSnapshotId"] is None
     assert any("intent 取 fixture" in note for note in request.notes)
@@ -173,7 +183,7 @@ def test_planning_body_uses_fixture_intent() -> None:
 def test_planning_body_without_record_leaves_id_empty() -> None:
     """契约的 academicRecordId 必填，适配层不能编一个占位字符串，只能让上层先落空记录。"""
     case = {"caseId": "G2-001", "groupId": "G2", "curriculumSnapshotId": "3c405feaa6d7"}
-    fixture = {"intent": {"motives": ["SCHEDULE"]}, "academicRecordId": None}
+    fixture = {"intent": INTENT, "academicRecordId": None}
     request = planning_body(case, fixture)
     assert request.body["academicRecordId"] is None
     assert any("空记录" in note for note in request.notes)
@@ -183,7 +193,7 @@ def test_planning_without_record_prepends_empty_record_step() -> None:
     from case_adapters import build_plan
 
     case = {"caseId": "G2-001", "groupId": "G2", "curriculumSnapshotId": "3c405feaa6d7"}
-    fixture = {"intent": {"motives": ["SCHEDULE"]}, "academicRecordId": None}
+    fixture = {"intent": INTENT, "academicRecordId": None}
     plan = build_plan(case, fixture)
     assert [step.path for step in plan.steps] == ["/api/v1/academic-records", "/api/v1/planning"]
     assert plan.steps[0].body["transcriptComplete"] is False
@@ -237,7 +247,14 @@ def test_answer_text_collects_structured_fields() -> None:
 def test_pass_when_no_placeholder_and_not_blocked(tmp_path: Path) -> None:
     transport = FakeTransport([(200, envelope(answer()))])
     runner = make_runner(tmp_path, transport, write_case(tmp_path))
-    outcome = runner.run_case({"caseId": "G2-001", "groupId": "G2", "inputFixtureRef": "fixtures/G2-001.json"})
+    outcome = runner.run_case(
+        {
+            "caseId": "G2-001",
+            "groupId": "G2",
+            "inputFixtureRef": "fixtures/G2-001.json",
+            "curriculumSnapshotId": "3c405feaa6d7",
+        }
+    )
     assert outcome.status == PASS
     assert outcome.score is not None
 
@@ -245,7 +262,14 @@ def test_pass_when_no_placeholder_and_not_blocked(tmp_path: Path) -> None:
 def test_degraded_when_answer_carries_placeholder(tmp_path: Path) -> None:
     payload = envelope(answer(unknowns=[{"code": "FAKE_MODEL", "message": "占位模型"}]))
     runner = make_runner(tmp_path, FakeTransport([(200, payload)]), write_case(tmp_path))
-    outcome = runner.run_case({"caseId": "G2-001", "groupId": "G2", "inputFixtureRef": "fixtures/G2-001.json"})
+    outcome = runner.run_case(
+        {
+            "caseId": "G2-001",
+            "groupId": "G2",
+            "inputFixtureRef": "fixtures/G2-001.json",
+            "curriculumSnapshotId": "3c405feaa6d7",
+        }
+    )
     assert outcome.status == DEGRADED
     assert outcome.placeholders == ["FAKE_MODEL"]
 
@@ -255,7 +279,14 @@ def test_fail_when_forbidden_claim_matched(tmp_path: Path) -> None:
         answer(recommendations=[{"courseCode": "CS1", "courseName": "已确认为你排好课表", "reason": ""}])
     )
     runner = make_runner(tmp_path, FakeTransport([(200, payload)]), write_case(tmp_path))
-    outcome = runner.run_case({"caseId": "G2-001", "groupId": "G2", "inputFixtureRef": "fixtures/G2-001.json"})
+    outcome = runner.run_case(
+        {
+            "caseId": "G2-001",
+            "groupId": "G2",
+            "inputFixtureRef": "fixtures/G2-001.json",
+            "curriculumSnapshotId": "3c405feaa6d7",
+        }
+    )
     assert outcome.blocked is True
     assert outcome.status == FAIL
 
@@ -263,7 +294,14 @@ def test_fail_when_forbidden_claim_matched(tmp_path: Path) -> None:
 def test_blocked_when_upstream_503(tmp_path: Path) -> None:
     payload = {"schemaVersion": "1.0", "status": "ERROR", "data": {}, "issues": [{"code": "TOOL_UNAVAILABLE"}]}
     runner = make_runner(tmp_path, FakeTransport([(503, payload)]), write_case(tmp_path))
-    outcome = runner.run_case({"caseId": "G2-001", "groupId": "G2", "inputFixtureRef": "fixtures/G2-001.json"})
+    outcome = runner.run_case(
+        {
+            "caseId": "G2-001",
+            "groupId": "G2",
+            "inputFixtureRef": "fixtures/G2-001.json",
+            "curriculumSnapshotId": "3c405feaa6d7",
+        }
+    )
     assert outcome.status == BLOCKED
     assert "TOOL_UNAVAILABLE" in (outcome.error or "")
 
@@ -286,10 +324,17 @@ def test_group_means_are_equal_weight(tmp_path: Path) -> None:
     fixtures.mkdir()
     for case_id, group in (("G2-001", "G2"), ("G2-002", "G2"), ("G3-001", "G3")):
         (cases / f"{case_id}.json").write_text(
-            json.dumps({"caseId": case_id, "groupId": group, "inputFixtureRef": f"fixtures/{case_id}.json"}),
+            json.dumps(
+                {
+                    "caseId": case_id,
+                    "groupId": group,
+                    "inputFixtureRef": f"fixtures/{case_id}.json",
+                    "curriculumSnapshotId": "3c405feaa6d7",
+                }
+            ),
             encoding="utf-8",
         )
-        (fixtures / f"{case_id}.json").write_text(json.dumps({"intent": {"motives": ["SCHEDULE"]}}), encoding="utf-8")
+        (fixtures / f"{case_id}.json").write_text(json.dumps({"intent": INTENT}), encoding="utf-8")
     gold = tmp_path / "gold"
     gold.mkdir()
     for case_id in ("G2-001", "G2-002", "G3-001"):
@@ -393,7 +438,14 @@ def test_audit_route_runs_two_steps(tmp_path: Path) -> None:
     (gold / "G1-001.json").write_text(json.dumps(GOLD, ensure_ascii=False), encoding="utf-8")
     transport = FakeTransport([(200, envelope(AUDIT_DATA))])
     runner = BenchmarkRunner(transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts")
-    outcome = runner.run_case({"caseId": "G1-001", "groupId": "G1", "inputFixtureRef": "audit_fixtures/G1-001.json"})
+    outcome = runner.run_case(
+        {
+            "caseId": "G1-001",
+            "groupId": "G1",
+            "inputFixtureRef": "audit_fixtures/G1-001.json",
+            "curriculumSnapshotId": "3c405feaa6d7",
+        }
+    )
     assert outcome.route == "AUDIT"
     assert outcome.status in (PASS, DEGRADED, FAIL)
     paths = [call[0] for call in transport.calls]
@@ -409,7 +461,14 @@ def test_audit_second_step_failure_names_the_step(tmp_path: Path) -> None:
     (gold / "G1-001.json").write_text(json.dumps(GOLD, ensure_ascii=False), encoding="utf-8")
     transport = FakeTransport([(503, {"issues": [{"code": "TOOL_UNAVAILABLE"}]})])
     runner = BenchmarkRunner(transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts")
-    outcome = runner.run_case({"caseId": "G1-001", "groupId": "G1", "inputFixtureRef": "audit_fixtures/G1-001.json"})
+    outcome = runner.run_case(
+        {
+            "caseId": "G1-001",
+            "groupId": "G1",
+            "inputFixtureRef": "audit_fixtures/G1-001.json",
+            "curriculumSnapshotId": "3c405feaa6d7",
+        }
+    )
     assert outcome.status == BLOCKED
     assert "第 2 步" in (outcome.error or "")
     assert "TOOL_UNAVAILABLE" in (outcome.error or "")
@@ -424,4 +483,4 @@ def test_audit_body_records_outcome_assumption(tmp_path: Path) -> None:
     plan = build_plan({"caseId": "G1-001", "groupId": "G1", "curriculumSnapshotId": "3c405feaa6d7"}, fixture)
     body = plan.steps[0].body
     assert body["completedCourses"][0]["outcome"] == "PASSED"
-    assert any("折算" in note for note in plan.notes)
+    assert any("兜底" in note for note in plan.notes)
