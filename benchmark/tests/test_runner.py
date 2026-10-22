@@ -210,10 +210,20 @@ def test_desired_courses_become_pin_course() -> None:
     assert constraint["sourceText"] == "Python计算"
 
 
-def test_course_code_outside_contract_charset_is_unsupported() -> None:
-    """fixture 里 08305009~010 这种编号过不了契约 Id 字符集，必须判 BLOCKED 而不是硬塞。"""
+def test_tilde_course_code_folds_to_main_code() -> None:
+    """原表用波浪号表示合上课：取主号作课标，原写法留在 sourceText，不造新编号。"""
     case = {"caseId": "G3-001", "groupId": "G3", "curriculumSnapshotId": "3c405feaa6d7"}
     fixture = {"desiredCourses": [{"courseCode": "08305009~010", "courseName": "数据结构(1-2)"}]}
+    request = planning_body(case, fixture)
+    constraint = request.body["intent"]["hardConstraints"][0]
+    assert constraint["courseCode"] == "08305009"
+    assert "08305009~010" in constraint["sourceText"]
+    assert any("取主号" in note for note in request.notes)
+
+
+def test_course_code_that_is_neither_id_nor_tilde_is_unsupported() -> None:
+    case = {"caseId": "G3-001", "groupId": "G3", "curriculumSnapshotId": "3c405feaa6d7"}
+    fixture = {"desiredCourses": [{"courseCode": "数据结构 1", "courseName": "数据结构"}]}
     with pytest.raises(UnsupportedCase):
         planning_body(case, fixture)
 

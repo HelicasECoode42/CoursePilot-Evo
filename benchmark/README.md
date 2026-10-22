@@ -67,4 +67,4 @@ python benchmark/run_benchmark.py --manifest benchmark/manifests/example.json \
 * 引用核验未接线（`JavaVerifier` 为 `None`），逐条记 `unverified`，不折算成通过。
 * held-out 未接入，`heldOutScore` 恒为 `None`，本轮只跑 evolution。
 * G1/G4 的题面走 `academic-records` 与 `requirements/audit` 路径，本骨架只接 `/planning`，这些用例判 `BLOCKED` 并写明原因。
-* fixture 里 `08305009~010` 一类课程编号过不了契约 `Id` 字符集，无法折成 `PIN_COURSE` 约束，同样判 `BLOCKED` 而不是改写编号。
+* 培养方案原表的合上课编号（`08305009~010`）含波浪号，契约标识符字符集不含该字符。折算口径：取波浪号之前的主号作课程标识，原写法原样写进 `sourceText`；不做字符替换，也不造原表里不存在的编号。

@@ -70,12 +70,30 @@ def _empty_intent() -> dict[str, Any]:
     }
 
 
-def _constraints_from_desired(courses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _constraints_from_desired(courses: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    """把「想选的课」折成 PIN_COURSE 约束。
+
+    培养方案原表用波浪号表示两个编号合上一门课（08305009~010），契约标识符字符集不含波浪号。
+    本模块的口径是取波浪号之前的主号作为课程标识，原写法原样保留在 sourceText；
+    不做字符替换，也不在系统里造一个原表里不存在的编号。
+    """
     constraints: list[dict[str, Any]] = []
+    notes: list[str] = []
     for course in courses:
-        code = course.get("courseCode")
+        original = course.get("courseCode")
+        code = original
         if not _id_ok(code):
-            raise UnsupportedCase(f"fixture 的 courseCode {code!r} 不符合契约 Id 字符集，无法构造 PIN_COURSE 约束")
+            main = str(original).split("~")[0].strip() if isinstance(original, str) and "~" in original else None
+            if not _id_ok(main):
+                raise UnsupportedCase(
+                    f"fixture 的 courseCode {original!r} 不符合契约 Id 字符集，且不是波浪号合上编号，"
+                    "无法构造 PIN_COURSE 约束"
+                )
+            code = main
+            notes.append(f"编号 {original} 含波浪号：取主号 {code} 作为课程标识，原写法保留在 sourceText")
+        source_text = course.get("courseName") or code
+        if code != original:
+            source_text = f"{source_text}（原表编号 {original}）"
         constraints.append(
             {
                 "kind": "PIN_COURSE",
@@ -84,10 +102,10 @@ def _constraints_from_desired(courses: list[dict[str, Any]]) -> list[dict[str, A
                 "dayOfWeek": None,
                 "section": None,
                 "value": None,
-                "sourceText": course.get("courseName") or code,
+                "sourceText": source_text,
             }
         )
-    return constraints
+    return constraints, notes
 
 
 def planning_body(
@@ -106,8 +124,10 @@ def planning_body(
     elif isinstance(fixture.get("desiredCourses"), list):
         body_intent = dict(_empty_intent())
         body_intent["motives"] = ["SCHEDULE"]
-        body_intent["hardConstraints"] = _constraints_from_desired(fixture["desiredCourses"])
+        constraints, constraint_notes = _constraints_from_desired(fixture["desiredCourses"])
+        body_intent["hardConstraints"] = constraints
         notes.append("intent 由 fixture.desiredCourses 派生：每门课记为 PIN_COURSE（题面输入）")
+        notes.extend(constraint_notes)
     else:
         body_intent = _empty_intent()
         notes.append("fixture 没有结构化 intent：intent 留空，由 Runner 自己澄清（题面只有自由文本）")
