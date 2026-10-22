@@ -84,6 +84,26 @@ python benchmark/mine_failures.py --run runs/benchmark/<runId>
 只做归因：不生成补丁、不判断晋级；Evolver 与 PromotionGate 属第六周。当前假工具下 12 例全部计入 `excluded`，
 假设数为 0——这是正确结果，不是归因失效。
 
+### held-out 隔离跑
+
+```text
+python benchmark/run_heldout.py --cases ../restricted/held-out --gold ../restricted/gold \
+    --manifest benchmark/manifests/example.json --transport dry
+```
+
+父进程只拿聚合结果，题面与判据只在子进程里出现。三条约束：
+
+| 约束 | 做法 |
+| --- | --- |
+| 路径 | held-out 与判据目录必须在仓库工作区之外；resolve 之前逐段检查，路径上不得有软链 |
+| 数据 | 判据只在子进程读；子进程只输出聚合 JSON，输出前自检不含判据原句（前 12 字命中即拒绝返回） |
+| 失败 | 子进程非零退出、输出不是 JSON、自检发现泄漏，一律报 IsolationError，不伪造分数 |
+
+`--transport dry` 只验证隔离机制，不发网络请求，结果带 `DRY_TRANSPORT` 占位标记并判 DEGRADED，不能当分数用。
+
+已知缺口：本机 held-out 12 例里有 8 例的 fixture 形态尚未接适配（`completed` 键、replan 形态的 `originalGoal`/`newGoal`、
+纯文本课程条目等），当前判 BLOCKED 并写明是哪种形态；补齐后才能对 held-out 出真实分数。
+
 当前限制
 
 * 语义匹配仍是 `scoring/scorer.py` 的 `keyword_matcher` 占位基线，分数偏低不代表模型差；接 C 的匹配器后应换掉。
