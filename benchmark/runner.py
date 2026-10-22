@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -137,6 +138,10 @@ class Transport(Protocol):
         """返回 (HTTP 状态码, 响应 JSON)。"""
         ...
 
+    def get(self, path: str, params: dict[str, Any], headers: dict[str, str]) -> tuple[int, dict[str, Any]]:
+        """查询型端点（如评价检索）。"""
+        ...
+
 
 class HttpTransport:
     """最小的 urllib 传输：不引入第三方 HTTP 客户端，方便在纯净检出里跑。"""
@@ -153,6 +158,20 @@ class HttpTransport:
             method="POST",
             headers={"Content-Type": "application/json", **headers},
         )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return response.status, json.loads(response.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            try:
+                return exc.code, json.loads(raw or "{}")
+            except json.JSONDecodeError:
+                return exc.code, {"_raw": raw[:400]}
+
+    def get(self, path: str, params: dict[str, Any], headers: dict[str, str]) -> tuple[int, dict[str, Any]]:
+        query = urllib.parse.urlencode({key: value for key, value in params.items() if value is not None})
+        url = self.base_url + path + (f"?{query}" if query else "")
+        request = urllib.request.Request(url, method="GET", headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 return response.status, json.loads(response.read().decode("utf-8") or "{}")
@@ -205,6 +224,16 @@ def answer_text(data: dict[str, Any]) -> str:
         for unknown in holder.get("unknowns") or []:
             if unknown.get("message"):
                 parts.append(str(unknown["message"]))
+    for item in data.get("items") or []:
+        if isinstance(item, dict):
+            fields = [
+                item.get("courseCode"),
+                item.get("teacherKey"),
+                item.get("termId"),
+                item.get("sourceKind"),
+                item.get("excerpt"),
+            ]
+            parts.append(" ".join(str(value) for value in fields if value))
     if data.get("decision"):
         parts.append(f"结论 {data['decision']}")
     return "\n".join(part for part in parts if part).strip()
@@ -325,6 +354,25 @@ class BenchmarkRunner:
         data: dict[str, Any] = {}
         started = time.perf_counter()
         for index, step in enumerate(plan.steps, 1):
+            if step.method == "GET":
+                params = step.params(payload) if callable(step.params) else (step.params or {})
+                missing = [key for key, value in params.items() if value is None]
+                if missing:
+                    outcome.error = f"构造：第 {index} 步 {step.label} 缺少查询参数 {missing}"
+                    outcome.measured_latency_ms = int((time.perf_counter() - started) * 1000)
+                    return outcome
+                status, payload = self.transport.get(step.path, params, headers)
+                outcome.http_status = status
+                if status != 200:
+                    issues = payload.get("issues") or []
+                    codes = [str(item.get("code")) for item in issues if item.get("code")]
+                    outcome.error = f"上游不可用（第 {index} 步 {step.label}）：" + (
+                        ", ".join(codes) or f"HTTP {status}"
+                    )
+                    outcome.measured_latency_ms = int((time.perf_counter() - started) * 1000)
+                    return outcome
+                data = payload.get("data") or {}
+                continue
             body = step.body(payload) if callable(step.body) else step.body
             problems = self.check_request(step.path, body)
             if problems:
@@ -348,6 +396,9 @@ class BenchmarkRunner:
         usage = data.get("usage") or {}
         outcome.decision = data.get("decision")
         outcome.unknown_codes = unknown_codes(data)
+        marker = getattr(self.transport, "placeholder_code", None)
+        if marker and marker not in outcome.unknown_codes:
+            outcome.unknown_codes.append(marker)
         outcome.placeholders = [code for code in outcome.unknown_codes if code in PLACEHOLDER_CODES]
         outcome.input_tokens = usage.get("inputTokens")
         outcome.output_tokens = usage.get("outputTokens")

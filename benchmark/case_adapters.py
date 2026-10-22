@@ -23,6 +23,7 @@ _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
 PLANNING = "PLANNING"
 AUDIT = "AUDIT"
 CATALOG = "CATALOG"
+REVIEW = "REVIEW"
 
 #: fixture 没写 outcome 时的折算值。写进 notes，别让它变成看不见的假设。
 MISSING_OUTCOME_DEFAULT = "PASSED"
@@ -36,12 +37,14 @@ class UnsupportedCase(Exception):
 
 @dataclass
 class Step:
-    """一次请求。body 可以是固定对象，也可以是拿前面响应算出来的函数。"""
+    """一次请求。body / params 可以是固定对象，也可以是拿前面响应算出来的函数。"""
 
     label: str
     path: str
-    body: dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]]
+    body: dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None = None
     note: str = ""
+    method: str = "POST"
+    params: dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
 
 @dataclass
@@ -304,6 +307,8 @@ def classify(case: dict[str, Any], fixture: dict[str, Any]) -> tuple[str, str]:
         return AUDIT, "fixture 给的是学生自报的各类别学分汇总，没有逐门记录，按缺失明细处理"
     if "completedCourses" in fixture or "academicRecordId" in fixture:
         return AUDIT, "fixture 带已修记录（或明确说明没有），题面问的是培养要求缺口"
+    if "reviewNotes" in fixture or "reviewSource" in fixture:
+        return REVIEW, "题面问某位老师的授课与给分，走评价检索端点"
     if "queriedCourse" in fixture:
         return CATALOG, "题面问某门课能否计入某类，需要目录检索端点，本轮未接"
     if isinstance(fixture.get("offering"), dict) or isinstance(fixture.get("studentReported"), dict):
@@ -329,6 +334,23 @@ def build_plan(
     )
     if route == CATALOG:
         plan.notes = [reason]
+        return plan
+    if route == REVIEW:
+        codes = [
+            note.get("courseCode")
+            for note in fixture.get("reviewNotes") or []
+            if isinstance(note, dict) and _id_ok(note.get("courseCode"))
+        ]
+        if not codes:
+            raise UnsupportedCase("评价检索接口要求 courseCode，fixture 里没有可用的课程号")
+        plan.notes = [
+            reason,
+            f"评价检索按课程号 {codes[0]} 查询（接口 courseCode 必填，教师名不进请求）",
+            "修读学期在 fixture 里为 null：应如实说未知，不得当作本学期事实",
+        ]
+        plan.steps = [
+            Step("评价检索", "/api/v1/reviews/search", method="GET", params={"courseCode": codes[0], "limit": 10})
+        ]
         return plan
     if route == PLANNING:
         body, notes = planning_body(case, fixture, mode=mode)
