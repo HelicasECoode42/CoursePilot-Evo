@@ -1,0 +1,22 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "人造班次容量（采集时显示值）+ 学生自述的报名人数（学生自述不进快照，本案例考的就是这个差别）。",
+  "promptText": "这门《人工智能》容量 50 人，我在选课系统里看到已经有 55 个人报了，我还能选上吗？",
+  "offering": {
+    "courseCode": "08306029",
+    "courseName": "人工智能",
+    "classId": "SYN-JXB-AI-1",
+    "credits": 4,
+    "capacity": 50,
+    "capturedAt": "2026-10-12T10:00:00+08:00",
+    "source": {
+      "kind": "SYNTHETIC"
+    },
+    "sourceEndpoint": "SYNTHETIC_FIXTURE"
+  },
+  "studentReported": {
+    "seenEnrollmentCount": 55,
+    "seenAt": null,
+    "sourcePage": "选课系统排名/余量页面（学生自述，不进快照）"
+  }
+}

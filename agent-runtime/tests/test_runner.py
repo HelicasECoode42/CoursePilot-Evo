@@ -27,6 +27,7 @@ from agent_runtime.api.schemas import (
     RunManifest,
     TeacherPreference,
 )
+from agent_runtime.application.budget import Budget
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.runner import PlanningRunner
 
@@ -173,9 +174,12 @@ def test_run_persists_sanitized_trace_and_manifest(
     manifest = RunManifest.model_validate_json(
         (directory / "manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest.maxInputTokens == 8000
-    assert manifest.maxToolCalls == 6
-    assert manifest.deadlineMs == 45000
+    enforced = Budget()
+    assert manifest.maxInputTokens == enforced.max_input_tokens == 8000
+    assert manifest.maxOutputTokens == enforced.max_output_tokens == 2000
+    assert manifest.maxToolCalls == enforced.max_tool_calls == 6
+    assert manifest.maxModelCalls == enforced.max_model_calls == 3
+    assert manifest.deadlineMs == enforced.deadline_ms == 45000
     assert manifest.modelId == "DEPLOYMENT_MODEL_PLACEHOLDER"
     saved = json.loads((directory / "answer.json").read_text(encoding="utf-8"))
     assert saved["decision"] == answer.decision

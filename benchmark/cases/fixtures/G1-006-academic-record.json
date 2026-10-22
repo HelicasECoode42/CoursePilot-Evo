@@ -1,0 +1,29 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的选课意图：三门课都取自培养方案里带 ★ 规则的三门，学分 1、1、2。",
+  "termId": "2024-2025-3",
+  "termLabel": "一年级春季学期（第3学期）",
+  "studentTerm": 3,
+  "majorId": "CS-2024",
+  "desiredCourses": [
+    {
+      "courseCode": "计科学1-A12",
+      "courseName": "新生研讨课",
+      "credits": 1.0,
+      "category": "新生研讨课"
+    },
+    {
+      "courseCode": "16584172",
+      "courseName": "劳动教育理论课",
+      "credits": 1.0,
+      "category": "公共基础课"
+    },
+    {
+      "courseCode": "00914006",
+      "courseName": "军事理论A",
+      "credits": 2.0,
+      "category": "公共基础课"
+    }
+  ],
+  "offeringSnapshotId": null
+}

@@ -30,6 +30,21 @@ class ModelTimeout(RuntimeError):
     """Provider timed out or the transport failed (-> 504, retryable, no repair)."""
 
 
+class ModelUpstreamError(RuntimeError):
+    """Provider 429 or 5xx. Retryable system error, never an invalid payload."""
+
+    def __init__(self, message: str, *, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class ModelConfigError(RuntimeError):
+    """URL and key are set, but the model id is still the deployment placeholder."""
+
+
+PLACEHOLDER_MODEL_ID = "DEPLOYMENT_MODEL_PLACEHOLDER"
+
+
 @dataclass(frozen=True)
 class ModelReply:
     """Provider-agnostic model result: either a clarification or candidate items."""
@@ -159,6 +174,10 @@ class HttpModelAdapter:
             raise ModelTimeout("模型请求超时") from exc
         except httpx.HTTPError as exc:
             raise ModelTimeout("模型请求失败") from exc
+        if response.status_code == 429:
+            raise ModelUpstreamError("模型端点限流", status_code=429)
+        if response.status_code >= 500:
+            raise ModelUpstreamError("模型端点不可用", status_code=response.status_code)
         if response.status_code >= 400:
             raise ModelInvalidOutput("模型端点拒绝请求")
         try:
@@ -233,5 +252,7 @@ def build_model_adapter(
     temperature: float,
 ) -> FakeModelAdapter | HttpModelAdapter:
     if model_base_url and model_api_key:
+        if model_id.strip() == "" or model_id == PLACEHOLDER_MODEL_ID:
+            raise ModelConfigError("已配置模型地址和密钥，但 CP_MODEL_ID 仍是占位符")
         return HttpModelAdapter(model_base_url, model_api_key, model_id, temperature)
     return FakeModelAdapter()

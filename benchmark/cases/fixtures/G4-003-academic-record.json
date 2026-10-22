@@ -1,0 +1,15 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的课程咨询：学生只提供课程名，未提供课程编号、开课学院或学分信息。",
+  "termLabel": "已修课程咨询",
+  "queriedCourse": {
+    "courseName": "互联网产品实践项目",
+    "courseCode": null,
+    "credits": null,
+    "category": null,
+    "school": null
+  },
+  "claimedCategory": "专业选修课",
+  "completedCourses": null,
+  "offeringSnapshotId": null
+}

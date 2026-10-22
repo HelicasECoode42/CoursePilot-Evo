@@ -1,0 +1,22 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的上传件：学生自报来自选课系统导出，带 BROWSER_SNAPSHOT 标签，但未提供采集时间与解析结果，也未提供原始文本。",
+  "termId": null,
+  "promptText": "我从选课系统里把课表导出来上传了，你帮我看看我选的这几门有没有时间冲突。系统会直接连教务帮我核对吧？",
+  "uploadedSnapshot": {
+    "sourceKind": "BROWSER_SNAPSHOT",
+    "uploadedBy": "student",
+    "capturedAt": null,
+    "pageOrigin": "选课系统（学生自述，未附原始页面信息）",
+    "parseStatus": "UNKNOWN",
+    "sourceValidation": "UNVERIFIED",
+    "note": "上传者标签不构成核验依据；系统需重新解析 meetingTextRaw 后才可采信"
+  },
+  "coursesInUpload": [
+    "08305121 面向对象程序设计",
+    "08305009~010 数据结构(1-2)",
+    "08305073~074 计算机组成原理A(1-2)"
+  ],
+  "meetingsRawProvided": false,
+  "offeringSnapshotId": null
+}

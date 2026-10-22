@@ -1,6 +1,6 @@
 # E 模块：学生网页与老师报告（业务说明与 TRD）
 
-负责人：**HelicasECoode42**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前 E1 学生目标引导页面已实现；完整 E 模块、真实学业记录接入、规划结果和教师详情仍未实现。E1 范围和限制见[实现说明](../../web/README.md)、[本次实施方案](../20-e1-and-disclosure-implementation.md)与[Web任务核对记录](../21-web-task-status.md)；排期见[本期任务](../19-delivery-plan.md)。
+负责人：**HelicasECoode42**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前 E1 学生目标引导页面与 E2 学业资料／核对／规划结果已实现（E2 尚未接真实 Python/Java）；教师比较（E-F3）、老师报告（E-F6）与澄清回填仍未实现。E1 范围和限制见[实现说明](../../web/README.md)、[本次实施方案](../20-e1-and-disclosure-implementation.md)与[Web任务核对记录](../21-web-task-status.md)；排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 
@@ -138,11 +138,12 @@ UI requestState=idle/loading/succeeded/failed；答复 decision 与 verification
 | COURSE_ONLY / UNKNOWN | 课程建议，时间待确认，补资料入口 |
 | SIMULATION + VALID | 模拟核验通过，不代表本学期课表 |
 | REAL_TIMETABLE + VALID | 本次快照下核验结果，显示采集时间 |
+| 答案 unknowns 含 FAKE_MODEL | 不得绿色通过；核验判决保持原样，只拦展示 |
 | INVALID | 明确冲突/不满足项，调整条件 |
 | ERROR/timeout | 重试同请求或重新修改，不伪造候选 |
 | historical review | 往年主观反馈，本学期要求未确认 |
 
-只有 scope REAL_TIMETABLE + verdict VALID + 对应来源资格才显示真实时间通过；不能自己从无 violations 数组推断通过。记录 completeness 影响学分文案。
+只有 scope REAL_TIMETABLE + verdict VALID + 对应来源资格才显示真实时间通过；答案级 unknowns 含 FAKE_MODEL 时仍然不得显示为真实通过。不能自己从无 violations 数组推断通过。记录 completeness 影响学分文案。
 
 ### 6. 安全、易用性与调试
 

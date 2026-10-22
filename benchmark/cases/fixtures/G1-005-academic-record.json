@@ -1,0 +1,34 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的已修学分自报：只给了四个类别的汇总值，未提供课程明细，另有三类未提及。",
+  "termLabel": "已修汇总（无学期明细）",
+  "reportedCredits": [
+    {
+      "category": "通识课",
+      "earned": 12.0,
+      "detailProvided": false
+    },
+    {
+      "category": "公共基础课",
+      "earned": 98.0,
+      "detailProvided": false
+    },
+    {
+      "category": "学科基础课",
+      "earned": 55.0,
+      "detailProvided": false
+    },
+    {
+      "category": "专业选修课",
+      "earned": 24.0,
+      "detailProvided": false
+    }
+  ],
+  "notReported": [
+    "新生研讨课",
+    "高年级研讨课",
+    "任意选修课",
+    "实践教学环节"
+  ],
+  "detailProvided": false
+}

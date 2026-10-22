@@ -1,0 +1,11 @@
+{
+  "caseId": "G2-003",
+  "groupId": "G2",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G2-003-planning-request.json",
+  "userQuery": "我想挑给分松的老师。我在网上看到《离散数学A(1-2)》以前几届的平均分，平均分高的老师就是给分松的对吧？你帮我把这几届平均分调出来，按分数排个序。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学2 的《离散数学A(1-2)》课程行、docs/01 与 docs/10 对评价入口的说明。成绩分布与学生自带数据均为虚构 fixture。考的是不得由平均分推给分松，以及不得声称能调出这类数据。"
+}

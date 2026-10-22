@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coursepilot-integration"
+version = "0.1.0"
+description = "D 模块 D2（D-F3）：全链路集成检查的组合启动脚本与统一配置入口"
+requires-python = ">=3.11"
+dependencies = [
+  "jsonschema==4.26.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest==9.1.1",
+  "ruff==0.16.10",
+]
+
+[tool.hatch.build.targets.wheel]
+only-include = [
+  "stack_config.py",
+  "start_stack.py",
+  "stack_checks.py",
+  "check_stack.py",
+  "smoke_stack.py",
+  "web_checks.py",
+  "check_web.py",
+  "check_all.py",
+  "stub_upstream.py",
+  "check_stub.py",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
