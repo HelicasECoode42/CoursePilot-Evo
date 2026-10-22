@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from agent_runtime.api.schemas import (
     AcademicRecord,
@@ -29,6 +29,34 @@ class ToolUnavailable(RuntimeError):
 
 class InvalidTool(RuntimeError):
     """toolName is not in the registered whitelist (-> 422)."""
+
+
+class ToolContractViolation(RuntimeError):
+    """Java answered, but the payload breaks the shared contract (-> 502).
+
+    Deliberately not folded into ToolUnavailable. Pydantic's ValidationError
+    subclasses ValueError, so catching ValueError around the parsing step turns
+    "the provider broke the contract" into "the provider is down". That cost us
+    a debugging session once already: the Java audit endpoint answered HTTP 200
+    while putting non-ASCII text in requirementId and an empty sourceRefIds, and
+    the only symptom here was TOOL_UNAVAILABLE. A contract break is not
+    retryable and the message must name the offending field.
+    """
+
+
+class ToolRejected(RuntimeError):
+    """Java answered with a 4xx and a reason (-> that same status).
+
+    Never retried. A rejected service key or an object the subject may not see
+    will not become valid on a second try, and reporting either as 503 hides
+    a configuration or authorization problem behind "dependency down".
+    """
+
+    def __init__(self, tool: str, status_code: int, issue_code: str, message: str) -> None:
+        super().__init__(f"{tool}: {status_code} {issue_code}: {message}")
+        self.tool = tool
+        self.status_code = status_code
+        self.issue_code = issue_code
 
 
 @dataclass(frozen=True)
@@ -124,17 +152,45 @@ class ToolClient:
             except httpx.HTTPError as retry_exc:
                 raise ToolUnavailable(tool) from retry_exc
 
-        if response.status_code >= 400:
+        if response.status_code >= 500:
+            # No usable answer: the dependency is down, which is retryable.
             raise ToolUnavailable(tool)
+        if response.status_code >= 400:
+            raise _rejection(tool, response)
+
         try:
             payload = response.json()
-            data = payload.get("data")
+        except ValueError as exc:
+            raise ToolContractViolation(f"{tool}: response body is not JSON") from exc
+        if not isinstance(payload, dict):
+            raise ToolContractViolation(f"{tool}: response is not a contract Envelope")
+
+        if payload.get("status") == "ERROR":
+            issue = (payload.get("issues") or [{}])[0]
+            raise ToolRejected(
+                tool, response.status_code, issue.get("code", "ERROR"), issue.get("message", "")
+            )
+
+        # OK and UNKNOWN both carry data: UNKNOWN means "this is as far as the
+        # facts go", not "the query failed".
+        data = payload.get("data")
+        try:
             if spec.listed:
                 items = data.get("items") if isinstance(data, dict) else data
-                return [spec.response_model.model_validate(item) for item in items or []]
+                if items is None:
+                    raise ToolContractViolation(
+                        f"{tool}: list endpoints answer with data.items (java.openapi.json)"
+                    )
+                return [spec.response_model.model_validate(item) for item in items]
+            if data is None:
+                raise ToolContractViolation(
+                    f"{tool}: data is null on a {payload.get('status')} response"
+                )
             return spec.response_model.model_validate(data)
-        except (ValueError, TypeError, KeyError) as exc:
-            raise ToolUnavailable(tool) from exc
+        except ValidationError as exc:
+            raise ToolContractViolation(f"{tool}: off contract: {exc}") from exc
+        except (TypeError, AttributeError) as exc:
+            raise ToolContractViolation(f"{tool}: unexpected data shape: {data!r}"[:300]) from exc
 
     def _send(
         self,
@@ -154,3 +210,16 @@ class ToolClient:
 def _timeout_seconds(context: ExecutionContext) -> float:
     remaining = (context.deadline - datetime.now(UTC)).total_seconds()
     return max(0.1, min(5.0, remaining))
+
+
+def _rejection(tool: str, response: httpx.Response) -> ToolRejected:
+    """Carry the provider's own Issue code through instead of inventing one."""
+    code, message = "UNKNOWN", response.text[:200]
+    try:
+        issues = response.json().get("issues") or []
+        if issues:
+            code = issues[0].get("code", code)
+            message = issues[0].get("message", message)
+    except ValueError:
+        pass  # A 4xx body that is not JSON is still a rejection, just an opaque one.
+    return ToolRejected(tool, response.status_code, code, message)
