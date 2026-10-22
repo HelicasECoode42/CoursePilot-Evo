@@ -65,6 +65,25 @@ python benchmark/run_benchmark.py --manifest benchmark/manifests/example.json \
 
 `summary.json` 会报 `claimModes` 与 `textShare`：文本判占比越高，这份分数越不能当语义正确率读。
 
+### 失败归因（D-F4 骨架）
+
+```text
+python benchmark/mine_failures.py --run runs/benchmark/<runId>
+```
+
+读一次运行的 `cases.jsonl`，把逐例失败按「失败类型 + 判据原句」归并，产出 `hypotheses.json`。
+
+| 项 | 口径 |
+| --- | --- |
+| 成假设的门槛 | 同一失败至少出现在 2 个不同用例（协议：单例失误不得触发自动补丁） |
+| 单例处理 | 进 `rejected` 并写明原因，不静默丢弃 |
+| 环境未接线 | `BLOCKED` 与带 `FAKE_*` 的 `DEGRADED` 不进归因，只计入 `excluded` 并写原因 |
+| 可改范围 | `allowedTargets` 只能落在 agent-runtime/harness 白名单内，越界直接报错 |
+| 输出 | `hypothesisId / category / caseIds / pattern / likelyCause / allowedTargets / expectedMetric / traceRefs` |
+
+只做归因：不生成补丁、不判断晋级；Evolver 与 PromotionGate 属第六周。当前假工具下 12 例全部计入 `excluded`，
+假设数为 0——这是正确结果，不是归因失效。
+
 当前限制
 
 * 语义匹配仍是 `scoring/scorer.py` 的 `keyword_matcher` 占位基线，分数偏低不代表模型差；接 C 的匹配器后应换掉。
