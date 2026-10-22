@@ -10,7 +10,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from agent_runtime.adapters.model_client import ModelInvalidOutput, ModelTimeout
-from agent_runtime.adapters.tool_client import InvalidTool, ToolUnavailable
+from agent_runtime.adapters.tool_client import (
+    InvalidTool,
+    ToolContractViolation,
+    ToolRejected,
+    ToolUnavailable,
+)
 from agent_runtime.api.idempotency import IdempotencyConflict, RequestInProgress
 from agent_runtime.api.schemas import Envelope, Issue
 from agent_runtime.application.budget import BudgetExceeded
@@ -98,6 +103,23 @@ def register_error_handlers(app: FastAPI) -> None:
     async def model_invalid_output(request: Request, exc: ModelInvalidOutput) -> JSONResponse:
         issue = Issue(code="MODEL_INVALID_OUTPUT", message=str(exc), field=None, retryable=False)
         return _json(request, 422, "ERROR", [issue])
+
+    @app.exception_handler(ToolContractViolation)
+    async def tool_contract_violation(
+        request: Request, exc: ToolContractViolation
+    ) -> JSONResponse:
+        # The provider answered; it just answered something the contract forbids.
+        # Calling this 503 sends people looking for a dead service.
+        issue = Issue(code="TOOL_CONTRACT_VIOLATION", message=str(exc), field=None, retryable=False)
+        return _json(request, 502, "ERROR", [issue])
+
+    @app.exception_handler(ToolRejected)
+    async def tool_rejected(request: Request, exc: ToolRejected) -> JSONResponse:
+        # Pass the provider's own status and reason through. Java's 404 means
+        # "not visible or does not exist" (java.openapi.json) and must stay 404.
+        status_code = exc.status_code if 400 <= exc.status_code < 500 else 502
+        issue = Issue(code=exc.issue_code, message=str(exc), field=None, retryable=False)
+        return _json(request, status_code, "ERROR", [issue])
 
     @app.exception_handler(ToolUnavailable)
     async def tool_unavailable(request: Request, exc: ToolUnavailable) -> JSONResponse:
