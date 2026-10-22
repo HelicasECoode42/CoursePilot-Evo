@@ -28,6 +28,10 @@ python benchmark/run_benchmark.py --manifest benchmark/manifests/example.json \
 
 退出码：`0` 全部 PASS（或 `--plan`）；`1` 存在 DEGRADED / FAIL / BLOCKED；`2` manifest 不符合 `RunManifest`。
 
+重复运行：`--repeats N`（缺省取 manifest 的 `repeatCount`）。第二轮起逐例与第一轮比对判定类字段
+（判定、路线、决策、未知码、token、工具调用数、分数、blocked、错误说明），耗时类字段天然有波动不参与比对；
+不一致会写进 `repeat-compare.json` 并以退出码 1 收尾，不按通过的那一轮结案。
+
 `manifests/example.json` 只是字段示例（`modelId`、`javaToolApiVersion`、`verifierVersion` 未定），不是任何一次真实运行记录；实跑前按当次配置另存一份，manifest 一旦运行就不该再改。
 
 判定语义（一例一判）

@@ -494,3 +494,63 @@ def test_audit_body_records_outcome_assumption(tmp_path: Path) -> None:
     body = plan.steps[0].body
     assert body["completedCourses"][0]["outcome"] == "PASSED"
     assert any("兜底" in note for note in plan.notes)
+
+
+# -- 重复运行校验（#35 验收条件：同 manifest 可复跑）------------------------
+def test_repeats_identical_results_are_stable(tmp_path: Path) -> None:
+    cases = write_case(tmp_path)
+    gold = tmp_path / "gold"
+    gold.mkdir()
+    (gold / "G2-001.json").write_text(json.dumps(GOLD, ensure_ascii=False), encoding="utf-8")
+    transport = FakeTransport([(200, envelope(answer())), (200, envelope(answer()))])
+    runner = BenchmarkRunner(transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts")
+    result = runner.run({**MANIFEST, "repeatCount": 2})
+    assert result["summary"]["repeats"] == 2
+    assert result["summary"]["repeatStable"] is True
+    assert result["summary"]["repeatDiffCount"] == 0
+    assert result["repeatDiffs"] == []
+
+
+def test_repeats_differing_decision_is_reported(tmp_path: Path) -> None:
+    cases = write_case(tmp_path)
+    gold = tmp_path / "gold"
+    gold.mkdir()
+    (gold / "G2-001.json").write_text(json.dumps(GOLD, ensure_ascii=False), encoding="utf-8")
+    transport = FakeTransport(
+        [
+            (200, envelope(answer())),
+            (200, envelope(answer(decision="RECOMMENDATIONS", clarification=None))),
+        ]
+    )
+    runner = BenchmarkRunner(transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts")
+    result = runner.run({**MANIFEST, "repeatCount": 2})
+    assert result["summary"]["repeatStable"] is False
+    diffs = result["repeatDiffs"]
+    assert any(diff["field"] == "decision" and diff["first"] == "CLARIFY" for diff in diffs)
+
+
+def test_repeat_comparison_ignores_latency(tmp_path: Path) -> None:
+    cases = write_case(tmp_path)
+    gold = tmp_path / "gold"
+    gold.mkdir()
+    (gold / "G2-001.json").write_text(json.dumps(GOLD, ensure_ascii=False), encoding="utf-8")
+    transport = FakeTransport([(200, envelope(answer())), (200, envelope(answer()))])
+    runner = BenchmarkRunner(transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts")
+    result = runner.run({**MANIFEST, "repeatCount": 2})
+    fields = {diff["field"] for diff in result["repeatDiffs"]}
+    assert "measuredLatencyMs" not in fields
+    assert "reportedElapsedMs" not in fields
+
+
+def test_repeat_compare_file_is_written(tmp_path: Path) -> None:
+    cases = write_case(tmp_path)
+    gold = tmp_path / "gold"
+    gold.mkdir()
+    (gold / "G2-001.json").write_text(json.dumps(GOLD, ensure_ascii=False), encoding="utf-8")
+    transport = FakeTransport([(200, envelope(answer())), (200, envelope(answer()))])
+    runner = BenchmarkRunner(transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts")
+    result = runner.run({**MANIFEST, "repeatCount": 2})
+    paths = runner.write_outputs(result, tmp_path / "out")
+    payload = json.loads(paths["repeatCompare"].read_text(encoding="utf-8"))
+    assert payload["stable"] is True
+    assert payload["diffCount"] == 0
