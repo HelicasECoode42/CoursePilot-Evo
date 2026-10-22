@@ -221,11 +221,13 @@ def test_tilde_course_code_folds_to_main_code() -> None:
     assert any("取主号" in note for note in request.notes)
 
 
-def test_course_code_that_is_neither_id_nor_tilde_is_unsupported() -> None:
+def test_course_code_that_is_neither_id_nor_tilde_falls_back_to_text() -> None:
+    """不是标识符也不是合上编号（例如「数据结构 1」）时不猜编号，也不挡用例，课名留在题面。"""
     case = {"caseId": "G3-001", "groupId": "G3", "curriculumSnapshotId": "3c405feaa6d7"}
     fixture = {"desiredCourses": [{"courseCode": "数据结构 1", "courseName": "数据结构"}]}
-    with pytest.raises(UnsupportedCase):
-        planning_body(case, fixture)
+    request = planning_body(case, fixture)
+    assert request.body["intent"]["hardConstraints"] == []
+    assert any("不是契约标识符" in note for note in request.notes)
 
 
 def test_fixture_with_only_record_keys_goes_audit_route() -> None:
@@ -573,9 +575,106 @@ def test_non_structured_completed_courses_are_unsupported() -> None:
     assert "非结构化条目" in str(excinfo.value)
 
 
+def test_course_without_code_is_skipped_not_fabricated() -> None:
+    """学生只给课名与成绩时（G4-005），不猜课号：该条不入记录，其余照常提交。"""
+    from case_adapters import build_plan
+
+    plan = build_plan(
+        {"caseId": "G4-005", "groupId": "G4", "curriculumSnapshotId": "3c405feaa6d7"},
+        {"completedCourses": [{"courseName": "数据结构与算法分析", "score": 92.0}]},
+    )
+    assert plan.route == "AUDIT"
+    assert plan.steps[0].body["completedCourses"] == []
+    assert any("没有合法课号" in note for note in plan.notes)
+
+
 def test_unknown_fixture_shape_lists_its_keys() -> None:
     from case_adapters import build_plan
 
     with pytest.raises(UnsupportedCase) as excinfo:
-        build_plan({"caseId": "GX-001", "groupId": "GX"}, {"originalGoal": "x", "newGoal": "y"})
-    assert "originalGoal" in str(excinfo.value)
+        build_plan({"caseId": "GX-001", "groupId": "GX"}, {"mysteryKey": "x", "anotherKey": "y"})
+    assert "mysteryKey" in str(excinfo.value)
+
+
+# -- held-out 的三种形态（2026-10-22 补）------------------------------------
+def test_cell_reference_course_code_is_not_folded() -> None:
+    """「计科学1-A12」是单元格引用，不是课程标识符：不折 PIN_COURSE，但不影响跑通。"""
+    case = {"caseId": "G1-006", "groupId": "G1", "curriculumSnapshotId": "3c405feaa6d7"}
+    fixture = {"desiredCourses": [{"courseCode": "计科学1-A12", "courseName": "新生研讨课"}]}
+    request = planning_body(case, fixture)
+    assert request.body["intent"]["hardConstraints"] == []
+    assert any("不是契约标识符" in note for note in request.notes)
+
+
+def test_aggregate_credit_fixture_goes_audit_without_fabricating_courses() -> None:
+    from case_adapters import build_plan
+
+    plan = build_plan(
+        {"caseId": "G1-004", "groupId": "G1", "curriculumSnapshotId": "3c405feaa6d7"},
+        {
+            "completed": {"professionalElectiveCredits": 18.0, "generalEducationCredits": None},
+            "transcriptComplete": False,
+        },
+    )
+    assert plan.route == "AUDIT"
+    assert plan.steps[0].body["completedCourses"] == []
+    assert "自报" in plan.reason
+
+
+def test_replan_fixture_goes_planning_without_previous_plan() -> None:
+    from case_adapters import build_plan
+
+    plan = build_plan(
+        {
+            "caseId": "G3-004",
+            "groupId": "G3",
+            "curriculumSnapshotId": "3c405feaa6d7",
+            "userQuery": "改成四年级秋季去实习",
+        },
+        {"originalGoal": "三年半毕业", "newGoal": "四年级秋季去实习", "originalPlanSummary": "..."},
+    )
+    assert plan.route == "PLANNING"
+    assert any("previousPlanId" in note for note in plan.notes)
+    body = plan.steps[-1].body({"data": {"academicRecordId": "record:test"}})
+    assert body["previousPlanId"] is None
+
+
+def test_replan_with_text_completed_courses_does_not_crash() -> None:
+    from case_adapters import build_plan
+
+    plan = build_plan(
+        {"caseId": "G3-005", "groupId": "G3", "curriculumSnapshotId": "3c405feaa6d7"},
+        {"originalGoal": "四年毕业", "newGoal": "大三下实习", "completedCourses": ["已有记录摘要"]},
+    )
+    assert plan.route == "PLANNING"
+    assert next(step.label for step in plan.steps) == "落空记录"
+
+
+def test_intent_extra_fields_are_dropped_with_note() -> None:
+    """G2-005 的 fixture 带契约外字段（sectionRange、teacherName）：裁掉并留痕，不整例判失败。"""
+    from case_adapters import build_plan
+
+    plan = build_plan(
+        {"caseId": "G2-005", "groupId": "G2", "curriculumSnapshotId": "3c405feaa6d7"},
+        {
+            "intent": {
+                "motives": ["SCHEDULE"],
+                "priorityOrder": [],
+                "hardConstraints": [
+                    {"kind": "BLOCK_DAY", "dayOfWeek": 3, "sectionRange": "下午", "sourceText": "周三下午不能排课"}
+                ],
+                "softPreferences": [
+                    {"dimension": "TIME", "value": "X", "sourceText": "不想连上四节", "teacherName": "王老师"}
+                ],
+                "pinnedTeacherCoursePairs": [],
+                "interestTags": [],
+                "careerDirectionIds": [],
+            }
+        },
+    )
+    body = plan.steps[-1].body({"data": {"academicRecordId": "record:test"}})
+    constraint = body["intent"]["hardConstraints"][0]
+    assert "sectionRange" not in constraint
+    assert constraint["courseCode"] is None
+    assert constraint["sourceText"] == "周三下午不能排课"
+    assert any("sectionRange" in note for note in plan.notes)

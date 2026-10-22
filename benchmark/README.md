@@ -101,8 +101,11 @@ python benchmark/run_heldout.py --cases ../restricted/held-out --gold ../restric
 
 `--transport dry` 只验证隔离机制，不发网络请求，结果带 `DRY_TRANSPORT` 占位标记并判 DEGRADED，不能当分数用。
 
-已知缺口：本机 held-out 12 例里有 8 例的 fixture 形态尚未接适配（`completed` 键、replan 形态的 `originalGoal`/`newGoal`、
-纯文本课程条目等），当前判 BLOCKED 并写明是哪种形态；补齐后才能对 held-out 出真实分数。
+held-out 形态适配现状（12 例）：11 例可跑，1 例未接——`G4-004` 问某位老师的授课与给分，需要评价检索端点
+（`GET /api/v1/reviews/search`），本骨架的传输层只实现了 `POST`，判 BLOCKED 并写明原因。
+其余形态已接：自报学分汇总（`completed` 键、`reportedCredits`）按缺失逐门明细处理并落空记录、
+replan 形态（`originalGoal`/`newGoal`）按新目标重算且 `previousPlanId` 为 null、
+单元格引用课号（`计科学1-A12`）不折 `PIN_COURSE` 而把课名留在题面、只给课名没给课号的已修课程不入库但留痕。
 
 当前限制
 

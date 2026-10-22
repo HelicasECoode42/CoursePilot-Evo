@@ -70,6 +70,45 @@ def _empty_intent() -> dict[str, Any]:
     }
 
 
+CONSTRAINT_KEYS = ("kind", "courseCode", "teacherKey", "dayOfWeek", "section", "value", "sourceText")
+SOFT_KEYS = ("dimension", "value", "sourceText")
+PAIR_KEYS = ("courseCode", "teacherKey", "mode")
+
+
+def _normalize_items(items: list[Any], allowed: tuple[str, ...], label: str, notes: list[str]) -> list[dict[str, Any]]:
+    """把 fixture 里的条目按契约字段白名单裁一遍：缺的可空字段补 None，多的字段丢掉并留痕。"""
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise UnsupportedCase(f"{label} 里有非结构化条目 {item!r}")
+        dropped = sorted(set(item) - set(allowed))
+        if dropped:
+            notes.append(f"{label} 丢弃契约外字段 {dropped}（原句仍在 sourceText 里）")
+        row = {key: item.get(key) for key in allowed}
+        out.append(row)
+    return out
+
+
+def _normalize_intent(intent: dict[str, Any], notes: list[str]) -> dict[str, Any]:
+    """fixture 的 intent 未必符合契约形状：按白名单裁，缺的可空字段补 None。"""
+    body = dict(_empty_intent())
+    for key in ("motives", "priorityOrder", "interestTags", "careerDirectionIds"):
+        if isinstance(intent.get(key), list):
+            body[key] = intent[key]
+    if isinstance(intent.get("hardConstraints"), list):
+        body["hardConstraints"] = _normalize_items(intent["hardConstraints"], CONSTRAINT_KEYS, "hardConstraints", notes)
+    if isinstance(intent.get("softPreferences"), list):
+        body["softPreferences"] = _normalize_items(intent["softPreferences"], SOFT_KEYS, "softPreferences", notes)
+    if isinstance(intent.get("pinnedTeacherCoursePairs"), list):
+        body["pinnedTeacherCoursePairs"] = _normalize_items(
+            intent["pinnedTeacherCoursePairs"], PAIR_KEYS, "pinnedTeacherCoursePairs", notes
+        )
+    extra = sorted(set(intent) - set(body))
+    if extra:
+        notes.append(f"intent 里丢弃契约外字段 {extra}")
+    return body
+
+
 def _constraints_from_desired(courses: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
     """把「想选的课」折成 PIN_COURSE 约束。
 
@@ -87,10 +126,12 @@ def _constraints_from_desired(courses: list[dict[str, Any]]) -> tuple[list[dict[
         if not _id_ok(code):
             main = str(original).split("~")[0].strip() if isinstance(original, str) and "~" in original else None
             if not _id_ok(main):
-                raise UnsupportedCase(
-                    f"fixture 的 courseCode {original!r} 不符合契约 Id 字符集，且不是波浪号合上编号，"
-                    "无法构造 PIN_COURSE 约束"
+                # 单元格引用（如「计科学1-A12」）不是课程标识符：不猜，也不丢课名，留给题面自由文本
+                notes.append(
+                    f"编号 {original!r} 不是契约标识符，也不是合上编号：该课不折成 PIN_COURSE，"
+                    f"课名「{course.get('courseName') or ''}」保留在题面里由 Runner 解析"
                 )
+                continue
             code = main
             notes.append(f"编号 {original} 含波浪号：取主号 {code} 作为课程标识，原写法保留在 sourceText")
         source_text = course.get("courseName") or code
@@ -121,8 +162,8 @@ def planning_body(
     notes: list[str] = []
     intent = fixture.get("intent")
     if isinstance(intent, dict):
-        body_intent = intent
-        notes.append("intent 取 fixture 的 intent 字段（题面输入）")
+        body_intent = _normalize_intent(intent, notes)
+        notes.append("intent 取 fixture 的 intent 字段并按契约白名单规整（题面输入）")
     elif isinstance(fixture.get("desiredCourses"), list):
         body_intent = dict(_empty_intent())
         body_intent["motives"] = ["SCHEDULE"]
@@ -140,6 +181,9 @@ def planning_body(
     else:
         record_id = None
         notes.append("fixture 没有合法 academicRecordId：不伪造已修记录，由适配层先落一条空记录")
+
+    if "originalGoal" in fixture or "newGoal" in fixture:
+        notes.append("replan 题面：previousPlanId 只能引用服务端已有方案，本用例没有可引用的 id，按新目标重算")
 
     prompt = fixture.get("promptText") or case.get("userQuery") or ""
     body = {
@@ -176,7 +220,9 @@ def record_body(
             raise UnsupportedCase(f"completedCourses 里有非结构化条目 {course!r}：无法确定课程编号，不猜测")
         code = course.get("courseCode")
         if not _id_ok(code):
-            raise UnsupportedCase(f"已修课程的 courseCode {code!r} 不符合契约 Id 字符集")
+            # 学生只给了课名与成绩、没给课号（G4-005 这类跨专业咨询）：不猜课号，这条不入库
+            notes.append(f"已修课程「{course.get('courseName') or '未命名'}」没有合法课号，未提交到记录里（不猜编号）")
+            continue
         outcome = course.get("outcome")
         if outcome is None:
             outcome = missing_outcome
@@ -252,6 +298,10 @@ def classify(case: dict[str, Any], fixture: dict[str, Any]) -> tuple[str, str]:
         return PLANNING, "fixture 带结构化 intent，属规划类题面"
     if isinstance(fixture.get("desiredCourses"), list):
         return PLANNING, "fixture 带待选课程清单，属规划类题面"
+    if "originalGoal" in fixture or "newGoal" in fixture:
+        return PLANNING, "replan 题面：只给目标变更与原方案摘要，没有可引用的 previousPlanId"
+    if isinstance(fixture.get("completed"), dict) or "reportedCredits" in fixture:
+        return AUDIT, "fixture 给的是学生自报的各类别学分汇总，没有逐门记录，按缺失明细处理"
     if "completedCourses" in fixture or "academicRecordId" in fixture:
         return AUDIT, "fixture 带已修记录（或明确说明没有），题面问的是培养要求缺口"
     if "queriedCourse" in fixture:
