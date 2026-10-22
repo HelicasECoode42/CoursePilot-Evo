@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>CoursePilot · 推荐与重新规划流程预览</title>
+    <style>
+      :root{--ink:#18312b;--soft:#65736d;--green:#226c50;--wash:#f2f7f4;--line:#e1e8e3;--amber:#875817;font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);background:#fff;font-synthesis:none}*{box-sizing:border-box}body{margin:0}button,input{font:inherit}button{cursor:pointer;color:inherit}button:focus-visible,input:focus-visible{outline:3px solid #69a98b;outline-offset:4px}.bar{height:78px;max-width:1100px;margin:auto;padding:0 30px;display:flex;align-items:center;justify-content:space-between}.brand{font-size:20px;font-weight:650;letter-spacing:-.7px;display:flex;gap:10px;align-items:center}.mark{height:24px;width:24px;border:6px solid var(--green);border-radius:50% 50% 50% 3px;transform:rotate(-18deg)}.small{font-size:12px;color:var(--soft);font-weight:400;letter-spacing:0}main{width:min(720px,calc(100% - 40px));margin:26px auto 30px}.eyebrow{font-size:13px;color:var(--soft);display:flex;justify-content:space-between;align-items:center;margin-bottom:19px}.track{width:90px;height:3px;background:#e9eeeb;border-radius:4px}.track i{display:block;height:100%;width:78%;background:var(--green)}h1{font-size:clamp(27px,4vw,34px);font-weight:600;line-height:1.35;letter-spacing:-.8px;margin:0 0 10px}h2{font-size:19px;margin:0 0 12px;font-weight:600}p{line-height:1.7}.intro{margin:0 0 22px;color:var(--soft);font-size:14px}.summary{display:flex;gap:7px;flex-wrap:wrap;margin:16px 0 23px}.pill{background:var(--wash);border-radius:6px;padding:6px 9px;font-size:12px;color:var(--green)}.section{border-top:1px solid var(--line);padding:19px 0 7px}.candidate{border-top:1px solid var(--line);padding:17px 0;display:grid;grid-template-columns:1fr auto;gap:12px}.candidate:first-of-type{border-top:0}.candidate strong{font-size:17px;font-weight:550}.meta{font-size:13px;color:var(--soft);margin:5px 0}.reason{font-size:13px;margin:9px 0 0;line-height:1.7}.pending{font-size:12px;color:#936329;background:#fff5e5;padding:6px 8px;border-radius:5px;height:fit-content}.badge{font-size:12px;color:var(--green);border:1px solid #cbd8cf;border-radius:5px;padding:5px 8px;height:fit-content;white-space:nowrap}.hint{background:#f8faf8;border-radius:9px;padding:12px 14px;color:var(--soft);font-size:13px;line-height:1.65;margin:15px 0}.hint.amber{background:#fff8ed;color:var(--amber)}.controls{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-top:23px;padding-top:17px;border-top:1px solid var(--line)}.primary{background:var(--green);border:0;color:white;font-weight:550;padding:12px 21px;border-radius:9px}.primary:hover{background:#18543d}.secondary{border:0;background:transparent;color:var(--soft);padding:12px 0}.secondary:hover{color:var(--green)}.editrow{border-bottom:1px solid var(--line);padding:15px 0;display:grid;grid-template-columns:125px minmax(0,1fr);gap:15px;align-items:start}.label{font-size:13px;color:var(--soft);padding-top:10px}.choices{display:flex;gap:8px;flex-wrap:wrap}.choice{border:1px solid var(--line);border-radius:8px;background:#fff;padding:9px 12px;font-size:13px}.choice[aria-pressed=true]{border-color:var(--green);background:var(--wash);color:var(--green)}.textinput{width:100%;border:1px solid #cbd7ce;border-radius:8px;padding:11px 12px;color:var(--ink)}.before{font-size:12px;color:var(--soft);margin:0 0 8px}.week{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px;margin-top:14px}.week th,.week td{border:1px solid var(--line);text-align:center;padding:6px 3px;height:38px}.week th{font-weight:500;color:var(--soft);background:#fbfcfb}.week th:first-child{width:42px}.week td.time{color:var(--soft);font-size:11px}.lesson{background:var(--wash);color:var(--green);font-weight:550;border-radius:5px;line-height:1.35}.lesson.changed{background:#fff3dc;color:#865c1a}.lesson.new{background:#eaf4ed}.legend{font-size:12px;color:var(--soft);display:flex;gap:15px;margin:10px 0}.course-list{display:grid;gap:0;margin-top:15px;border-top:1px solid var(--line)}.course-row{padding:12px 0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:10px}.course-row strong{font-size:14px;font-weight:550}.course-row p{font-size:12px;color:var(--soft);margin:3px 0 0}.hidden{display:none!important}.footer{max-width:720px;margin:24px auto 30px;text-align:center;font-size:11px;color:#6d7a73;padding:0 20px}.toast{margin:12px 0;color:var(--green);font-size:13px;min-height:22px}@media(max-width:540px){.bar{padding:0 20px;height:67px}.brand{font-size:18px}.brand .small{display:none}main{margin-top:20px}.intro{font-size:13px}.candidate{grid-template-columns:1fr}.candidate .pending,.candidate .badge{width:fit-content}.editrow{grid-template-columns:1fr;gap:6px}.label{padding-top:0}.controls{align-items:flex-start}.primary{padding:12px 15px}.week{font-size:11px}.week th,.week td{padding:4px 1px;height:35px}.week th:first-child{width:34px}.course-row{grid-template-columns:1fr}}
+    </style>
+    <style>
+      .searchbar{display:flex;gap:8px;margin:10px 0 14px}.searchbar input{flex:1;min-width:0;border:1px solid #cbd7ce;border-radius:8px;padding:10px}.search-result{border-top:1px solid var(--line);padding:12px 0;display:flex;align-items:center;justify-content:space-between;gap:12px}.search-result strong{font-size:14px;font-weight:550}.search-result p{font-size:12px;margin:3px 0;color:var(--soft)}.pick{border:1px solid #b9cbc0;background:white;border-radius:6px;padding:8px 10px;font-size:12px;white-space:nowrap}.offering{border-top:1px solid var(--line);padding:12px 0;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}.offering strong{font-size:13px;font-weight:550}.offering p{font-size:12px;margin:3px 0;color:var(--soft)}.status-conflict{color:#9b3f36;background:#fff0ee}.status-clear{color:#226c50;background:#f2f7f4}.status-unknown{color:#875817;background:#fff8ed}.offering button:disabled{cursor:not-allowed;opacity:.6}@media(max-width:540px){.search-result,.offering{align-items:flex-start;grid-template-columns:1fr}}
+    </style>
+  </head>
+  <body>
+    <header class="bar">
+      <div class="brand"><span class="mark" aria-hidden="true"></span><span>CoursePilot <span class="small">选课规划</span></span></div>
+      <span class="small">流程预览</span>
+    </header>
+    <main>
+      <div class="eyebrow"><span id="step-label">规划结果 · 第 1 版</span><span class="track" aria-hidden="true"><i></i></span></div>
+
+      <section id="result" aria-labelledby="result-title">
+        <h1 id="result-title">这是根据你目前条件整理的建议</h1>
+        <p class="intro">这是一整份候选方案，不是单门课程推荐。你可以直接搜索其他课程替换，也可以修改条件后重新推荐；每次改动都要重新核验。</p>
+        <div class="summary" aria-label="本次规划条件">
+          <span class="pill">目标：降低工作量</span><span class="pill">必须避开：周一第 1 节</span><span class="pill">培养要求：已核对</span>
+        </div>
+        <div class="section">
+          <h2>整份方案 · 5 门课</h2>
+          <p class="meta">课表布局用于帮助整体查看；本预览用合成班次示意，不代表真实开课时间。</p>
+          <button class="secondary" id="open-search">⌕ 搜课程，调整这份方案</button>
+          <div id="search-panel" class="hint hidden">
+            <h2>搜索课程</h2>
+            <div class="searchbar"><input id="course-search" type="search" value="操作系统" aria-label="搜索课程" /><button class="primary" id="search-button">搜索</button></div>
+            <div class="search-result"><div><strong>操作系统基础</strong><p>找到 3 个开课班次。选择要替换的课程：<strong>计算机网络导论</strong></p><p>示例班次和核验状态均为合成数据。</p></div></div>
+            <div class="offering"><div><strong>01 班 · 周二第 3–4 节</strong><p>与当前方案的「离散数学」时间冲突</p></div><button class="pick status-conflict" disabled>有冲突</button></div>
+            <div class="offering"><div><strong>02 班 · 周四第 6–7 节</strong><p>当前方案与已知约束范围内暂未发现冲突</p></div><button class="pick" id="replace-course">选这个班次</button></div>
+            <div class="offering"><div><strong>03 班 · 上课时间待定</strong><p>无法判断是否冲突；不能作为已核验班次</p></div><button class="pick status-unknown" disabled>无法确认</button></div>
+            <p id="search-status" class="toast" role="status"></p>
+            <button id="recheck-course" class="primary hidden">重新核验这份方案</button>
+            <button id="close-search" class="secondary">收起搜索</button>
+          </div>
+          <div class="legend"><span>■ 方案内课程</span><span>□ 未排入课程</span></div>
+          <table class="week" aria-label="一周课程安排示意"><thead><tr><th>节次</th><th>周一</th><th>周二</th><th>周三</th><th>周四</th><th>周五</th></tr></thead><tbody>
+            <tr><td class="time">1</td><td class="lesson">数据结构</td><td></td><td></td><td></td><td></td></tr>
+            <tr><td class="time">2</td><td class="lesson">数据结构</td><td></td><td class="lesson">大学英语</td><td></td><td></td></tr>
+            <tr><td class="time">3</td><td></td><td class="lesson">离散数学</td><td class="lesson">大学英语</td><td></td><td></td></tr>
+            <tr><td class="time">4</td><td></td><td class="lesson">离散数学</td><td></td><td class="lesson">计算机网络</td><td></td></tr>
+            <tr><td class="time">5</td><td></td><td></td><td></td><td class="lesson">计算机网络</td><td></td></tr>
+            <tr><td class="time">6</td><td class="lesson">体育</td><td></td><td></td><td></td><td></td></tr>
+            <tr><td class="time">7</td><td class="lesson">体育</td><td></td><td></td><td></td><td></td></tr>
+            <tr><td class="time">8</td><td></td><td></td><td></td><td></td><td></td></tr>
+          </tbody></table>
+          <div class="course-list">
+            <div class="course-row"><div><strong>数据结构基础</strong><p>培养要求建议 · 具体班次与时间待核验</p></div><span class="pending">待核验</span></div>
+            <div class="course-row"><div><strong>离散数学</strong><p>与当前目标相关 · 具体班次与时间待核验</p></div><span class="pending">待核验</span></div>
+            <div class="course-row"><div><strong>大学英语</strong><p>满足本学期选课目标 · 具体班次与时间待核验</p></div><span class="pending">待核验</span></div>
+            <div class="course-row"><div><strong>计算机网络导论</strong><p>与当前目标相关 · 评价依据有限</p></div><span class="badge">依据有限</span></div>
+            <div class="course-row"><div><strong>体育</strong><p>符合当前方案约束 · 具体班次与时间待核验</p></div><span class="pending">待核验</span></div>
+          </div>
+        </div>
+        <div class="hint amber"><strong>重要：示意课表，不是已核验的真实课表</strong><br />当前没有可用的真实班次快照，表格中的时间仅用于预览整份方案如何呈现；实际课程时间和冲突尚不能确认。真实页面只能搜索当前学期的可选班次，不能任意编造时间。</div>
+        <div class="controls"><button class="secondary" id="back-to-answers">返回已填条件</button><button class="primary" id="edit">修改条件并重新推荐</button></div>
+      </section>
+
+      <section id="edit-view" class="hidden" aria-labelledby="edit-title">
+        <h1 id="edit-title">想调整哪项条件？</h1>
+        <p class="intro">你可以在上一页搜索其他课程班次替换；也可以修改目标或时间条件后重新推荐。无论哪种调整，都要重新核验。</p>
+        <div class="editrow"><div class="label">选课目标</div><div class="choices" role="group" aria-label="选课目标"><button class="choice" aria-pressed="true">降低工作量</button><button class="choice" aria-pressed="false">提高绩点</button><button class="choice" aria-pressed="false">拓展兴趣</button></div></div>
+        <div class="editrow"><div class="label">必须避开的时间</div><div><p class="before">当前：周一第 1 节</p><div class="choices" role="group" aria-label="时间条件"><button class="choice" aria-pressed="true">保留周一第 1 节</button><button class="choice" aria-pressed="false">放宽这项条件</button></div></div></div>
+        <div class="editrow"><div class="label">补充说明</div><div><input class="textinput" type="text" value="尽量安排在周二至周四" aria-label="补充说明" /></div></div>
+        <div class="hint">本次会关联上一版方案并提交新请求。已填写的其他条件继续保留；新的结果会重新显示依据、冲突和未知项。</div>
+        <div class="controls"><button class="secondary" id="cancel-edit">返回上一版结果</button><button class="primary" id="regenerate">按新条件重新推荐</button></div>
+      </section>
+
+      <section id="new-result" class="hidden" aria-labelledby="new-title">
+        <h1 id="new-title">已按新条件生成第 2 版</h1>
+        <p class="intro">上一版仍保留供对照；新结果需要重新核验，不会把旧结论直接沿用。</p>
+        <div class="summary"><span class="pill">本次调整：放宽周一第 1 节</span><span class="pill">关联上一版方案</span></div>
+        <div class="section"><h2>第 2 版整份方案 · 5 门课</h2>
+          <p class="meta">绿色为仍在方案中的课程，浅黄色标出本次新加入的课程。</p>
+          <table class="week" aria-label="第二版一周课程安排示意"><thead><tr><th>节次</th><th>周一</th><th>周二</th><th>周三</th><th>周四</th><th>周五</th></tr></thead><tbody>
+            <tr><td class="time">1</td><td class="lesson new">数据结构</td><td></td><td></td><td></td><td></td></tr>
+            <tr><td class="time">2</td><td class="lesson new">数据结构</td><td></td><td class="lesson new">大学英语</td><td></td><td></td></tr>
+            <tr><td class="time">3</td><td></td><td class="lesson changed">程序设计</td><td class="lesson new">大学英语</td><td></td><td></td></tr>
+            <tr><td class="time">4</td><td></td><td class="lesson changed">程序设计</td><td></td><td class="lesson new">计算机网络</td><td></td></tr>
+            <tr><td class="time">5</td><td></td><td></td><td></td><td class="lesson new">计算机网络</td><td></td></tr>
+            <tr><td class="time">6</td><td class="lesson new">体育</td><td></td><td></td><td></td><td></td></tr>
+            <tr><td class="time">7</td><td class="lesson new">体育</td><td></td><td></td><td></td><td></td></tr>
+            <tr><td class="time">8</td><td></td><td></td><td></td><td></td><td></td></tr>
+          </tbody></table>
+          <div class="course-list">
+            <div class="course-row"><div><strong>数据结构基础</strong><p>仍在方案 · 时间待核验</p></div><span class="badge">保留</span></div>
+            <div class="course-row"><div><strong>程序设计</strong><p>放宽时间条件后进入方案 · 时间待核验</p></div><span class="pending">新增</span></div>
+            <div class="course-row"><div><strong>大学英语、计算机网络导论、体育</strong><p>仍在方案 · 班次信息待核验</p></div><span class="badge">保留</span></div>
+          </div>
+        </div>
+        <div class="hint amber"><strong>仍有无法确认项</strong><br />课程候选有变化，但缺少真实班次快照，不能判断是否与其他课程冲突。</div>
+        <p class="toast" id="success-message" role="status">预览演示：新请求关联上一版方案，展示新结果和变化。</p>
+        <div class="controls"><button class="secondary" id="compare">回看第 1 版条件</button><button class="primary" id="edit-again">继续改条件</button></div>
+      </section>
+    </main>
+    <footer class="footer">交互预览 · 内容为合成示例，不调用真实服务，不代表真实课程、班次或核验结果。</footer>
+    <script>
+      const result = document.querySelector("#result");
+      const editView = document.querySelector("#edit-view");
+      const newResult = document.querySelector("#new-result");
+      const stepLabel = document.querySelector("#step-label");
+      const searchPanel = document.querySelector("#search-panel");
+      function show(view, label) {
+        for (const section of [result, editView, newResult]) section.classList.add("hidden");
+        view.classList.remove("hidden");
+        stepLabel.textContent = label;
+        view.querySelector("h1").focus?.();
+        window.scrollTo({ top: 0, behavior: "instant" });
+      }
+      document.querySelector("#edit").addEventListener("click", () => show(editView, "修改条件 · 保留其他回答"));
+      document.querySelector("#cancel-edit").addEventListener("click", () => show(result, "规划结果 · 第 1 版"));
+      document.querySelector("#back-to-answers").addEventListener("click", () => show(editView, "修改条件 · 保留其他回答"));
+      document.querySelector("#regenerate").addEventListener("click", () => show(newResult, "规划结果 · 第 2 版"));
+      document.querySelector("#edit-again").addEventListener("click", () => show(editView, "修改条件 · 保留其他回答"));
+      document.querySelector("#compare").addEventListener("click", () => show(result, "规划结果 · 第 1 版"));
+      document.querySelector("#open-search").addEventListener("click", () => searchPanel.classList.remove("hidden"));
+      document.querySelector("#close-search").addEventListener("click", () => searchPanel.classList.add("hidden"));
+      document.querySelector("#search-button").addEventListener("click", () => {
+        document.querySelector("#search-status").textContent = `找到与“${document.querySelector("#course-search").value || "操作系统"}”相关的合成示例。`;
+      });
+      document.querySelector("#replace-course").addEventListener("click", () => {
+        document.querySelectorAll("#result .week tbody tr").forEach(row => {
+          if (row.children[4].textContent.trim() === "计算机网络") row.children[4].textContent = "";
+        });
+        document.querySelectorAll("#result .course-row").forEach(row => {
+          if (row.textContent.includes("计算机网络导论")) row.querySelector("strong").textContent = "操作系统基础";
+        });
+        document.querySelectorAll("#result .week tbody tr").forEach((row, index) => {
+          if (index === 5 || index === 6) row.children[4].textContent = "操作系统";
+        });
+        document.querySelector("#search-status").textContent = "预览：已选操作系统基础 02 班替换计算机网络导论。提交前必须重新核验整份方案。";
+        document.querySelector("#recheck-course").classList.remove("hidden");
+      });
+      document.querySelector("#recheck-course").addEventListener("click", () => {
+        document.querySelector("#search-status").textContent = "预览核验结果：缺少真实班次数据，状态为「无法确认」；不能标记为已通过。";
+      });
+      document.querySelectorAll(".choices").forEach(group => group.querySelectorAll(".choice").forEach(button => {
+        button.addEventListener("click", () => {
+          group.querySelectorAll(".choice").forEach(item => item.setAttribute("aria-pressed", "false"));
+          button.setAttribute("aria-pressed", "true");
+        });
+      }));
+    </script>
+  </body>
+</html>

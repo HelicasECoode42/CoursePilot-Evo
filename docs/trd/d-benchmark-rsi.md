@@ -51,6 +51,8 @@ A/B 提供独立事实依据；C 提供同一 Agent 和脱敏运行记录；E �
 
 D-01 四组任务：学业核对、hard/soft、多目标规划/replan、澄清/拒编。每组目标 5 evolution+5 held-out，最低 3+3。fixture 标 REAL 培养事实 / SIMULATION 班次 / 无真实班次，不把 simulation 当真实排课能力。
 
+结果工作区的手动换班次验收属于确定性流程检查，不把学生选班次误计为模型能力。集成用例至少覆盖：候选班次与整份方案已选课冲突、候选班次与学生硬时间冲突、同课另一班次无已知冲突、候选时间未知，以及换班后旧结果不能沿用。D 独立确认预期并验证页面展示与 Java 判决一致；真实班次 unavailable 时，测试必须接受 UNKNOWN，而不是造出真实无冲突结论。
+
 D-02 固定 model/temperature/API/data/evaluator/budget；D-03 token/工具/时间；D-04 至少两个不同 case 的失败假设；D-05 白名单最小 patch；D-06 两轮候选判决、rejected 也保存。
 
 答案与题面隔离、同环境不同 case。Evolver 只见 evolution 输入和脱敏 trace，没有 gold、held-out、evaluator、Java 源码；不通过 Prompt 自觉保证隔离。
