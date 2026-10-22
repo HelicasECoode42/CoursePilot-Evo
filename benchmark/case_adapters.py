@@ -80,6 +80,8 @@ def _constraints_from_desired(courses: list[dict[str, Any]]) -> tuple[list[dict[
     constraints: list[dict[str, Any]] = []
     notes: list[str] = []
     for course in courses:
+        if not isinstance(course, dict):
+            raise UnsupportedCase(f"desiredCourses 里有非结构化条目 {course!r}：无法确定课程编号，不猜测")
         original = course.get("courseCode")
         code = original
         if not _id_ok(code):
@@ -170,6 +172,8 @@ def record_body(
     courses: list[dict[str, Any]] = []
     filled_outcome = 0
     for course in fixture.get("completedCourses") or []:
+        if not isinstance(course, dict):
+            raise UnsupportedCase(f"completedCourses 里有非结构化条目 {course!r}：无法确定课程编号，不猜测")
         code = course.get("courseCode")
         if not _id_ok(code):
             raise UnsupportedCase(f"已修课程的 courseCode {code!r} 不符合契约 Id 字符集")
@@ -256,7 +260,7 @@ def classify(case: dict[str, Any], fixture: dict[str, Any]) -> tuple[str, str]:
         return PLANNING, "fixture 带班次与自报人数，题面问的是能否选上，按规划类题面处理（容量事实由快照提供）"
     if isinstance(fixture.get("uploadedSnapshot"), dict):
         return PLANNING, "fixture 只有学生上传件与自由文本，intent 留空由 Runner 澄清"
-    raise UnsupportedCase("fixture 形态无法归入规划类或核查类")
+    raise UnsupportedCase(f"fixture 形态无法归入规划类或核查类（含键：{', '.join(sorted(fixture))}）")
 
 
 def build_plan(

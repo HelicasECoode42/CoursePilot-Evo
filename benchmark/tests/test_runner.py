@@ -554,3 +554,28 @@ def test_repeat_compare_file_is_written(tmp_path: Path) -> None:
     payload = json.loads(paths["repeatCompare"].read_text(encoding="utf-8"))
     assert payload["stable"] is True
     assert payload["diffCount"] == 0
+
+
+def test_non_structured_course_entries_are_unsupported() -> None:
+    """held-out 里出现过纯文本条目（G3-005）：不能崩在 get()，要判构造失败并说明。"""
+    case = {"caseId": "G3-005", "groupId": "G3", "curriculumSnapshotId": "3c405feaa6d7"}
+    with pytest.raises(UnsupportedCase) as excinfo:
+        planning_body(case, {"desiredCourses": ["08305121 面向对象程序设计"]})
+    assert "非结构化条目" in str(excinfo.value)
+
+
+def test_non_structured_completed_courses_are_unsupported() -> None:
+    case = {"caseId": "G3-005", "groupId": "G3", "curriculumSnapshotId": "3c405feaa6d7"}
+    from case_adapters import build_plan
+
+    with pytest.raises(UnsupportedCase) as excinfo:
+        build_plan(case, {"completedCourses": ["08305121 面向对象程序设计"]})
+    assert "非结构化条目" in str(excinfo.value)
+
+
+def test_unknown_fixture_shape_lists_its_keys() -> None:
+    from case_adapters import build_plan
+
+    with pytest.raises(UnsupportedCase) as excinfo:
+        build_plan({"caseId": "GX-001", "groupId": "GX"}, {"originalGoal": "x", "newGoal": "y"})
+    assert "originalGoal" in str(excinfo.value)

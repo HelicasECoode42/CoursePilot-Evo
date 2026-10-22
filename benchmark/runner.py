@@ -52,7 +52,7 @@ BLOCKED = "BLOCKED"
 PLAN = "PLAN"
 
 #: 答案里出现这些 code 说明走的是占位实现或缺上游数据，只能算链路通。
-PLACEHOLDER_CODES = ("FAKE_MODEL", "FAKE_TOOL", "OFFERING_UNAVAILABLE")
+PLACEHOLDER_CODES = ("FAKE_MODEL", "FAKE_TOOL", "OFFERING_UNAVAILABLE", "DRY_TRANSPORT")
 
 #: 端点 → contracts 里对应的请求体定义。请求体先过一遍契约，避免折错了还发给上游。
 REQUEST_SCHEMAS = {
@@ -270,7 +270,12 @@ class BenchmarkRunner:
         path = Path(reference)
         if not path.is_absolute():
             bases = [repo_root] if repo_root else []
-            bases += [self.cases_root.parent, self.cases_root.parents[1], self.cases_root.parents[2]]
+            bases += [
+                self.cases_root,
+                self.cases_root.parent,
+                self.cases_root.parents[1],
+                self.cases_root.parents[2],
+            ]
             found = next((base / reference for base in bases if base and (base / reference).is_file()), None)
             if found is None:
                 raise FileNotFoundError(f"找不到 fixture：{reference}")
