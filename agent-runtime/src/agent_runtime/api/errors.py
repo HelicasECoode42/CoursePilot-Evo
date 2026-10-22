@@ -117,9 +117,7 @@ def register_error_handlers(app: FastAPI) -> None:
         return _json(request, 422, "ERROR", [issue])
 
     @app.exception_handler(ToolContractViolation)
-    async def tool_contract_violation(
-        request: Request, exc: ToolContractViolation
-    ) -> JSONResponse:
+    async def tool_contract_violation(request: Request, exc: ToolContractViolation) -> JSONResponse:
         # The provider answered; it just answered something the contract forbids.
         # Calling this 503 sends people looking for a dead service.
         issue = Issue(code="TOOL_CONTRACT_VIOLATION", message=str(exc), field=None, retryable=False)

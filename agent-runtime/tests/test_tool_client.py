@@ -184,7 +184,16 @@ def test_contract_violation_is_not_reported_as_unavailable() -> None:
             200,
             json=_envelope(
                 "OK",
-                {"items": [{"courseCode": "CS101", "name": "程序设计", "credits": "4.00", "category": "必修"}]},
+                {
+                    "items": [
+                        {
+                            "courseCode": "CS101",
+                            "name": "程序设计",
+                            "credits": "4.00",
+                            "category": "必修",
+                        }
+                    ]
+                },
             ),
         )
 
@@ -216,7 +225,9 @@ def test_bad_service_key_keeps_its_401() -> None:
         return httpx.Response(
             401,
             json=_envelope(
-                "ERROR", None, [{"code": "SERVICE_KEY_INVALID", "message": "缺少或错误的 X-Service-Key"}]
+                "ERROR",
+                None,
+                [{"code": "SERVICE_KEY_INVALID", "message": "缺少或错误的 X-Service-Key"}],
             ),
         )
 
