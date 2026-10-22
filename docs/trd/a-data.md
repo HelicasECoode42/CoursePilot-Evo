@@ -124,6 +124,8 @@ ReviewImport Schema 为唯一格式：notes≤200、excerpt≤1500 字；sourceU
 
 浏览器原始导出格式见旧 snapshot Schema，转换到 OfferingImport：termId、calendar、sourceKind、capturedAt、offerings。sourceKind 由输入说明来源，sourceValidation 由 B 的后台验证流程控制；上传者不能声明 VERIFIED。meetings/parseStatus 客户端值仅供对照，B 重新解析 raw。
 
+为结果工作区的班次搜索提供同一课程下可区分的开课项：至少保留 `courseCode/classId/teacherKey/meetingTextRaw/sourceRefId`，并带学期、来源类型、采集时间与解析状态。当前学期没有可核验资料时明确报告缺失，不得用历史班次伪装当前可选班次；历史与合成样例只用于标注对应类型的测试和演示。A 提供来源/字段匹配和异常样例，B 决定快照能否用于真实核验。
+
 ```mermaid
 sequenceDiagram
   participant A as Adapter

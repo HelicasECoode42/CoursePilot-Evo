@@ -16,7 +16,7 @@
 | C-F2 | 理解目标与优先级 | 支持多目标，区分必须条件、偏好和优先级，保留明确指定的课程教师意愿。 | C2、C3 |
 | C-F3 | 追问并接住回答 | 识别影响推荐的缺失或歧义，提出一个相关问题；补答后继续原流程。 | C3 |
 | C-F4 | 生成有依据的推荐 | 按需取课程、学业和评价事实，调用真实模型提出候选，强制 Java 核验，解释依据与未知。 | C2 |
-| C-F5 | 处理取舍与重新推荐 | 条件冲突时澄清/修复；学生改一个条件后重新查询并核验，不静默删除必须项。 | C3 |
+| C-F5 | 处理取舍与重新推荐 | 条件冲突时澄清/修复；学生改条件后关联旧方案重新查询并核验；学生从班次搜索中明确替换一门课时，Python 校验方案归属、保留其他项并请求 Java 核验完整新方案，不静默删除必须项或覆盖学生选择。 | C3；第六周班次替换 |
 | C-F6 | 保证运行可控 | 重复请求不双跑，超时/预算耗尽有终态；记录版本/用量/耗时，生产与评测使用同一入口。 | C2、C3 |
 | C-F7 | 提供相关发展方向 | 仅在职业目标分支提供少量有来源的计算机方向介绍，缺资料时说明未知。 | 第六周细拆 |
 | C-F8 | 加载可评测的策略版本 | 支持评测模块提供的允许修改的运行策略版本，保留稳定版本、限制改动范围。 | 第六周细拆 |
@@ -87,6 +87,8 @@ PlanningRequest 必填 schemaVersion、curriculumSnapshotId、academicRecordId�
 | Idempotency-Key | 同会话同内容复用；不同内容 409 |
 
 PlanningAnswer decision=CLARIFY 必须有 Question 且无 recommendations；每份 recommendation 有 PlanValidation，最多 3 份。UNKNOWN 可保留课程层建议，不能返回真实合格课表。usage 未取得 token 用 null。
+
+结果页的“搜索班次并替换”不是模型生成：Python 提供受会话保护的课程/班次查询网关，并接收 `previousPlanId + courseCode + selectedClassId` 一类的明确替换意图。Python 验证旧方案归属，取得原方案完整项目，替换目标项并调用 Java `plans/validate`。若新班次冲突或未知，应原样返回 Java 判决和原因；不得让模型把 INVALID/UNKNOWN 改成有效。新增的 Web 网关路径、请求/响应和幂等语义须先与 B/E 一起更新 `planning.openapi.json` 并补正反例，字段不能由三方各自私定。
 
 ### 4. 正常与重规划时序
 
