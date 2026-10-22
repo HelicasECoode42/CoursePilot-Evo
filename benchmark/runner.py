@@ -373,10 +373,71 @@ class BenchmarkRunner:
             outcome.status = PASS
         return outcome
 
+    def _run_once(self, cases: list[dict[str, Any]], *, repo_root: Path | None, plan_only: bool) -> list[CaseOutcome]:
+        if not plan_only:
+            return [self.run_case(case, repo_root=repo_root) for case in cases]
+        outcomes: list[CaseOutcome] = []
+        for case in cases:
+            try:
+                fixture = self.load_fixture(str(case.get("inputFixtureRef") or ""), repo_root)
+                plan = build_plan(case, fixture, mode=self.mode, missing_outcome=self.missing_outcome)
+                outcome = CaseOutcome(
+                    case_id=str(case.get("caseId")),
+                    group_id=str(case.get("groupId")),
+                    status=PLAN,
+                    route=plan.route,
+                    notes=[plan.reason, *plan.notes],
+                )
+            except (UnsupportedCase, OSError, json.JSONDecodeError) as exc:
+                outcome = CaseOutcome(
+                    case_id=str(case.get("caseId")),
+                    group_id=str(case.get("groupId")),
+                    status=PLAN,
+                    error=f"构造：{type(exc).__name__}: {exc}",
+                )
+            outcomes.append(outcome)
+        return outcomes
+
     def run(
-        self, manifest: dict[str, Any], *, repo_root: Path | None = None, plan_only: bool = False
+        self,
+        manifest: dict[str, Any],
+        *,
+        repo_root: Path | None = None,
+        plan_only: bool = False,
+        repeats: int | None = None,
     ) -> dict[str, Any]:
+        """跑完一个 case set。repeats 缺省取 manifest 的 repeatCount。
+
+        协议要求「相同设置下的重复运行」，这里把重复做成一等参数：第二轮起逐例与第一轮比对，
+        只比对判定类字段，耗时类字段天然有波动不参与；不一致就如实列出，不做容错抹平。
+        """
         cases = self.load_cases()
+        count = max(1, int(repeats if repeats is not None else (manifest.get("repeatCount") or 1)))
+        runs = [self._run_once(cases, repo_root=repo_root, plan_only=plan_only) for _ in range(count)]
+        outcomes = runs[0]
+        diffs: list[dict[str, Any]] = []
+        for index, other in enumerate(runs[1:], 2):
+            diffs.extend(diff_outcomes(outcomes, other, run_index=index))
+        summary = self.build_summary(outcomes)
+        summary.update(
+            {
+                "repeats": count,
+                "repeatStable": not diffs,
+                "repeatDiffCount": len(diffs),
+                "repeatDiffSample": diffs[:5],
+                "repeatNote": (
+                    "只跑了一轮，未做重复运行校验" if count == 1 else "多轮逐例比对，只比判定类字段，耗时类字段不比"
+                ),
+            }
+        )
+        return {
+            "manifest": manifest,
+            "outcomes": outcomes,
+            "runs": runs,
+            "repeatDiffs": diffs,
+            "report": self.build_report(manifest, outcomes),
+            "summary": summary,
+        }
         if plan_only:
             outcomes = []
             for case in cases:
@@ -507,6 +568,20 @@ class BenchmarkRunner:
         report_path.write_text(json.dumps(result["report"], ensure_ascii=False, indent=2), encoding="utf-8")
         summary_path = out_dir / "summary.json"
         summary_path.write_text(json.dumps(result["summary"], ensure_ascii=False, indent=2), encoding="utf-8")
+        compare_path = out_dir / "repeat-compare.json"
+        compare_path.write_text(
+            json.dumps(
+                {
+                    "repeats": result["summary"].get("repeats"),
+                    "stable": result["summary"].get("repeatStable"),
+                    "diffCount": result["summary"].get("repeatDiffCount"),
+                    "diffs": result.get("repeatDiffs", []),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         cases_path = out_dir / "cases.jsonl"
         with cases_path.open("w", encoding="utf-8") as handle:
             for outcome in result["outcomes"]:
@@ -516,7 +591,58 @@ class BenchmarkRunner:
             "report": report_path,
             "summary": summary_path,
             "cases": cases_path,
+            "repeatCompare": compare_path,
         }
+
+
+#: 复跑比对只看这些字段。耗时类字段天然有波动（本机噪声、排队），不参与一致性判定。
+REPEAT_COMPARED_FIELDS = (
+    "status",
+    "route",
+    "http_status",
+    "decision",
+    "placeholders",
+    "unknown_codes",
+    "input_tokens",
+    "output_tokens",
+    "tool_calls",
+    "score",
+    "blocked",
+    "error",
+)
+
+
+def _comparable(outcome: CaseOutcome) -> dict[str, Any]:
+    return {name: getattr(outcome, name) for name in REPEAT_COMPARED_FIELDS}
+
+
+def diff_outcomes(first: list[CaseOutcome], other: list[CaseOutcome], *, run_index: int) -> list[dict[str, Any]]:
+    """比对两轮逐例结果，返回不一致项。只报字段级差异，不做任何容错抹平。"""
+    diffs: list[dict[str, Any]] = []
+    first_by_id = {outcome.case_id: outcome for outcome in first}
+    for outcome in other:
+        base = first_by_id.get(outcome.case_id)
+        if base is None:
+            diffs.append(
+                {"run": run_index, "caseId": outcome.case_id, "field": "<case>", "first": "缺失", "this": "新增"}
+            )
+            continue
+        left, right = _comparable(base), _comparable(outcome)
+        for name in REPEAT_COMPARED_FIELDS:
+            if left[name] != right[name]:
+                diffs.append(
+                    {
+                        "run": run_index,
+                        "caseId": outcome.case_id,
+                        "field": name,
+                        "first": left[name],
+                        "this": right[name],
+                    }
+                )
+    for case_id in first_by_id:
+        if case_id not in {outcome.case_id for outcome in other}:
+            diffs.append({"run": run_index, "caseId": case_id, "field": "<case>", "first": "有", "this": "缺失"})
+    return diffs
 
 
 def validate_manifest(manifest: dict[str, Any], schema: dict[str, Any]) -> list[str]:

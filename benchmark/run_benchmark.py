@@ -50,6 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--plan", action="store_true", help="只列用例与判定计划，不连服务")
     parser.add_argument(
+        "--repeats",
+        type=int,
+        default=None,
+        help="重复运行轮数（缺省取 manifest 的 repeatCount）；第二轮起逐例比对判定类字段",
+    )
+    parser.add_argument(
         "--missing-outcome",
         default="PASSED",
         choices=("PASSED", "FAILED", "IN_PROGRESS", "UNKNOWN"),
@@ -81,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         mode=args.mode,
         missing_outcome=args.missing_outcome,
     )
-    result = runner.run(manifest, repo_root=REPO_ROOT, plan_only=args.plan)
+    result = runner.run(manifest, repo_root=REPO_ROOT, plan_only=args.plan, repeats=args.repeats)
 
     out_dir = Path(args.out) if args.out else REPO_ROOT / "runs" / "benchmark" / str(manifest["runId"])
     paths = runner.write_outputs(result, out_dir)
@@ -101,6 +107,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"判据分层 {summary['claimModes']}，文本判占比 {summary['textShare']}")
     if summary["textShareNote"]:
         print(f"  {summary['textShareNote']}")
+    verdict = "逐例一致" if summary["repeatStable"] else f"不一致 {summary['repeatDiffCount']} 处"
+    print(f"复跑 {summary['repeats']} 轮：{verdict}（{summary['repeatNote']}）")
+    for diff in summary["repeatDiffSample"]:
+        print(f"  第 {diff['run']} 轮 {diff['caseId']} 字段 {diff['field']}：{diff['first']} → {diff['this']}")
     print(f"分组均值 {summary['groupMeans']}，宏平均 {summary['macroScore']}")
     if not summary["macroComparable"]:
         print(
@@ -114,6 +124,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.plan:
         return 0
+    if not summary["repeatStable"]:
+        print("\n重复运行结果不一致，拒绝按通过的运行收尾", file=sys.stderr)
+        return 1
     bad = [outcome for outcome in result["outcomes"] if outcome.status != PASS]
     if bad:
         print(f"\n{len(bad)} 例未通过（{', '.join(sorted({item.status for item in bad}))}）", file=sys.stderr)
