@@ -27,6 +27,34 @@ from runner import BenchmarkRunner, HttpTransport, load_manifest_schema, validat
 class DryTransport:
     """隔离自检用：不发网络请求，固定返回可判定的答复，形状与真实 Envelope 一致。"""
 
+    #: 让 runner 把 dry 运行判成 DEGRADED：隔离自检的答复不能当成通过。
+    placeholder_code = "DRY_TRANSPORT"
+
+    def get(self, path, params, headers):
+        if "reviews/search" in path:
+            return 200, {
+                "schemaVersion": "1.0",
+                "status": "OK",
+                "data": {
+                    "items": [
+                        {
+                            "reviewNoteId": "note:dry",
+                            "courseCode": params.get("courseCode"),
+                            "teacherKey": None,
+                            "termId": None,
+                            "sourceKind": "SYNTHETIC",
+                            "publishedAt": None,
+                            "sourceUrl": "https://example.invalid/",
+                            "excerpt": "隔离自检占位评价",
+                            "dimensions": ["GRADING"],
+                            "matchStatus": "COURSE_ONLY",
+                            "sourceRefId": "ref:dry",
+                        }
+                    ]
+                },
+            }
+        return 200, {"schemaVersion": "1.0", "status": "OK", "data": {}}
+
     def post(self, path, body, headers):
         if path.endswith("/sessions"):
             return 201, {"schemaVersion": "1.0", "status": "OK", "data": {"sessionToken": "dry-token"}}

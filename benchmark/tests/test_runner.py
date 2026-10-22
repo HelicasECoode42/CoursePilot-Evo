@@ -74,9 +74,13 @@ GOLD = {
 class FakeTransport:
     """按调用顺序返回预设响应，记录每次请求体，便于断言构造结果。"""
 
-    def __init__(self, planning: list[tuple[int, dict]] | None = None) -> None:
+    def __init__(
+        self, planning: list[tuple[int, dict]] | None = None, gets: list[tuple[int, dict]] | None = None
+    ) -> None:
         self.planning = list(planning or [])
+        self.gets = list(gets or [])
         self.calls: list[tuple[str, dict, dict]] = []
+        self.get_calls: list[tuple[str, dict, dict]] = []
 
     def post(self, path, body, headers):
         self.calls.append((path, body, headers))
@@ -86,6 +90,11 @@ class FakeTransport:
             # 落记录不受被测行为影响，固定回一条 id，让用例只关心目标端点的响应。
             return 201, envelope({"academicRecordId": "record:1"})
         status, payload = self.planning.pop(0)
+        return status, payload
+
+    def get(self, path, params, headers):
+        self.get_calls.append((path, params, headers))
+        status, payload = self.gets.pop(0)
         return status, payload
 
 
@@ -678,3 +687,81 @@ def test_intent_extra_fields_are_dropped_with_note() -> None:
     assert constraint["courseCode"] is None
     assert constraint["sourceText"] == "周三下午不能排课"
     assert any("sectionRange" in note for note in plan.notes)
+
+
+# -- 评价检索（GET 通道）---------------------------------------------------
+REVIEW_FIXTURE = {
+    "reviewNotes": [
+        {
+            "reviewNoteId": "note:1",
+            "courseCode": "08306029",
+            "teacherKey": None,
+            "termId": None,
+            "sourceKind": "SYNTHETIC",
+            "excerpt": "张三老师给分不错",
+            "dimensions": ["GRADING"],
+            "matchStatus": "COURSE_ONLY",
+            "sourceRefId": "ref:1",
+        }
+    ],
+    "teacherName": "张三",
+}
+
+
+def test_review_fixture_goes_review_route_with_get_step() -> None:
+    from case_adapters import build_plan
+
+    plan = build_plan({"caseId": "G4-004", "groupId": "G4", "curriculumSnapshotId": "3c405feaa6d7"}, REVIEW_FIXTURE)
+    assert plan.route == "REVIEW"
+    step = plan.steps[0]
+    assert step.method == "GET"
+    assert step.path == "/api/v1/reviews/search"
+    assert step.params["courseCode"] == "08306029"
+    assert any("courseCode 必填" in note for note in plan.notes)
+
+
+def test_review_route_without_course_code_is_unsupported() -> None:
+    from case_adapters import UnsupportedCase, build_plan
+
+    with pytest.raises(UnsupportedCase):
+        build_plan(
+            {"caseId": "G4-004", "groupId": "G4", "curriculumSnapshotId": "3c405feaa6d7"},
+            {"reviewNotes": [{"reviewNoteId": "n1"}]},
+        )
+
+
+def test_runner_calls_get_for_review_route(tmp_path: Path) -> None:
+    cases = tmp_path / "review_cases"
+    cases.mkdir()
+    (cases / "G4-004.json").write_text(
+        json.dumps(
+            {
+                "caseId": "G4-004",
+                "groupId": "G4",
+                "curriculumSnapshotId": "3c405feaa6d7",
+                "inputFixtureRef": "review_fixtures/G4-004.json",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    fx = tmp_path / "review_fixtures"
+    fx.mkdir()
+    (fx / "G4-004.json").write_text(json.dumps(REVIEW_FIXTURE, ensure_ascii=False), encoding="utf-8")
+    gold = tmp_path / "gold_review"
+    gold.mkdir()
+    (gold / "G4-004.json").write_text(json.dumps(GOLD, ensure_ascii=False), encoding="utf-8")
+
+    transport = FakeTransport(gets=[(200, envelope({"items": REVIEW_FIXTURE["reviewNotes"]}))])
+    runner = BenchmarkRunner(transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts")
+    outcome = runner.run_case(
+        {
+            "caseId": "G4-004",
+            "groupId": "G4",
+            "inputFixtureRef": "review_fixtures/G4-004.json",
+            "curriculumSnapshotId": "3c405feaa6d7",
+        }
+    )
+    assert outcome.route == "REVIEW"
+    assert outcome.status == PASS
+    assert transport.get_calls[0][1]["courseCode"] == "08306029"
