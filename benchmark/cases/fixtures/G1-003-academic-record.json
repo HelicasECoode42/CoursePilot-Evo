@@ -1,6 +1,6 @@
 {
   "provenance": "SYNTHETIC_FICTION",
-  "note": "虚构的已修记录：该课已修，但学生未提供成绩是否合格。",
+  "note": "虚构的已修记录：该课已修，但学生未提供成绩是否合格。 该课成绩是否合格未知（scorePassed 为 null），据此写 outcome=UNKNOWN。",
   "termId": "2025-2026-2",
   "termLabel": "二(春)",
   "studentTerm": 5,
@@ -12,7 +12,8 @@
       "credits": 3.0,
       "category": "专业选修课",
       "termIndex": 5,
-      "scorePassed": null
+      "scorePassed": null,
+      "outcome": "UNKNOWN"
     }
   ],
   "englishTaughtCourse": {
