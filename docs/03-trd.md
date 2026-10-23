@@ -4,7 +4,7 @@
 
 | 项 | 基线 |
 | --- | --- |
-| 状态 | 可执行设计与接口契约；服务尚未实现 |
+| 状态 | 可执行设计与接口契约；三端均有可运行实现，仅学业核对链路实测打通 |
 | 产品 | [PRD](02-prd.md)、[需求维度](14-student-choice-research-and-ux.md) |
 | 技术 | Vue 3/Vite/Router；Python 3.11+/FastAPI/Pydantic；Java 21/Spring Boot/MySQL/Flyway |
 | 字段真源 | [OpenAPI/JSON Schema](../contracts/README.md) |
