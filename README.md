@@ -8,6 +8,8 @@
 
 先读[团队总览：业务流程、核心对象、模块分工](docs/15-team-baseline-and-batches.md)，再到[个人模块业务说明与 TRD](docs/05-team-and-sub-trds.md)理解完整职责，最后领取[本期业务任务](docs/19-delivery-plan.md)。看板标题是业务交付，接口和实现步骤在卡片里。
 
+上手和维护：[E 模块（学生网页与老师报告）指南](docs/23-web-e-module-guide.md)、[仓库维护手册](docs/24-repo-maintenance.md)。
+
 ## 团队进度入口
 
 [开发与验收看板](https://github.com/users/HelicasECoode42/projects/1) · [队员操作说明](docs/18-team-progress-guide.md) · [第五至第八周排期草案（待核对）](docs/19-delivery-plan.md)。仅维护周次；任务和 Bug 使用同一看板，审批证据保留在关联 PR。
