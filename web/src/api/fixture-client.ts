@@ -125,23 +125,6 @@ const DEMO_AUDIT: AuditResult = {
  * 演示模式不生成课程推荐：没有核验器就不该有候选。
  * 结果页的候选渲染由单测用替身客户端覆盖，不由学生可见的演示模式承担。
  */
-const DEMO_ANSWER: PlanningAnswer = {
-  taskId: "fixture-task-e2",
-  traceId: "fixture-trace-e2",
-  decision: "UNABLE_TO_VERIFY",
-  academicAudit: DEMO_AUDIT,
-  recommendations: [],
-  clarification: null,
-  unknowns: [
-    {
-      code: "FIXTURE_DATA",
-      message: "演示模式没有核验器，不生成课程候选；请开启真实服务再试。",
-      field: null,
-      retryable: false,
-    },
-  ],
-  usage: { inputTokens: null, outputTokens: null, toolCalls: 0, elapsedMs: 0 },
-};
 
 /**
  * 演示方案的 id。方案里 CS102 已定在周一第 1-2 节，CS103 尚未选班次；
@@ -172,6 +155,62 @@ const FIXTURE_HARD_CONSTRAINTS: Constraint[] = [
     sourceText: "周五不排课（演示数据）",
   },
 ];
+
+/**
+ * 演示方案的核验结论。
+ *
+ * scope 只能是 SIMULATION：演示数据不是真实班次，标成 REAL_TIMETABLE 会让
+ * 「缺班次不给绿色通过」那道展示门禁失效，页面就会把一份虚构课表显示成
+ * 已核验通过。verdict 写 VALID 只表示「在这组演示数据里没发现违规」，
+ * 页面仍然不会给绿色。
+ */
+const DEMO_VERIFICATION: PlanValidation = {
+  verifierResultId: "fixture-verifier-base",
+  verdict: "VALID",
+  scope: "SIMULATION",
+  curriculumSnapshotId: DEMO_CURRICULUM_ID,
+  offeringSnapshotId: FIXTURE_OFFERING_SNAPSHOT_ID,
+  recordRevision: DEMO_RECORD.revision,
+  violations: [],
+  unknownChecks: [
+    {
+      code: "CLASS_NOT_SELECTED",
+      message: "CS103 尚未选定班次，上课时间无法确认（演示数据）。",
+      field: null,
+      retryable: false,
+    },
+  ],
+  performedChecks: ["PLAN_TIME_OVERLAP", "HARD_CONSTRAINT_BLOCK_DAY"],
+  sourceRefIds: ["source:fixture-offering-cs102-01"],
+};
+
+const DEMO_ANSWER: PlanningAnswer = {
+  taskId: "fixture-task-e2",
+  traceId: "fixture-trace-e2",
+  decision: "RECOMMENDATIONS",
+  academicAudit: DEMO_AUDIT,
+  recommendations: [
+    {
+      planId: FIXTURE_PREVIOUS_PLAN_ID,
+      items: structuredClone(FIXTURE_PLAN_BASE_ITEMS),
+      explanation:
+        "（合成）这份方案用于演示结果页与换班次流程，不是真实推荐；课程、教师和时间都是虚构的。",
+      reviewNoteIds: [],
+      verification: DEMO_VERIFICATION,
+    },
+  ],
+  clarification: null,
+  unknowns: [
+    {
+      code: "FIXTURE_DATA",
+      message:
+        "演示模式没有真实核验器，这份方案和它的判决都是合成的，不能当作已核验结果。",
+      field: null,
+      retryable: false,
+    },
+  ],
+  usage: { inputTokens: null, outputTokens: null, toolCalls: 0, elapsedMs: 0 },
+};
 
 /**
  * CS103 的三个班次刻意演示三种状态：
@@ -221,7 +260,32 @@ const CS103_OFFERINGS: CourseOffering[] = [
   },
 ];
 
+/**
+ * 方案里已选的 CS102 班次。
+ *
+ * 结果页判断「候选班次会不会撞课」时要先知道已选课程的时间，而时间是按
+ * classId 再查一次班次拿到的。这里不给 CS102 的数据，页面就只能说
+ * 「时间未知」，三态里的「有冲突」在演示里永远出不来。
+ */
+const CS102_OFFERINGS: CourseOffering[] = [
+  {
+    courseCode: "CS102",
+    classId: "CS102-01",
+    teacherKey: "teacher-li-01",
+    teacherText: "李明（合成）",
+    credits: 4,
+    capacity: 50,
+    meetingTextRaw: "周一 1-2 节 1-16 周",
+    meetings: [
+      { dayOfWeek: 1, sectionStart: 1, sectionEnd: 2, weeks: WEEKS_1_TO_16 },
+    ],
+    parseStatus: "PARSED",
+    sourceRefId: "source:fixture-offering-cs102-01",
+  },
+];
+
 const FIXTURE_OFFERINGS = new Map<string, CourseOffering[]>([
+  ["CS102", CS102_OFFERINGS],
   ["CS103", CS103_OFFERINGS],
 ]);
 
@@ -534,8 +598,9 @@ export class FixtureApiClient implements CoursePilotApiClient {
 
   async getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport> {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    if (!this.sessionToken)
-      throw new Error("Fixture session has not been created");
+    // 老师报告不是学生会话里的一页，打开它只能靠直接输网址，而直接输网址就是
+    // 整页加载、内存里的会话必然是空的。演示模式下再要求会话，这一页就永远
+    // 看不到内容。真实模式仍然要求 bearer + 管理密钥，由服务端强制。
     return { ...structuredClone(FIXTURE_RUN_REPORT), runId };
   }
 
