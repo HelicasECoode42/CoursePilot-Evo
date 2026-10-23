@@ -10,8 +10,14 @@ import type {
   Envelope,
   PlanningAnswer,
   PlanningRequest,
+  ReviewNote,
+  RunReport,
+  SessionOfferingList,
+  SessionPlanReplaceInput,
+  SessionPlanReplacement,
   SessionResult,
   SnapshotSummary,
+  TeacherCourseOption,
 } from "../contracts";
 
 export type ApiFailureKind =
@@ -68,6 +74,38 @@ export interface CoursePilotApiClient {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<PlanningAnswer>;
+  /** E4：本会话方案中某门课可替换的开课班次。items 为空是正常状态，候选不构成核验结论。 */
+  searchSessionOfferings(
+    previousPlanId: string,
+    courseCode: string,
+    signal?: AbortSignal,
+  ): Promise<SessionOfferingList>;
+  /**
+   * E4：把方案里的一门课换成学生选中的班次，并由服务端对整份新方案重新核验。
+   * 请求必须带 Idempotency-Key；判决原样返回，不能被页面改写。
+   */
+  replaceSessionPlanItem(
+    body: SessionPlanReplaceInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanReplacement>;
+  /**
+   * E4：查询教师与课程的对应。契约要求 curriculumSnapshotId；courseCode 传 null 表示
+   * 不按课程过滤。只返回第一页（契约默认 limit），nextCursor 暂不翻页。
+   */
+  listTeacherCourseOptions(
+    curriculumSnapshotId: string,
+    courseCode: string | null,
+    signal?: AbortSignal,
+  ): Promise<TeacherCourseOption[]>;
+  /** E4：检索课程（可选教师）的评价证据。teacherKey 传 null 表示不按教师过滤。 */
+  searchReviews(
+    courseCode: string,
+    teacherKey: string | null,
+    signal?: AbortSignal,
+  ): Promise<ReviewNote[]>;
+  /** E4：受限的老师运行报告。服务端还要求管理密钥，浏览器端拿不到时会得到 403，页面需要照实说明。 */
+  getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport>;
   clearSession(): void;
   fixtureAcademicRecordId(): string | null;
 }
@@ -91,9 +129,52 @@ const validateAuditResult = ajv.getSchema(
 const validatePlanningAnswer = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/PlanningAnswer",
 );
+const validateCourseOffering = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/CourseOffering",
+);
+const validatePlanItem = ajv.getSchema("coursepilot-domain-v1#/$defs/PlanItem");
+const validateConstraint = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/Constraint",
+);
+const validatePlanValidation = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/PlanValidation",
+);
+const validateTeacherCourseOption = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/TeacherCourseOption",
+);
+const validateReviewNote = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/ReviewNote",
+);
+const validateRunReport = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/RunReport",
+);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 拼查询串时跳过 null 和 undefined，让可选参数真的不出现在 URL 里，
+ * 而不是变成字面量 "null"。
+ */
+function withQuery(
+  path: string,
+  params: Record<string, string | null | undefined>,
+): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== null && value !== undefined) search.set(key, value);
+  }
+  const query = search.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+/** 数组中每一项都要过对应的 Ajv 校验；空数组直接通过，空是合法的业务状态。 */
+function everyValid(
+  items: unknown[],
+  validate: ((value: unknown) => boolean) | undefined,
+): boolean {
+  return items.every((item) => Boolean(validate?.(item)));
 }
 
 function parseEnvelope(value: unknown): Envelope<unknown> {
@@ -400,6 +481,149 @@ export class HttpApiClient implements CoursePilotApiClient {
       );
     }
     return envelope.data as PlanningAnswer;
+  }
+
+  async searchSessionOfferings(
+    previousPlanId: string,
+    courseCode: string,
+    signal?: AbortSignal,
+  ): Promise<SessionOfferingList> {
+    const { response, envelope } = await this.request(
+      withQuery("/api/v1/session-offerings", { previousPlanId, courseCode }),
+      { method: "GET", sessionToken: this.requireSession(), signal },
+    );
+    // 空 items 是业务状态；只有非 OK 且非 UNKNOWN 才算系统错误。
+    if (!isSuccessEnvelope(envelope)) {
+      throw errorForResponse(response.status, envelope);
+    }
+    const data = envelope.data;
+    if (
+      !isObject(data) ||
+      data.previousPlanId !== previousPlanId ||
+      data.courseCode !== courseCode ||
+      !Array.isArray(data.items) ||
+      !everyValid(data.items, validateCourseOffering)
+    ) {
+      throw new ApiFailure(
+        "服务返回的开课班次不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as SessionOfferingList;
+  }
+
+  async replaceSessionPlanItem(
+    body: SessionPlanReplaceInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanReplacement> {
+    const { response, envelope } = await this.request(
+      "/api/v1/session-plans/replace",
+      {
+        method: "POST",
+        sessionToken: this.requireSession(),
+        signal,
+        body,
+        idempotencyKey,
+      },
+    );
+    if (!isSuccessEnvelope(envelope)) {
+      throw errorForResponse(response.status, envelope);
+    }
+    const data = envelope.data;
+    if (
+      !isObject(data) ||
+      data.previousPlanId !== body.previousPlanId ||
+      typeof data.planId !== "string" ||
+      !Array.isArray(data.items) ||
+      !everyValid(data.items, validatePlanItem) ||
+      !Array.isArray(data.hardConstraints) ||
+      !everyValid(data.hardConstraints, validateConstraint) ||
+      !validatePlanValidation?.(data.verification)
+    ) {
+      throw new ApiFailure(
+        "服务返回的换班次结果不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as SessionPlanReplacement;
+  }
+
+  async listTeacherCourseOptions(
+    curriculumSnapshotId: string,
+    courseCode: string | null,
+    signal?: AbortSignal,
+  ): Promise<TeacherCourseOption[]> {
+    const { response, envelope } = await this.request(
+      withQuery("/api/v1/teacher-course-options", {
+        curriculumSnapshotId,
+        courseCode,
+      }),
+      { method: "GET", sessionToken: this.requireSession(), signal },
+    );
+    if (!isSuccessEnvelope(envelope)) {
+      throw errorForResponse(response.status, envelope);
+    }
+    const data = envelope.data;
+    if (
+      !isObject(data) ||
+      !Array.isArray(data.items) ||
+      !everyValid(data.items, validateTeacherCourseOption)
+    ) {
+      throw new ApiFailure(
+        "服务返回的教师课程信息不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return data.items as TeacherCourseOption[];
+  }
+
+  async searchReviews(
+    courseCode: string,
+    teacherKey: string | null,
+    signal?: AbortSignal,
+  ): Promise<ReviewNote[]> {
+    const { response, envelope } = await this.request(
+      withQuery("/api/v1/reviews/search", { courseCode, teacherKey }),
+      { method: "GET", sessionToken: this.requireSession(), signal },
+    );
+    if (!isSuccessEnvelope(envelope)) {
+      throw errorForResponse(response.status, envelope);
+    }
+    const data = envelope.data;
+    if (
+      !isObject(data) ||
+      !Array.isArray(data.items) ||
+      !everyValid(data.items, validateReviewNote)
+    ) {
+      throw new ApiFailure(
+        "服务返回的评价证据不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return data.items as ReviewNote[];
+  }
+
+  async getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport> {
+    const { response, envelope } = await this.request(
+      `/api/v1/reports/runs/${encodeURIComponent(runId)}`,
+      { method: "GET", sessionToken: this.requireSession(), signal },
+    );
+    if (!isSuccessEnvelope(envelope)) {
+      throw errorForResponse(response.status, envelope);
+    }
+    if (!validateRunReport?.(envelope.data)) {
+      throw new ApiFailure(
+        "服务返回的运行报告不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as RunReport;
   }
 
   private async request(

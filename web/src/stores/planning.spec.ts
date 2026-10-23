@@ -63,6 +63,22 @@ function fakeClient(
     submitPlanning: vi.fn(async () => {
       throw new ApiFailure("stub 未实现规划", "invalid_response");
     }),
+    // E4 方法在这份 store 测试里用不到，统一给出明确的未实现错误。
+    searchSessionOfferings: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现班次搜索", "invalid_response");
+    }),
+    replaceSessionPlanItem: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现换班次", "invalid_response");
+    }),
+    listTeacherCourseOptions: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现教师查询", "invalid_response");
+    }),
+    searchReviews: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现评价检索", "invalid_response");
+    }),
+    getRunReport: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现运行报告", "invalid_response");
+    }),
     ...overrides,
   };
 }

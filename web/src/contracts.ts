@@ -222,3 +222,132 @@ export interface PlanningAnswer {
 export interface AcademicRecordList {
   items: AcademicRecord[];
 }
+
+// --- E4: 换班次、教师与评价、运行报告（字段以 contracts/schemas/domain.schema.json 为准） ---
+
+/** 一次上课时段。weeks 是教学周号，去重后不超过 60 个。 */
+export interface Meeting {
+  dayOfWeek: number;
+  sectionStart: number;
+  sectionEnd: number;
+  weeks: number[];
+}
+
+/**
+ * 一个开课班次。只是可替换的候选，不构成核验结论：候选自身无冲突不代表
+ * 放进整份方案后无冲突，必须经换班次接口对整份方案重新核验。
+ * parseStatus 不是 PARSED 时 meetings 为空，页面要说明时间未能确认。
+ */
+export interface CourseOffering {
+  courseCode: string;
+  classId: string;
+  teacherKey: string | null;
+  teacherText: string;
+  credits: number | null;
+  capacity: number | null;
+  meetingTextRaw: string;
+  meetings: Meeting[];
+  parseStatus: "PARSED" | "UNPARSED" | "INVALID";
+  sourceRefId: string;
+}
+
+/** 学生的硬条件。kind 决定哪些字段必须非空，见 domain.schema.json 的 allOf。 */
+export interface Constraint {
+  kind:
+    | "BLOCK_DAY"
+    | "BLOCK_SECTION"
+    | "BLOCK_SLOT"
+    | "PIN_TEACHER_COURSE"
+    | "PIN_COURSE"
+    | "MAX_CREDITS";
+  courseCode: string | null;
+  teacherKey: string | null;
+  dayOfWeek: number | null;
+  section: number | null;
+  value: number | null;
+  sourceText: string;
+}
+
+/**
+ * 教师与课程的对应。历史与当期分开：HISTORICAL_ONLY 只说明教过，不说明本学期会开；
+ * UNKNOWN 表示当期是否开课无法确认，页面不能把它显示成可选。
+ */
+export interface TeacherCourseOption {
+  courseCode: string;
+  teacherKey: string;
+  teacherDisplayName: string;
+  availability: "CURRENT_VERIFIED" | "HISTORICAL_ONLY" | "UNKNOWN";
+  reviewNoteIds: string[];
+  classIds: string[];
+}
+
+/**
+ * 一条评价证据。matchStatus 不是 COURSE_TEACHER_MATCHED 时，依据只能对应课程或
+ * 未核实的教师，页面要标注「依据有限」，不能当作该教师的评价。
+ */
+export interface ReviewNote {
+  reviewNoteId: string;
+  courseCode: string;
+  teacherKey: string | null;
+  termId: string | null;
+  sourceKind:
+    | "OFFICIAL_SYLLABUS"
+    | "USER_IMPORT"
+    | "EXTERNAL_LINK"
+    | "SYNTHETIC";
+  publishedAt: string | null;
+  sourceUrl: string | null;
+  excerpt: string;
+  dimensions: Array<
+    | "GRADING"
+    | "ATTENDANCE"
+    | "WORKLOAD"
+    | "EXAM"
+    | "GROUP_WORK"
+    | "PRESENTATION"
+    | "TEACHING"
+    | "OVERALL"
+  >;
+  matchStatus: "COURSE_TEACHER_MATCHED" | "COURSE_ONLY" | "UNVERIFIED";
+  sourceRefId: string;
+}
+
+/** 受限的运行报告。heldOutScore 与各项平均值未知时为 null，不转成 0。 */
+export interface RunReport {
+  runId: string;
+  harnessVersion: string;
+  parentVersion: string | null;
+  decision: "BASELINE" | "PROMOTED" | "REJECTED";
+  heldOutScore: number | null;
+  averageInputTokens: number | null;
+  averageOutputTokens: number | null;
+  averageToolCalls: number | null;
+  averageLatencyMs: number | null;
+  failureCategories: string[];
+}
+
+/** `GET /api/v1/session-offerings` 的 data。items 为空数组是正常业务状态。 */
+export interface SessionOfferingList {
+  previousPlanId: string;
+  courseCode: string;
+  items: CourseOffering[];
+}
+
+/** `POST /api/v1/session-plans/replace` 的请求体。selectedClassId 必须来自搜索结果。 */
+export interface SessionPlanReplaceInput {
+  previousPlanId: string;
+  courseCode: string;
+  selectedClassId: string;
+}
+
+/**
+ * 换班次后的新方案。verification 是对整份新方案的判决，原样展示，
+ * 不能把 INVALID 或 UNKNOWN 改写成有效。
+ */
+export interface SessionPlanReplacement {
+  previousPlanId: string;
+  planId: string;
+  items: PlanItem[];
+  hardConstraints: Constraint[];
+  verification: PlanValidation;
+}
