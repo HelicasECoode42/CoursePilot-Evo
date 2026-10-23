@@ -1,0 +1,12 @@
+{
+  "courseCode": "CS103",
+  "classId": "CS103-01",
+  "teacherKey": null,
+  "teacherText": "待定",
+  "credits": null,
+  "capacity": null,
+  "meetingTextRaw": "时间待定",
+  "meetings": [],
+  "parseStatus": "UNPARSED",
+  "sourceRefId": "offering:2025-fall:CS103-01"
+}

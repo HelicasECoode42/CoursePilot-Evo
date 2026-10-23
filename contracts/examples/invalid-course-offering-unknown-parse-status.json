@@ -1,0 +1,14 @@
+{
+  "courseCode": "CS102",
+  "classId": "CS102-02",
+  "teacherKey": "teacher:li-ming",
+  "teacherText": "李明",
+  "credits": 4,
+  "capacity": 60,
+  "meetingTextRaw": "星期三第3-4节{1-16周}",
+  "meetings": [
+    { "dayOfWeek": 3, "sectionStart": 3, "sectionEnd": 4, "weeks": [1, 2, 3] }
+  ],
+  "parseStatus": "TIME_UNKNOWN",
+  "sourceRefId": "offering:2025-fall:CS102-02"
+}
