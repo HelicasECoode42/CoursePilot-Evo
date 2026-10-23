@@ -210,14 +210,18 @@ describe("student question page", () => {
     expect(store.draft.classPreferencesReviewed).toBe(true);
   });
 
-  it("keeps teacher choice as a handoff until course options exist", async () => {
+  it("hands teacher choice off to the comparison page instead of picking one inline", async () => {
+    // 教师必须和具体课程一起选，而这一步没有课程资料，所以这里不提供选择，
+    // 只给一个去比较页的入口。比较页在那里按课程列出教师与历史评价。
     store.setMotives(["SPECIFIC_TEACHER"]);
     await router.push("/plan/questions/teacher");
     const wrapper = mountPage();
 
     expect(router.currentRoute.value.path).toBe("/plan/questions/teacher");
-    expect(wrapper.text()).toContain("当前页面没有课程教师选项");
     expect(wrapper.find("select").exists()).toBe(false);
+    const handoff = wrapper.find('a[href="/plan/teachers"]');
+    expect(handoff.exists()).toBe(true);
+    expect(handoff.text()).toContain("比较课程与教师");
   });
 
   it("asks students to choose when multiple curricula exist without showing internal IDs", async () => {

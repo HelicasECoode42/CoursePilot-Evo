@@ -1,18 +1,30 @@
 <script setup lang="ts">
 /**
- * 规划结果页（E-F4 前半）。
+ * 规划结果页（E-F4）。
  *
- * 这一页只做两件事：把 store 里的 PlanningAnswer 显示出来，以及把
- * 「结论该用什么颜色」交给 domain/answer-display.ts。
- * 页面本身不判断 verdict/scope，也不从 violations 为空推断通过。
+ * 前半：把 store 里的 PlanningAnswer 显示出来，颜色与文案交给 domain/answer-display.ts。
+ * 后半：在结果页搜索某门课的开课班次，并替换方案里的一门课。
+ *   - 搜索时的「有冲突 / 可选 / 无法确认」只是预览，不是核验结论；
+ *   - 只有替换接口返回的 verification（对整份新方案的判决）才是结论，原样展示。
  */
-import { computed } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api";
-import type { PlanningAnswer, PlanValidation } from "../contracts";
+import { ApiFailure } from "../api/client";
+import type {
+  CourseOffering,
+  Issue,
+  Meeting,
+  PlanItem,
+  PlanValidation,
+  PlanningAnswer,
+  Recommendation,
+  SessionPlanReplacement,
+} from "../contracts";
 import {
   collectUnknowns,
   describeVerification,
+  type VerificationView,
 } from "../domain/answer-display";
 import { usePlanningStore } from "../stores/planning";
 
@@ -35,18 +47,405 @@ const headline = computed(() => {
   }
 });
 
-const unknowns = computed(() =>
+/** 一份方案在页面上的样子。替换过就是替换后的新版本，判决只用新返回的那一份。 */
+interface PlanView {
+  planId: string;
+  items: PlanItem[];
+  verification: PlanValidation;
+  /** 替换前的推荐 planId；未替换时为 null。 */
+  replacedFrom: string | null;
+}
+
+interface PlanEntry {
+  index: number;
+  recommendation: Recommendation;
+  plan: PlanView;
+  view: VerificationView;
+}
+
+/** 替换结果按「原推荐的 planId」保存，结果页重新提交时整体清空。 */
+const replacements = ref<Record<string, SessionPlanReplacement>>({});
+
+function currentPlan(recommendation: Recommendation): PlanView {
+  const replaced = replacements.value[recommendation.planId];
+  if (replaced === undefined) {
+    return {
+      planId: recommendation.planId,
+      items: recommendation.items,
+      verification: recommendation.verification,
+      replacedFrom: null,
+    };
+  }
+  return {
+    planId: replaced.planId,
+    items: replaced.items,
+    verification: replaced.verification,
+    replacedFrom: recommendation.planId,
+  };
+}
+
+const recommendations = computed<Recommendation[]>(
+  () => result.value?.recommendations ?? [],
+);
+
+/** 未知项：答复级 + 每份当前方案的核验级（替换后只用新判决）。 */
+const unknowns = computed<Issue[]>(() =>
   result.value === null
     ? []
     : collectUnknowns(
         result.value.unknowns,
-        result.value.recommendations.map((item) => item.verification),
+        recommendations.value.map((item) => currentPlan(item).verification),
       ),
 );
 
-/** 展示门禁：把本次答复的未知项一并交给 describeVerification，带受控缺口标记时降级。 */
-function verificationView(validation: PlanValidation) {
+/** 展示门禁：统一交给 describeVerification，带受控缺口标记时降级。 */
+function verificationView(validation: PlanValidation): VerificationView {
   return describeVerification(validation, unknowns.value);
+}
+
+const planEntries = computed<PlanEntry[]>(() =>
+  recommendations.value.map((recommendation, index) => {
+    const plan = currentPlan(recommendation);
+    return {
+      index,
+      recommendation,
+      plan,
+      view: verificationView(plan.verification),
+    };
+  }),
+);
+
+function verdictClass(view: VerificationView): string {
+  if (view.allowGreenPass) return "notice--success";
+  if (view.tone === "conflict") return "notice--error";
+  return "notice--warning";
+}
+
+function issuesOf(validation: PlanValidation): Issue[] {
+  return [...validation.violations, ...validation.unknownChecks];
+}
+
+/* ---------- 搜索班次与替换 ---------- */
+
+/** 已选课程的已知时段，用于搜索时的预览比较。 */
+interface KnownPlanMeeting {
+  courseCode: string;
+  meetings: Meeting[];
+}
+
+interface OfferingRow {
+  classId: string;
+  kind: "clear" | "conflict" | "unknown";
+  /** 冲突或无法确认时显示在禁用按钮上；可选时按钮文字是「选这个班次」。 */
+  label: string;
+  note: string;
+  noteId: string;
+  timeText: string;
+  teacherText: string;
+}
+
+const openKey = ref<string | null>(null);
+const courseInput = ref("");
+const searchStatus = ref<"idle" | "loading" | "ready" | "error">("idle");
+const searchError = ref("");
+const searchedCourse = ref<string | null>(null);
+const offerings = ref<CourseOffering[]>([]);
+const knownPlanMeetings = ref<KnownPlanMeeting[]>([]);
+const planGaps = ref<string[]>([]);
+const selectedClassId = ref<string | null>(null);
+const replaceStatus = ref<"idle" | "submitting" | "error">("idle");
+const replaceError = ref("");
+
+let searchController: AbortController | null = null;
+let replaceController: AbortController | null = null;
+let searchVersion = 0;
+let replaceVersion = 0;
+let replaceKey: string | null = null;
+
+function newIdempotencyKey(): string {
+  return `web-${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
+function visibleError(error: unknown): string {
+  if (error instanceof ApiFailure) return error.message;
+  return "暂时无法完成请求，请稍后重试。";
+}
+
+function isAborted(error: unknown): boolean {
+  return error instanceof ApiFailure && error.kind === "aborted";
+}
+
+function clearSelection() {
+  replaceVersion += 1;
+  replaceController?.abort();
+  replaceController = null;
+  selectedClassId.value = null;
+  replaceKey = null;
+  replaceStatus.value = "idle";
+  replaceError.value = "";
+}
+
+function resetSearch() {
+  searchVersion += 1;
+  searchController?.abort();
+  searchController = null;
+  searchStatus.value = "idle";
+  searchError.value = "";
+  searchedCourse.value = null;
+  offerings.value = [];
+  knownPlanMeetings.value = [];
+  planGaps.value = [];
+  clearSelection();
+}
+
+function resetPlanEdits() {
+  openKey.value = null;
+  replacements.value = {};
+  resetSearch();
+}
+
+// 结果换了（重新提交或新答复），之前的替换和搜索都不再适用。
+watch(() => store.planningResult, resetPlanEdits);
+
+onBeforeUnmount(() => {
+  searchController?.abort();
+  replaceController?.abort();
+});
+
+function entryButtonId(index: number): string {
+  return `result-search-entry-${index}`;
+}
+function panelId(index: number): string {
+  return `result-search-panel-${index}`;
+}
+function courseInputId(index: number): string {
+  return `result-search-course-${index}`;
+}
+const focusTargets = new Map<string, HTMLElement>();
+
+/** 记录需要聚焦的按钮和输入框；不直接访问 document，保持页面只依赖 Vue 的引用。 */
+function registerFocus(id: string, element: unknown) {
+  if (element instanceof HTMLElement) focusTargets.set(id, element);
+  else focusTargets.delete(id);
+}
+
+function focusById(id: string) {
+  void nextTick(() => focusTargets.get(id)?.focus());
+}
+
+function isOpen(entry: PlanEntry): boolean {
+  return openKey.value === entry.recommendation.planId;
+}
+
+function togglePanel(entry: PlanEntry) {
+  if (isOpen(entry)) {
+    closePanel(entry);
+    return;
+  }
+  resetSearch();
+  courseInput.value = "";
+  openKey.value = entry.recommendation.planId;
+  focusById(courseInputId(entry.index));
+}
+
+function closePanel(entry: PlanEntry) {
+  openKey.value = null;
+  resetSearch();
+  focusById(entryButtonId(entry.index));
+}
+
+/** 两段时段冲突 = 同一星期、节次区间相交、且周次有交集。周次不相交的单双周课不冲突。 */
+function meetingsOverlap(a: Meeting, b: Meeting): boolean {
+  return (
+    a.dayOfWeek === b.dayOfWeek &&
+    a.sectionStart <= b.sectionEnd &&
+    b.sectionStart <= a.sectionEnd &&
+    a.weeks.some((week) => b.weeks.includes(week))
+  );
+}
+
+async function runSearch(entry: PlanEntry) {
+  const course = courseInput.value.trim();
+  if (course === "") {
+    searchStatus.value = "error";
+    searchError.value = "请先输入课程号。";
+    return;
+  }
+  const plan = entry.plan;
+  const version = ++searchVersion;
+  searchController?.abort();
+  const controller = new AbortController();
+  searchController = controller;
+  clearSelection();
+  searchStatus.value = "loading";
+  searchError.value = "";
+
+  // 方案里其他已选班次的课程：去查它们的时间，用来做搜索时的预览比较。
+  const selected = plan.items.filter(
+    (item) => item.classId !== null && item.courseCode !== course,
+  );
+  const otherCodes = [...new Set(selected.map((item) => item.courseCode))];
+  try {
+    const [target, otherLists] = await Promise.all([
+      api.searchSessionOfferings(plan.planId, course, controller.signal),
+      Promise.all(
+        otherCodes.map((code) =>
+          api.searchSessionOfferings(plan.planId, code, controller.signal),
+        ),
+      ),
+    ]);
+    if (version !== searchVersion) return;
+
+    const known: KnownPlanMeeting[] = [];
+    const gaps: string[] = [];
+    for (const item of selected) {
+      const list = otherLists[otherCodes.indexOf(item.courseCode)];
+      const found = list?.items.find(
+        (candidate) => candidate.classId === item.classId,
+      );
+      if (
+        found === undefined ||
+        found.parseStatus !== "PARSED" ||
+        found.meetings.length === 0
+      ) {
+        gaps.push(item.courseCode);
+      } else {
+        known.push({ courseCode: item.courseCode, meetings: found.meetings });
+      }
+    }
+    offerings.value = target.items;
+    knownPlanMeetings.value = known;
+    planGaps.value = gaps;
+    searchedCourse.value = course;
+    searchStatus.value = "ready";
+  } catch (error) {
+    if (version !== searchVersion || isAborted(error)) return;
+    searchStatus.value = "error";
+    searchError.value = visibleError(error);
+  }
+}
+
+/** 按已知时间判断一个班次。只是预览：时间未知不能当成没有冲突。 */
+function judgeOffering(
+  offering: CourseOffering,
+): Pick<OfferingRow, "kind" | "note"> {
+  if (offering.parseStatus !== "PARSED" || offering.meetings.length === 0) {
+    return {
+      kind: "unknown",
+      note: "上课时间没有解析成功，无法判断是否冲突，不能直接选择。",
+    };
+  }
+  if (offering.meetings.some((meeting) => meeting.weeks.length === 0)) {
+    return {
+      kind: "unknown",
+      note: "上课周次没有确认，无法判断是否冲突，不能直接选择。",
+    };
+  }
+  const conflicts = knownPlanMeetings.value
+    .filter((planned) =>
+      planned.meetings.some((theirs) =>
+        offering.meetings.some((mine) => meetingsOverlap(mine, theirs)),
+      ),
+    )
+    .map((planned) => planned.courseCode);
+  if (conflicts.length > 0) {
+    return {
+      kind: "conflict",
+      note: `与方案中已选的 ${conflicts.join("、")} 时间重叠（仅为预览，提交前需整份核验）。`,
+    };
+  }
+  return {
+    kind: "clear",
+    note: "按已知时间没有发现冲突（仅为预览，提交前仍需整份核验）。",
+  };
+}
+
+const offeringRows = computed<OfferingRow[]>(() =>
+  offerings.value.map((offering, index) => {
+    const judged = judgeOffering(offering);
+    return {
+      classId: offering.classId,
+      kind: judged.kind,
+      label:
+        judged.kind === "conflict"
+          ? "有冲突"
+          : judged.kind === "unknown"
+            ? "无法确认"
+            : "选这个班次",
+      note: judged.note,
+      noteId: `result-offering-note-${index}`,
+      timeText: offering.meetingTextRaw.trim() || "时间未填写",
+      teacherText: offering.teacherText,
+    };
+  }),
+);
+
+const selectedOffering = computed<CourseOffering | null>(
+  () =>
+    offerings.value.find((item) => item.classId === selectedClassId.value) ??
+    null,
+);
+
+function selectOffering(classId: string) {
+  if (replaceStatus.value === "submitting") return;
+  selectedClassId.value = classId;
+  replaceKey = newIdempotencyKey();
+  replaceStatus.value = "idle";
+  replaceError.value = "";
+}
+
+function replacePreview(entry: PlanEntry, classId: string): string {
+  const item = entry.plan.items.find(
+    (candidate) => candidate.courseCode === searchedCourse.value,
+  );
+  if (item === undefined) {
+    return `已选 ${classId}，但当前方案里没有这门课，替换可能会被拒绝。`;
+  }
+  const current =
+    item.classId === null
+      ? `${item.courseCode}（未选班次）`
+      : `${item.courseCode} ${item.classId}`;
+  return `已选 ${classId} 替换 ${current}`;
+}
+
+/** 重新核验 = 对整份新方案调用替换接口。请求进行中再点直接忽略。 */
+async function recheck(entry: PlanEntry) {
+  if (replaceStatus.value === "submitting") return;
+  const course = searchedCourse.value;
+  const classId = selectedClassId.value;
+  if (course === null || classId === null) return;
+
+  const version = ++replaceVersion;
+  replaceController?.abort();
+  const controller = new AbortController();
+  replaceController = controller;
+  const key = replaceKey ?? newIdempotencyKey();
+  replaceKey = key;
+  replaceStatus.value = "submitting";
+  replaceError.value = "";
+  try {
+    const replaced = await api.replaceSessionPlanItem(
+      {
+        previousPlanId: entry.plan.planId,
+        courseCode: course,
+        selectedClassId: classId,
+      },
+      key,
+      controller.signal,
+    );
+    if (version !== replaceVersion) return;
+    replacements.value = {
+      ...replacements.value,
+      [entry.recommendation.planId]: replaced,
+    };
+    openKey.value = null;
+    resetSearch();
+    focusById(entryButtonId(entry.index));
+  } catch (error) {
+    if (version !== replaceVersion || isAborted(error)) return;
+    replaceStatus.value = "error";
+    replaceError.value = visibleError(error);
+  }
 }
 
 async function goBackToQuestions() {
@@ -105,29 +504,33 @@ async function goBackToQuestions() {
         </p>
       </div>
 
-      <div v-else-if="result.recommendations.length" class="option-section">
+      <div v-else-if="planEntries.length" class="option-section">
         <article
-          v-for="recommendation in result.recommendations"
-          :key="recommendation.planId"
+          v-for="entry in planEntries"
+          :key="entry.recommendation.planId"
         >
-          <h2 class="sub-label">方案 {{ recommendation.planId }}</h2>
-          <p
-            class="notice"
-            :class="{
-              'notice--success': verificationView(recommendation.verification)
-                .allowGreenPass,
-              'notice--warning': !verificationView(recommendation.verification)
-                .allowGreenPass,
-            }"
-            role="status"
-          >
-            <strong>
-              {{ verificationView(recommendation.verification).label }}
-            </strong>
-            —— {{ verificationView(recommendation.verification).detail }}
+          <h2 class="sub-label">方案 {{ entry.plan.planId }}</h2>
+          <p v-if="entry.plan.replacedFrom" class="microcopy">
+            这是替换后的新版本（替换前为
+            {{ entry.plan.replacedFrom }}）。下面的核验结论只针对这一版。
           </p>
+          <div class="notice" :class="verdictClass(entry.view)" role="status">
+            <strong>{{ entry.view.label }}</strong>
+            <ul
+              v-if="issuesOf(entry.plan.verification).length"
+              class="summary-list"
+            >
+              <li
+                v-for="issue in issuesOf(entry.plan.verification)"
+                :key="issue.code + issue.message"
+              >
+                {{ issue.message }}
+              </li>
+            </ul>
+            <p v-else class="microcopy">{{ entry.view.detail }}</p>
+          </div>
           <ul class="summary-list">
-            <li v-for="item in recommendation.items" :key="item.courseCode">
+            <li v-for="item in entry.plan.items" :key="item.courseCode">
               {{ item.courseCode }}
               <template v-if="item.teacherKey">
                 · 教师 {{ item.teacherKey }}
@@ -135,7 +538,177 @@ async function goBackToQuestions() {
               <template v-if="item.classId">· 班次 {{ item.classId }}</template>
             </li>
           </ul>
-          <p class="microcopy">{{ recommendation.explanation }}</p>
+          <p v-if="!entry.plan.replacedFrom" class="microcopy">
+            {{ entry.recommendation.explanation }}
+          </p>
+
+          <button
+            :id="entryButtonId(entry.index)"
+            :ref="(el) => registerFocus(entryButtonId(entry.index), el)"
+            class="button button--secondary"
+            type="button"
+            :aria-expanded="isOpen(entry) ? 'true' : 'false'"
+            :aria-controls="panelId(entry.index)"
+            @click="togglePanel(entry)"
+          >
+            搜课程，调整这份方案
+          </button>
+
+          <section
+            v-if="isOpen(entry)"
+            :id="panelId(entry.index)"
+            class="search-panel"
+            aria-label="搜课程，调整这份方案"
+          >
+            <p class="microcopy">
+              搜索结果里的「有冲突」「无法确认」只是预览，不是核验结论。选中班次后，必须重新核验整份方案，以核验结果为准。
+            </p>
+            <form
+              class="search-form"
+              role="search"
+              @submit.prevent="runSearch(entry)"
+            >
+              <label class="field-label" :for="courseInputId(entry.index)">
+                课程号
+              </label>
+              <div class="search-row">
+                <input
+                  :id="courseInputId(entry.index)"
+                  :ref="(el) => registerFocus(courseInputId(entry.index), el)"
+                  v-model="courseInput"
+                  class="text-control"
+                  type="search"
+                  maxlength="32"
+                  autocomplete="off"
+                  placeholder="例如 CS103"
+                />
+                <button
+                  class="button button--primary"
+                  type="submit"
+                  :disabled="searchStatus === 'loading'"
+                >
+                  搜索
+                </button>
+              </div>
+            </form>
+
+            <p
+              v-if="searchStatus === 'loading'"
+              class="notice"
+              role="status"
+              aria-live="polite"
+            >
+              正在查找班次，请稍候。
+            </p>
+            <p
+              v-else-if="searchStatus === 'error'"
+              class="notice notice--error"
+              role="alert"
+            >
+              {{ searchError }} 可以稍后再试一次。
+            </p>
+            <template v-else-if="searchStatus === 'ready' && searchedCourse">
+              <h3 class="sub-label">{{ searchedCourse }} 的开课班次</h3>
+              <p
+                v-if="offeringRows.length === 0"
+                class="notice notice--warning"
+                role="note"
+              >
+                这门课在当前快照下没有班次。
+              </p>
+              <template v-else>
+                <ul
+                  class="offering-list"
+                  :aria-label="`${searchedCourse} 的开课班次`"
+                >
+                  <li
+                    v-for="row in offeringRows"
+                    :key="row.classId"
+                    class="offering-row"
+                  >
+                    <div>
+                      <strong>班次 {{ row.classId }}</strong>
+                      <p>
+                        {{ row.timeText }}
+                        <template v-if="row.teacherText">
+                          · {{ row.teacherText }}
+                        </template>
+                      </p>
+                      <p :id="row.noteId">{{ row.note }}</p>
+                    </div>
+                    <button
+                      v-if="row.kind === 'clear'"
+                      class="button button--secondary"
+                      type="button"
+                      :aria-describedby="row.noteId"
+                      @click="selectOffering(row.classId)"
+                    >
+                      {{ row.label }}
+                    </button>
+                    <button
+                      v-else
+                      class="offering-tag"
+                      :class="`offering-tag--${row.kind}`"
+                      type="button"
+                      disabled
+                      :aria-describedby="row.noteId"
+                    >
+                      {{ row.label }}
+                    </button>
+                  </li>
+                </ul>
+                <p v-if="planGaps.length" class="microcopy">
+                  方案中
+                  {{ planGaps.join("、") }}
+                  的时间没能从当前快照读到，上面的冲突判断只比较已知时间。
+                </p>
+              </template>
+
+              <div
+                v-if="selectedOffering"
+                class="notice notice--warning"
+                role="group"
+                aria-label="替换预览"
+              >
+                <strong>{{
+                  replacePreview(entry, selectedOffering.classId)
+                }}</strong>
+                <p class="microcopy">
+                  提交前必须重新核验整份方案。上面的预览不能代替核验结果。
+                </p>
+                <p
+                  v-if="replaceStatus === 'submitting'"
+                  role="status"
+                  aria-live="polite"
+                >
+                  正在重新核验整份方案，请稍候。这一步不会重复提交。
+                </p>
+                <p
+                  v-else-if="replaceStatus === 'error'"
+                  class="notice notice--error"
+                  role="alert"
+                >
+                  {{ replaceError }} 可以再点一次重新核验。
+                </p>
+                <button
+                  class="button button--primary"
+                  type="button"
+                  :disabled="replaceStatus === 'submitting'"
+                  @click="recheck(entry)"
+                >
+                  重新核验这份方案
+                </button>
+              </div>
+            </template>
+
+            <button
+              class="button button--quiet"
+              type="button"
+              @click="closePanel(entry)"
+            >
+              收起搜索
+            </button>
+          </section>
         </article>
       </div>
 
@@ -169,3 +742,90 @@ async function goBackToQuestions() {
     </nav>
   </section>
 </template>
+
+<style scoped>
+.search-panel {
+  margin: 14px 0 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.search-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.search-row .text-control {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.offering-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.offering-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.offering-row strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.offering-row p {
+  margin: 3px 0 0;
+  color: var(--soft);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.offering-tag {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.offering-tag:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.offering-tag--conflict {
+  color: #8b3c31;
+  background: #fff4f2;
+  border-color: #efc4bd;
+}
+
+.offering-tag--unknown {
+  color: #875817;
+  background: #fff8ed;
+  border-color: #ecd6b0;
+}
+
+@media (max-width: 540px) {
+  .search-row {
+    flex-direction: column;
+  }
+
+  .offering-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+</style>
