@@ -68,5 +68,25 @@
     "file": "invalid-academic-record-missing-revision.json",
     "definition": "AcademicRecord",
     "valid": false
+  },
+  {
+    "file": "course-offering.json",
+    "definition": "CourseOffering",
+    "valid": true
+  },
+  {
+    "file": "course-offering-unparsed.json",
+    "definition": "CourseOffering",
+    "valid": true
+  },
+  {
+    "file": "invalid-course-offering-unparsed-with-meetings.json",
+    "definition": "CourseOffering",
+    "valid": false
+  },
+  {
+    "file": "invalid-course-offering-unknown-parse-status.json",
+    "definition": "CourseOffering",
+    "valid": false
   }
 ]

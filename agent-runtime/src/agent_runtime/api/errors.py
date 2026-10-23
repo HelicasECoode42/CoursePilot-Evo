@@ -19,6 +19,8 @@ from agent_runtime.api.idempotency import IdempotencyConflict, RequestInProgress
 from agent_runtime.api.schemas import Envelope, Issue
 from agent_runtime.application.budget import BudgetExceeded
 from agent_runtime.application.ids import new_id
+from agent_runtime.application.plan_replacement import ReusedVerification
+from agent_runtime.application.plan_store import PlanNotInSession
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
 
@@ -65,6 +67,22 @@ class NotFoundError(ApiError):
     status_code = 404
     status = "NOT_FOUND"
     issue_code = "NOT_FOUND"
+
+
+class InvalidInputError(ApiError):
+    status_code = 422
+    status = "INVALID_INPUT"
+    issue_code = "INVALID_INPUT"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        field: str | None = None,
+        code: str = "INVALID_INPUT",
+    ) -> None:
+        super().__init__(message, field=field)
+        self.issue_code = code
 
 
 class ForbiddenError(ApiError):
@@ -136,6 +154,28 @@ def register_error_handlers(app: FastAPI) -> None:
             code="IDEMPOTENCY_CONFLICT", message=str(exc), field="Idempotency-Key", retryable=False
         )
         return _json(request, 409, "CONFLICT", [issue])
+
+    @app.exception_handler(PlanNotInSession)
+    async def plan_not_in_session(request: Request, exc: PlanNotInSession) -> JSONResponse:
+        del exc
+        issue = Issue(
+            code="NOT_FOUND",
+            message="方案不在当前会话",
+            field="previousPlanId",
+            retryable=False,
+        )
+        return _json(request, 404, "NOT_FOUND", [issue])
+
+    @app.exception_handler(ReusedVerification)
+    async def reused_verification(request: Request, exc: ReusedVerification) -> JSONResponse:
+        del exc
+        issue = Issue(
+            code="VERIFICATION_REUSED",
+            message="核验结果复用了旧判决编号，已拒绝",
+            field="verifierResultId",
+            retryable=False,
+        )
+        return _json(request, 422, "INVALID_INPUT", [issue])
 
     @app.exception_handler(RequestInProgress)
     async def request_in_progress(request: Request, exc: RequestInProgress) -> JSONResponse:
