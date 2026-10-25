@@ -6,7 +6,12 @@
 
 服务登记表
   只登记「有书面依据」的启动命令；没有依据的一律留空并判 BLOCKED（未登记），不猜命令。
-  mysql 的本地启动方式环境相关，本脚本只做可达性判定；CI 侧由 workflow 的 services 提供。
+  mysql 当前栈不适用（B 用 H2 文件库，pom 无 MySQL 驱动与 Flyway），判 N/A：输出里仍逐行可见并写明原因，
+  但不计入必需服务，也不会让整轮变绿；B 引入 MySQL 后删掉 stack_config.NOT_APPLICABLE 的 mysql 条目即恢复为必需服务。
+  CI 侧的 MySQL 由 workflow 的 services 提供，与本脚本的判定无关。
+  java 的健康探针：java-environment 未引入 spring-boot-starter-actuator，没有 /actuator/health，
+  所以只判到 TCP 层；行为级就绪由 check_stack.py 的主链路第一步（建会话 201）与 Java 的两步承担。
+  java 的服务密钥：Java 读 COURSEPILOT_SERVICE_KEY，本脚本把 CP_SERVICE_KEY 的值映射为该子进程环境变量（env_map）。
 
 用法
   python integration/start_stack.py --plan     # 只判定与打印计划，不启动任何进程，退出码与真跑一致
@@ -31,7 +36,7 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from stack_config import ROOT, errors, resolve, validate
+from stack_config import NOT_APPLICABLE, ROOT, errors, resolve, validate
 
 LOG_DIR = ROOT / "runs" / "stack"
 PID_FILE = LOG_DIR / "pids.json"
@@ -43,7 +48,11 @@ SERVICES: tuple[dict, ...] = (
         "module": "(环境，本仓库内无模块)",
         "manifest": None,
         "start_cmd": None,
-        "cmd_source": "待 B 落地后登记本地启动方式；CI 侧用 workflow 的 services: mysql",
+        # 当前栈不适用：B 用 H2 文件库（java-environment/src/main/resources/application.properties
+        # 的 spring.datasource.url=jdbc:h2:file:...），pom.xml 无 MySQL 驱动、无 Flyway。
+        # 标记为 N/A 而不是删除，输出里保留这一行与原因；B 引入 MySQL 后删掉 stack_config.NOT_APPLICABLE 的 mysql 条目即恢复为必需服务。
+        "inapplicable": NOT_APPLICABLE.get("mysql"),
+        "cmd_source": "待 B 引入 MySQL 后登记本地启动方式；CI 侧用 workflow 的 services: mysql",
         "health_path": None,
         "host_key": "CP_MYSQL_HOST",
         "port_key": "CP_MYSQL_PORT",
@@ -53,10 +62,17 @@ SERVICES: tuple[dict, ...] = (
         "owner": "B",
         "module": "java-environment",
         "manifest": "pom.xml",
-        "start_cmd": ["./mvnw", "-B", "spring-boot:run"],
-        "cmd_source": "Spring Boot 约定命令；待 B 的 README 确认后转正",
-        "health_path": "/actuator/health",
+        # Windows 上 mvnw 是 mvnw.cmd；路径型命令按模块目录解析（见 resolve_command）
+        "start_cmd": ["./mvnw.cmd" if os.name == "nt" else "./mvnw", "-B", "spring-boot:run"],
+        "cmd_source": (
+            "java-environment/README.md 登记的 ./mvnw spring-boot:run（需 JDK 21+）；"
+            "健康探针未配：pom.xml 未引入 actuator，就绪只判到 TCP 层（8081），"
+            "行为级就绪由 check_stack.py 的主链路承担"
+        ),
+        "health_path": None,
         "url_key": "CP_JAVA_BASE_URL",
+        # 子进程环境变量名 -> 配置键；Java 侧变量名不改，由本脚本映射
+        "env_map": {"COURSEPILOT_SERVICE_KEY": "CP_SERVICE_KEY"},
     },
     {
         "name": "api",
@@ -110,8 +126,13 @@ def http_ok(url: str, timeout: float = 3.0) -> tuple[bool, str]:
 
 
 def judge(svc: dict, values: dict, probe: bool = True) -> dict:
-    """不启动任何进程，只给判定：MISSING / BLOCKED / READY / UNREACHABLE。"""
+    """不启动任何进程，只给判定：N/A / MISSING / BLOCKED / PLAN / READY / UNREACHABLE。"""
     result = {"name": svc["name"], "owner": svc["owner"], "status": "", "detail": "", "next": ""}
+    if svc.get("inapplicable"):
+        result["status"] = "N/A"
+        result["detail"] = f"当前栈不适用：{svc['inapplicable']}"
+        result["next"] = svc["cmd_source"]
+        return result
     if svc["manifest"]:
         manifest = ROOT / svc["module"] / svc["manifest"]
         if not manifest.is_file():
@@ -197,22 +218,55 @@ def stop_recorded() -> int:
     return 0
 
 
-def resolve_command(start_cmd: list[str]) -> list[str] | None:
+def resolve_command(start_cmd: list[str], cwd: Path) -> list[str] | None:
     """把登记表里的命令解析成可执行路径。
 
-    Windows 上裸名 `npm` 会被 CreateProcess 补成 `npm.exe` 而失败（实际是 `npm.CMD`），
-    所以这里统一用 shutil.which 解析；解析不到就返回 None，由调用方判 UNREACHABLE 而不是崩掉。
+    路径型命令（./mvnw 这类）相对模块目录 cwd 解析：shutil.which 对带目录的命令只看进程当前目录，
+    会把模块内的 mvnw 误判为不存在。裸名（npm、python）走 PATH。
+    Windows 上裸名 `npm` 会被 CreateProcess 补成 `npm.exe` 而失败（实际是 `npm.CMD`），所以裸名统一用 shutil.which。
+    解析不到返回 None，由调用方判 UNREACHABLE 而不是崩掉。
     """
-    resolved = shutil.which(start_cmd[0])
+    head = start_cmd[0]
+    if "/" in head or "\\" in head:
+        candidate = (cwd / head).resolve()
+        if not (candidate.is_file() and os.access(candidate, os.X_OK)):
+            return None
+        return [str(candidate), *start_cmd[1:]]
+    resolved = shutil.which(head)
     if resolved is None:
         return None
     return [resolved, *start_cmd[1:]]
 
 
+def child_env(svc: dict, values: dict) -> dict[str, str]:
+    """子进程环境：继承本进程环境，再按 env_map 注入从配置来的值（配置文件里的值也要能传给子进程）。
+
+    注意：这里只拷贝键值进入子进程，不打印、不写日志。
+    """
+    env = dict(os.environ)
+    for child_key, config_key in svc.get("env_map", {}).items():
+        env[child_key] = values[config_key]
+    return env
+
+
 def start_service(argv: list[str], svc: dict, values: dict) -> subprocess.Popen:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log = open(LOG_DIR / f"{svc['name']}.log", "w", encoding="utf-8")  # noqa: SIM115
-    return subprocess.Popen(argv, cwd=ROOT / svc["module"], stdout=log, stderr=subprocess.STDOUT)
+    return subprocess.Popen(
+        argv,
+        cwd=ROOT / svc["module"],
+        env=child_env(svc, values),
+        stdout=log,
+        stderr=subprocess.STDOUT,
+    )
+
+
+def exit_status(results: list[dict]) -> int:
+    """READY / PLAN / N/A 不挡退出码；其余（BLOCKED、MISSING、UNREACHABLE、TIMEOUT）一律 1。
+
+    N/A 只表示「当前栈不适用」，且会在输出里逐行显示原因，不计为通过，也不掩盖其他服务的未就绪。
+    """
+    return 0 if all(r["status"] in ("READY", "PLAN", "N/A") for r in results) else 1
 
 
 def wait_ready(svc: dict, values: dict, timeout: float, interval: float) -> dict:
@@ -263,17 +317,16 @@ def main(argv: list[str] | None = None) -> int:
             if args.plan:
                 results.append(verdict)
                 continue
-            if verdict["status"] in ("MISSING", "BLOCKED"):
+            if verdict["status"] in ("N/A", "MISSING", "BLOCKED", "READY"):
                 results.append(verdict)
                 continue
-            if verdict["status"] == "READY":
-                results.append(verdict)
-                continue
-            argv = resolve_command(svc["start_cmd"])
+            argv = resolve_command(svc["start_cmd"], ROOT / svc["module"])
             if argv is None:
                 verdict["status"] = "UNREACHABLE"
-                verdict["detail"] = f"启动命令不可执行：PATH 里找不到 {svc['start_cmd'][0]}"
-                verdict["next"] = f"把 {svc['start_cmd'][0]} 装好并放进 PATH；日志与判定不改口径"
+                verdict["detail"] = (
+                    f"启动命令不可执行：找不到 {svc['start_cmd'][0]}（相对模块 {svc['module']} 或 PATH）"
+                )
+                verdict["next"] = f"确认 {svc['module']} 内的启动脚本存在且可执行，或把所需命令装好并放进 PATH"
                 results.append(verdict)
                 continue
             procs[svc["name"]] = start_service(argv, svc, values)
@@ -304,18 +357,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{'服务':<8} {'状态':<12} {'负责':<10} 说明")
         for r in results:
             print(f"{r['name']:<8} {r['status']:<12} {r['owner']:<10} {r['detail']}")
-        todo = [r for r in results if r["status"] not in ("READY", "PLAN")]
+        todo = [r for r in results if r["status"] not in ("READY", "PLAN", "N/A")]
         if todo:
             print("\n未就绪的服务与下一步：")
             for r in todo:
                 print(f"  {r['name']}（{r['owner']}）：{r['next']}")
-        ready = sum(1 for r in results if r["status"] == "READY")
-        print(
-            f"\n就绪 {ready}/{len(results)}；"
-            + ("全部就绪。" if ready == len(results) else "存在未就绪服务，退出码 1（不允许跳过算通过）")
-        )
+        required = [r for r in results if r["status"] != "N/A"]
+        ready = sum(1 for r in required if r["status"] == "READY")
+        na = len(results) - len(required)
+        tail = f"；不适用 {na} 项（N/A，见上表原因，不计入必需）" if na else ""
+        if args.plan:
+            print(f"\n计划模式（PLAN）：未连服务{tail}；真跑时退出码以同一规则判定。")
+        else:
+            print(
+                f"\n就绪 {ready}/{len(required)}{tail}；"
+                + ("全部必需服务就绪。" if ready == len(required) else "存在未就绪服务，退出码 1（不允许跳过算通过）")
+            )
 
-    return 0 if all(r["status"] in ("READY", "PLAN") for r in results) else 1
+    return exit_status(results)
 
 
 if __name__ == "__main__":

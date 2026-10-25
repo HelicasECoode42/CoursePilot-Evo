@@ -4,6 +4,9 @@
   docs/16：全组用唯一配置入口；端口/timeouts/CORS 都是环境配置；服务启动校验缺必要配置并失败，
            不能默认使用硬编码密钥或宽松公网 origin。
   docs/03：默认本地 Web 5173、Python 8000、Java 8080、MySQL 3306，均配置化。
+           注意：docs/03 写的 Java 8080 与实际服务不一致，本文件的 Java 默认值以实际服务为准（8081，
+           见 java-environment/src/main/resources/application.properties 的 server.port=8081）。
+           docs/03 不归本模块，需要由其所有者对齐。
   docs/04：Java 要 X-Service-Key，由 Python 配置提供；密钥仅在环境变量，不进仓库/Prompt/Trace；
            CORS 仅允许配置的 Web origin，不能是通配。
   C 模块（agent-runtime/.env.example）：键名用 CP_ 前缀；模型端点留空时走受控 stub。
@@ -15,7 +18,8 @@
 
 判定等级
   error   缺必要项、密钥占位、URL/端口非法、服务端口冲突 → 退出码 1
-  warning 非 loopback 监听、模型端点留空（受控 stub）    → 退出码 0
+  warning 非 loopback 监听、模型端点留空（受控 stub）、
+          当前不适用服务（NOT_APPLICABLE）的必填项未填   → 退出码 0（仍逐条可见）
 """
 
 from __future__ import annotations
@@ -60,8 +64,21 @@ SPECS: tuple[Spec, ...] = (
     Spec("CP_MYSQL_DB", "mysql", None, False, "库名，必填"),
     Spec("CP_MYSQL_USER", "mysql", None, False, "账号，必填"),
     Spec("CP_MYSQL_PASSWORD", "mysql", None, True, "口令，必填；只放环境变量或 data/private/stack.env"),
-    Spec("CP_JAVA_BASE_URL", "java", "http://127.0.0.1:8080", False, "B 的事实 API（docs/03 默认 8080）"),
-    Spec("CP_SERVICE_KEY", "java", None, True, "Python→Java 的 X-Service-Key（docs/04），必填"),
+    Spec(
+        "CP_JAVA_BASE_URL",
+        "java",
+        "http://127.0.0.1:8081",
+        False,
+        "B 的事实 API（实际 server.port=8081，与 docs/03 的 8080 不一致，以实际为准）",
+    ),
+    Spec(
+        "CP_SERVICE_KEY",
+        "java",
+        None,
+        True,
+        "Python→Java 的 X-Service-Key（docs/04），必填；start_stack 启动 Java 时映射为子进程环境变量 "
+        "COURSEPILOT_SERVICE_KEY（Java 侧变量名不改）",
+    ),
     Spec("CP_API_BASE_URL", "api", "http://127.0.0.1:8000", False, "C 的网关（docs/03 默认 8000）"),
     Spec("CP_WEB_BASE_URL", "web", "http://127.0.0.1:5173", False, "E 的页面（docs/03 默认 5173）"),
     Spec("CP_CORS_ORIGINS", "api", "http://127.0.0.1:5173", False, "只允许配置的 Web origin；禁通配"),
@@ -72,6 +89,13 @@ SPECS: tuple[Spec, ...] = (
     Spec("CP_START_COMMAND_TIMEOUT_SECONDS", "common", "180", False, "启动命令的等待上限（秒）"),
 )
 BY_KEY = {s.key: s for s in SPECS}
+
+# 当前技术栈不适用的服务：必填项不挡配置校验（改为 warning 逐条可见），启动脚本判 N/A。
+# 唯一来源：start_stack.py 的 mysql 登记项从这里取原因，两处不另写一份。
+# B 引入 MySQL 后删掉这一条即恢复为必填、必需服务。
+NOT_APPLICABLE: dict[str, str] = {
+    "mysql": "B 当前用 H2 文件库（application.properties 的 jdbc:h2:file），pom.xml 无 MySQL 驱动、无 Flyway；B 引入 MySQL 后再登记",
+}
 URL_KEYS = ("CP_JAVA_BASE_URL", "CP_API_BASE_URL", "CP_WEB_BASE_URL")
 
 
@@ -122,7 +146,12 @@ def validate(values: dict[str, str]) -> list[tuple[str, str, str]]:
     for spec in SPECS:
         value = (values.get(spec.key) or "").strip()
         if spec.default is None and not value:
-            problems.append(("error", spec.key, f"必填项缺失（{spec.service} 需要）；{spec.note}"))
+            if spec.service in NOT_APPLICABLE:
+                problems.append(
+                    ("warning", spec.key, f"{spec.service} 当前不适用，必填项暂不校验（原因见 start_stack 的服务表）")
+                )
+            else:
+                problems.append(("error", spec.key, f"必填项缺失（{spec.service} 需要）；{spec.note}"))
         elif spec.secret and value.lower() in PLACEHOLDERS:
             problems.append(("error", spec.key, "仍是占位值，不是可用密钥"))
 

@@ -44,7 +44,8 @@ jobs:
       CP_MYSQL_USER: coursepilot
       CP_MYSQL_PASSWORD: ci-password-not-a-secret
       CP_SERVICE_KEY: ci-service-key-not-a-secret
-      CP_JAVA_BASE_URL: http://127.0.0.1:8080
+      # Java 实际监听 8081（java-environment/src/main/resources/application.properties）
+      CP_JAVA_BASE_URL: http://127.0.0.1:8081
       CP_API_BASE_URL: http://127.0.0.1:8000
       CP_WEB_BASE_URL: http://127.0.0.1:5173
       CP_CORS_ORIGINS: http://127.0.0.1:5173

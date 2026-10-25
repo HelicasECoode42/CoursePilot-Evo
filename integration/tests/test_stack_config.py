@@ -40,8 +40,17 @@ def test_missing_required_key_is_error():
 
 
 def test_all_required_keys_are_reported_at_once():
+    # mysql 当前不适用（B 用 H2），它的必填项不再是 error；Java 的必填项仍然是 error
     values = base_values(**{DB_KEY: "", "CP_MYSQL_USER": "", PW_KEY: "", SK_KEY: ""})
-    assert sorted(k for _l, k, _m in errors(validate(values))) == sorted([DB_KEY, "CP_MYSQL_USER", PW_KEY, SK_KEY])
+    assert [k for _l, k, _m in errors(validate(values))] == [SK_KEY]
+    warned = sorted(k for lv, k, _m in validate(values) if lv == "warning")
+    assert warned == sorted([DB_KEY, "CP_MYSQL_USER", PW_KEY, "CP_MODEL_BASE_URL"])
+
+
+def test_not_applicable_service_missing_required_key_is_warning_not_error():
+    problems = validate(base_values(**{DB_KEY: ""}))
+    assert errors(problems) == []
+    assert any(lv == "warning" and k == DB_KEY and "不适用" in m for lv, k, m in problems)
 
 
 def test_placeholder_secret_is_error():
@@ -64,7 +73,7 @@ def test_bad_port_is_error():
 
 
 def test_port_conflict_between_services_is_error():
-    problem = errors(validate(base_values(CP_API_BASE_URL="http://127.0.0.1:8080")))
+    problem = errors(validate(base_values(CP_API_BASE_URL="http://127.0.0.1:8081")))
     assert any(k == "CP_API_BASE_URL" and "冲突" in m for _l, k, m in problem)
 
 
@@ -112,4 +121,4 @@ def test_defaults_are_traceable(tmp_path, monkeypatch):
     monkeypatch.setenv("CP_STACK_ENV", str(tmp_path / "missing.env"))
     monkeypatch.delenv("CP_JAVA_BASE_URL", raising=False)
     values, sources, _used = resolve()
-    assert values["CP_JAVA_BASE_URL"] == "http://127.0.0.1:8080" and sources["CP_JAVA_BASE_URL"] == "default"
+    assert values["CP_JAVA_BASE_URL"] == "http://127.0.0.1:8081" and sources["CP_JAVA_BASE_URL"] == "default"
