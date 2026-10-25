@@ -118,6 +118,13 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
 
     /** 开始一次记录/核对请求；新的请求会中止上一次。 */
     function beginRecordRequest(): { version: number; signal: AbortSignal } {
+      // 被中止的请求在 catch 里直接 return，不会再动 recordsStatus。所以这里先把
+      // 可能停在 loading 的状态落回安定值，否则它永远停在「加载中」：
+      // selectRecord 只作废在途请求、自己不发请求，runAudit 也只管 auditStatus。
+      // 紧接着真正发请求的调用方会自己把它改回 loading。
+      if (recordsStatus.value === "loading") {
+        recordsStatus.value = records.value.length > 0 ? "ready" : "idle";
+      }
       recordVersion += 1;
       recordController?.abort();
       const controller = new AbortController();
@@ -142,14 +149,11 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     }
 
     /**
-     * 同一批内容的重试复用幂等键；内容变了换新键。
-     * 与 keyForRequest 同一规则，只是输入是学业记录而不是规划请求。
+     * 同一批内容的重试复用幂等键；内容变了换新键。规则和规划提交共用
+     * domain/idempotency.ts 的 keyForRequest，不在这里另写一份。
      */
     function keyForRecordInput(input: AcademicRecordInput): string {
-      const digest = JSON.stringify(input);
-      if (recordKeyState === null || recordKeyState.digest !== digest) {
-        recordKeyState = { digest, key: newIdempotencyKey() };
-      }
+      recordKeyState = keyForRequest(recordKeyState, input, newIdempotencyKey);
       return recordKeyState.key;
     }
 

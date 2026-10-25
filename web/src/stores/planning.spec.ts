@@ -944,6 +944,30 @@ describe("planning session store", () => {
         unknowns: [],
       };
 
+      it("does not leave the record list stuck on loading when a reload is cancelled", async () => {
+        // selectRecord 只作废在途请求、自己不发请求。被中止的 loadRecords 在 catch 里
+        // 直接 return，不会再动 recordsStatus，所以作废时必须把它落回安定值。
+        const second = deferred<{ items: AcademicRecord[] }>();
+        const listSessionRecords = vi
+          .fn()
+          .mockResolvedValueOnce({ items: [savedRecord] })
+          .mockReturnValueOnce(second.promise);
+        const { store } = readyStore({ listSessionRecords });
+
+        await store.loadRecords();
+        expect(store.recordsStatus).toBe("ready");
+
+        const reload = store.loadRecords();
+        expect(store.recordsStatus).toBe("loading");
+
+        store.selectRecord(savedRecord.academicRecordId);
+        expect(store.recordsStatus).not.toBe("loading");
+
+        second.resolve({ items: [savedRecord] });
+        await reload;
+        expect(store.recordsStatus).not.toBe("loading");
+      });
+
       it("ignores a second save while the first one is still in flight", async () => {
         const pending = deferred<AcademicRecord>();
         const saveSessionRecord = vi.fn(() => pending.promise);
