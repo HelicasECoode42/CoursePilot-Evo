@@ -150,6 +150,8 @@ const searchStatus = ref<"idle" | "loading" | "ready" | "error">("idle");
 const searchError = ref("");
 const searchedCourse = ref<string | null>(null);
 const offerings = ref<CourseOffering[]>([]);
+/** 班次资料是 UNKNOWN（快照缺失或非当前）：空列表不能说成「没有班次」。 */
+const offeringsUnconfirmed = ref(false);
 const knownPlanMeetings = ref<KnownPlanMeeting[]>([]);
 const planGaps = ref<string[]>([]);
 const selectedClassId = ref<string | null>(null);
@@ -193,6 +195,7 @@ function resetSearch() {
   searchError.value = "";
   searchedCourse.value = null;
   offerings.value = [];
+  offeringsUnconfirmed.value = false;
   knownPlanMeetings.value = [];
   planGaps.value = [];
   clearSelection();
@@ -314,6 +317,7 @@ async function runSearch(entry: PlanEntry) {
       }
     }
     offerings.value = target.items;
+    offeringsUnconfirmed.value = target.status === "UNKNOWN";
     knownPlanMeetings.value = known;
     planGaps.value = gaps;
     searchedCourse.value = course;
@@ -325,9 +329,15 @@ async function runSearch(entry: PlanEntry) {
   }
 }
 
-/** 按已知时间判断一个班次。只是预览：时间未知不能当成没有冲突。 */
+/**
+ * 按已知时间判断一个班次。只是预览：时间未知不能当成没有冲突。
+ * 只有「班次资料已确认、本班次时间完整、方案其他课时间全部读到、且没有冲突」才给 clear，
+ * 与 answer-display.ts 的门禁一致：确定的结论才给绿色，其余一律落到无法确认。
+ */
 function judgeOffering(
   offering: CourseOffering,
+  listUnconfirmed: boolean,
+  gapCodes: readonly string[],
 ): Pick<OfferingRow, "kind" | "note"> {
   if (offering.parseStatus !== "PARSED" || offering.meetings.length === 0) {
     return {
@@ -354,6 +364,18 @@ function judgeOffering(
       note: `与方案中已选的 ${conflicts.join("、")} 时间重叠（仅为预览，提交前需整份核验）。`,
     };
   }
+  if (listUnconfirmed) {
+    return {
+      kind: "unknown",
+      note: "班次资料无法确认（快照缺失或不是当前版本），不能直接选择。",
+    };
+  }
+  if (gapCodes.length > 0) {
+    return {
+      kind: "unknown",
+      note: `方案中 ${gapCodes.join("、")} 的时间没能读到，无法判断是否与它们冲突，不能直接选择。`,
+    };
+  }
   return {
     kind: "clear",
     note: "按已知时间没有发现冲突（仅为预览，提交前仍需整份核验）。",
@@ -362,7 +384,11 @@ function judgeOffering(
 
 const offeringRows = computed<OfferingRow[]>(() =>
   offerings.value.map((offering, index) => {
-    const judged = judgeOffering(offering);
+    const judged = judgeOffering(
+      offering,
+      offeringsUnconfirmed.value,
+      planGaps.value,
+    );
     return {
       classId: offering.classId,
       kind: judged.kind,
@@ -610,13 +636,20 @@ async function goBackToQuestions() {
             <template v-else-if="searchStatus === 'ready' && searchedCourse">
               <h3 class="sub-label">{{ searchedCourse }} 的开课班次</h3>
               <p
-                v-if="offeringRows.length === 0"
+                v-if="offeringsUnconfirmed"
+                class="notice notice--warning"
+                role="note"
+              >
+                这门课的班次无法确认：当前快照缺失或不是当前版本，不能据此说没有班次，下面的班次也都不能直接选择。
+              </p>
+              <p
+                v-else-if="offeringRows.length === 0"
                 class="notice notice--warning"
                 role="note"
               >
                 这门课在当前快照下没有班次。
               </p>
-              <template v-else>
+              <template v-if="offeringRows.length > 0">
                 <ul
                   class="offering-list"
                   :aria-label="`${searchedCourse} 的开课班次`"

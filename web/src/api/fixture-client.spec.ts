@@ -65,6 +65,8 @@ describe("fixture 数据符合 domain.schema.json", () => {
       "NOT-A-COURSE",
     );
     expect(none.items).toEqual([]);
+    // fixture 的空结果是确定的「没有」，不能被标成无法确认。
+    expect(none.status).toBe("OK");
   });
 
   it("三个演示班次覆盖冲突、可选、时间未知三种状态", async () => {
@@ -122,11 +124,17 @@ describe("fixture 数据符合 domain.schema.json", () => {
 
   it("教师选项与评价同形，且至少一条评价依据有限", async () => {
     const curriculumId = (await client.listCurricula()).items[0]!.snapshotId;
-    const options = await client.listTeacherCourseOptions(curriculumId, null);
+    const { items: options, status: optionStatus } =
+      await client.listTeacherCourseOptions(curriculumId, null);
     expect(options.length).toBeGreaterThan(0);
+    expect(optionStatus).toBe("OK");
     for (const option of options) expectValid("TeacherCourseOption", option);
 
-    const reviews = await client.searchReviews("CS103", null);
+    const { items: reviews, status: reviewStatus } = await client.searchReviews(
+      "CS103",
+      null,
+    );
+    expect(reviewStatus).toBe("OK");
     // 空数组会让下面的校验循环空转通过，所以先确认真有数据。
     expect(reviews.length).toBeGreaterThan(0);
     for (const review of reviews) expectValid("ReviewNote", review);

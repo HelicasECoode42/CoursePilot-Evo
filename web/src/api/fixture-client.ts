@@ -11,7 +11,6 @@ import type {
   PlanValidation,
   ReviewNote,
   RunReport,
-  SessionOfferingList,
   SessionPlanReplaceInput,
   SessionPlanReplacement,
   TeacherCourseOption,
@@ -20,7 +19,10 @@ import {
   ApiFailure,
   type CoursePilotApiClient,
   type CurriculumResult,
+  type ReviewNoteSearch,
+  type SessionOfferingSearch,
   type SessionView,
+  type TeacherCourseOptionSearch,
 } from "./client";
 
 const DEMO_SESSION: SessionView = {
@@ -505,15 +507,18 @@ export class FixtureApiClient implements CoursePilotApiClient {
     previousPlanId: string,
     courseCode: string,
     signal?: AbortSignal,
-  ): Promise<SessionOfferingList> {
+  ): Promise<SessionOfferingSearch> {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (!this.sessionToken)
       throw new Error("Fixture session has not been created");
     // 没有对应课程的班次返回空数组：这是正常业务状态，不是错误。
+    // fixture 的数据是确定的，所以空数组就是「确定没有」，status 显式给 OK；
+    // 不能用 UNKNOWN 来模拟「无法确认」，那要靠真实快照缺失时的 HTTP 响应。
     return {
       previousPlanId,
       courseCode,
       items: structuredClone(FIXTURE_OFFERINGS.get(courseCode) ?? []),
+      status: "OK",
     };
   }
 
@@ -566,22 +571,26 @@ export class FixtureApiClient implements CoursePilotApiClient {
     _curriculumSnapshotId: string,
     courseCode: string | null,
     signal?: AbortSignal,
-  ): Promise<TeacherCourseOption[]> {
+  ): Promise<TeacherCourseOptionSearch> {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (!this.sessionToken)
       throw new Error("Fixture session has not been created");
-    return structuredClone(
-      FIXTURE_TEACHER_OPTIONS.filter(
-        (option) => courseCode === null || option.courseCode === courseCode,
+    // fixture 数据是确定的，过滤后为空也是确定的「没有」，所以 status 显式给 OK。
+    return {
+      items: structuredClone(
+        FIXTURE_TEACHER_OPTIONS.filter(
+          (option) => courseCode === null || option.courseCode === courseCode,
+        ),
       ),
-    );
+      status: "OK",
+    };
   }
 
   async searchReviews(
     courseCode: string,
     teacherKey: string | null,
     signal?: AbortSignal,
-  ): Promise<ReviewNote[]> {
+  ): Promise<ReviewNoteSearch> {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (!this.sessionToken)
       throw new Error("Fixture session has not been created");
@@ -593,7 +602,11 @@ export class FixtureApiClient implements CoursePilotApiClient {
           note.teacherKey === null ||
           note.teacherKey === teacherKey),
     );
-    return structuredClone(matches.slice(0, 5));
+    // fixture 的评价是确定数据，没有匹配就是确定的「没有找到」，status 显式给 OK。
+    return {
+      items: structuredClone(matches.slice(0, 5)),
+      status: "OK",
+    };
   }
 
   async getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport> {

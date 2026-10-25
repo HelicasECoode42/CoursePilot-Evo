@@ -24,6 +24,8 @@ interface ReviewState {
   status: "loading" | "ready" | "error";
   notes: ReviewNote[];
   error: string;
+  /** 评价资料是 UNKNOWN：空列表不能说成「没有找到评价」，有内容时也要提示可能不完整。 */
+  unconfirmed: boolean;
 }
 
 const COURSE_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
@@ -73,6 +75,8 @@ const searchedCourse = ref<string | null>(null);
 const searchStatus = ref<"idle" | "loading" | "ready" | "error">("idle");
 const searchError = ref("");
 const options = ref<TeacherCourseOption[]>([]);
+/** 教师资料是 UNKNOWN（快照缺失或非当前）：空列表不能说成「没有可比较的教师」。 */
+const optionsUnconfirmed = ref(false);
 const expandedKey = ref<string | null>(null);
 const reviewStates = ref<Record<string, ReviewState>>({});
 /**
@@ -223,17 +227,20 @@ async function searchTeachers() {
   searchedCourse.value = code;
   searchStatus.value = "loading";
   expandedKey.value = null;
+  optionsUnconfirmed.value = false;
   try {
     const result = await api.listTeacherCourseOptions(
       store.selectedCurriculumId,
       code,
     );
     if (seq !== searchSeq) return;
-    options.value = result.filter((option) => option.courseCode === code);
+    options.value = result.items.filter((option) => option.courseCode === code);
+    optionsUnconfirmed.value = result.status === "UNKNOWN";
     searchStatus.value = "ready";
   } catch (error) {
     if (seq !== searchSeq) return;
     options.value = [];
+    optionsUnconfirmed.value = false;
     searchError.value = failureMessage(error);
     searchStatus.value = "error";
   }
@@ -245,26 +252,39 @@ async function loadReviews(option: TeacherCourseOption) {
   reviewSeq.set(key, seq);
   reviewStates.value = {
     ...reviewStates.value,
-    [key]: { status: "loading", notes: [], error: "" },
+    [key]: { status: "loading", notes: [], error: "", unconfirmed: false },
   };
   try {
-    const notes = await api.searchReviews(option.courseCode, option.teacherKey);
+    const result = await api.searchReviews(
+      option.courseCode,
+      option.teacherKey,
+    );
     if (reviewSeq.get(key) !== seq) return;
     // 只保留这门课、且是这位老师或未指明老师的评价，不混入别的老师。
-    const own = notes.filter(
+    const own = result.items.filter(
       (note) =>
         note.courseCode === option.courseCode &&
         (note.teacherKey === null || note.teacherKey === option.teacherKey),
     );
     reviewStates.value = {
       ...reviewStates.value,
-      [key]: { status: "ready", notes: own, error: "" },
+      [key]: {
+        status: "ready",
+        notes: own,
+        error: "",
+        unconfirmed: result.status === "UNKNOWN",
+      },
     };
   } catch (error) {
     if (reviewSeq.get(key) !== seq) return;
     reviewStates.value = {
       ...reviewStates.value,
-      [key]: { status: "error", notes: [], error: failureMessage(error) },
+      [key]: {
+        status: "error",
+        notes: [],
+        error: failureMessage(error),
+        unconfirmed: false,
+      },
     };
   }
 }
@@ -403,6 +423,16 @@ function dimensionText(dimensions: ReviewNote["dimensions"]): string {
         </button>
       </div>
       <p
+        v-else-if="
+          searchStatus === 'ready' && options.length === 0 && optionsUnconfirmed
+        "
+        class="notice notice--warning"
+        role="status"
+      >
+        {{ searchedCourse }}
+        的教师资料无法确认：当前培养方案快照缺失或不是当前版本，不能据此说没有可比较的教师。
+      </p>
+      <p
         v-else-if="searchStatus === 'ready' && options.length === 0"
         class="notice"
         role="status"
@@ -411,169 +441,184 @@ function dimensionText(dimensions: ReviewNote["dimensions"]): string {
         在当前培养方案快照下没有可比较的教师资料。这是正常说明，不是错误。
       </p>
 
-      <ul
-        v-else-if="searchStatus === 'ready'"
-        class="teacher-list"
-        aria-label="教师选项"
-      >
-        <li
-          v-for="option in options"
-          :key="optionKey(option)"
-          class="choice-card teacher-option"
-        >
-          <span class="choice-copy">
-            <strong>{{ option.teacherDisplayName }}</strong>
-            <small>
-              {{ AVAILABILITY_LABEL[option.availability] }} ·
-              {{ classCountText(option) }}
-            </small>
-          </span>
-
-          <span
-            class="seg"
-            role="group"
-            :aria-label="`${option.teacherDisplayName} 的保留强度`"
+      <template v-else-if="searchStatus === 'ready'">
+        <p v-if="optionsUnconfirmed" class="notice notice--warning" role="note">
+          下面的教师资料无法确认（快照缺失或不是当前版本），列表可能不完整。
+        </p>
+        <ul class="teacher-list" aria-label="教师选项">
+          <li
+            v-for="option in options"
+            :key="optionKey(option)"
+            class="choice-card teacher-option"
           >
-            <button
-              type="button"
-              :aria-pressed="pickOf(option)?.mode === 'MUST'"
-              :aria-label="`${option.teacherDisplayName} ${MODE_LABEL.MUST}`"
-              @click="setStrength(option, 'MUST')"
-            >
-              {{ MODE_LABEL.MUST }}
-            </button>
-            <button
-              type="button"
-              :aria-pressed="pickOf(option)?.mode === 'PREFER'"
-              :aria-label="`${option.teacherDisplayName} ${MODE_LABEL.PREFER}`"
-              @click="setStrength(option, 'PREFER')"
-            >
-              {{ MODE_LABEL.PREFER }}
-            </button>
-          </span>
+            <span class="choice-copy">
+              <strong>{{ option.teacherDisplayName }}</strong>
+              <small>
+                {{ AVAILABILITY_LABEL[option.availability] }} ·
+                {{ classCountText(option) }}
+              </small>
+            </span>
 
-          <button
-            :ref="(el) => bindTrigger(option, el)"
-            type="button"
-            class="button button--secondary"
-            :aria-expanded="expandedKey === optionKey(option)"
-            :aria-controls="
-              expandedKey === optionKey(option) ? panelId(option) : undefined
-            "
-            @click="toggleReviews(option)"
-          >
-            {{ expandedKey === optionKey(option) ? "收起评价" : "查看评价" }}
-          </button>
-
-          <div
-            v-if="expandedKey === optionKey(option)"
-            class="teacher-reviews"
-            :id="panelId(option)"
-            role="region"
-            :aria-label="`${option.teacherDisplayName} 的课程评价`"
-            @keydown.esc="collapseReviews(option)"
-          >
-            <p
-              v-if="reviewStateOf(option)?.status === 'loading'"
-              class="microcopy"
-              role="status"
+            <span
+              class="seg"
+              role="group"
+              :aria-label="`${option.teacherDisplayName} 的保留强度`"
             >
-              正在读取评价…
-            </p>
-            <div
-              v-else-if="reviewStateOf(option)?.status === 'error'"
-              class="notice notice--error"
-              role="alert"
-            >
-              <p>{{ reviewStateOf(option)?.error }}</p>
               <button
                 type="button"
-                class="button button--secondary"
-                @click="loadReviews(option)"
+                :aria-pressed="pickOf(option)?.mode === 'MUST'"
+                :aria-label="`${option.teacherDisplayName} ${MODE_LABEL.MUST}`"
+                @click="setStrength(option, 'MUST')"
               >
-                重试
+                {{ MODE_LABEL.MUST }}
+              </button>
+              <button
+                type="button"
+                :aria-pressed="pickOf(option)?.mode === 'PREFER'"
+                :aria-label="`${option.teacherDisplayName} ${MODE_LABEL.PREFER}`"
+                @click="setStrength(option, 'PREFER')"
+              >
+                {{ MODE_LABEL.PREFER }}
+              </button>
+            </span>
+
+            <button
+              :ref="(el) => bindTrigger(option, el)"
+              type="button"
+              class="button button--secondary"
+              :aria-expanded="expandedKey === optionKey(option)"
+              :aria-controls="
+                expandedKey === optionKey(option) ? panelId(option) : undefined
+              "
+              @click="toggleReviews(option)"
+            >
+              {{ expandedKey === optionKey(option) ? "收起评价" : "查看评价" }}
+            </button>
+
+            <div
+              v-if="expandedKey === optionKey(option)"
+              class="teacher-reviews"
+              :id="panelId(option)"
+              role="region"
+              :aria-label="`${option.teacherDisplayName} 的课程评价`"
+              @keydown.esc="collapseReviews(option)"
+            >
+              <p
+                v-if="reviewStateOf(option)?.status === 'loading'"
+                class="microcopy"
+                role="status"
+              >
+                正在读取评价…
+              </p>
+              <div
+                v-else-if="reviewStateOf(option)?.status === 'error'"
+                class="notice notice--error"
+                role="alert"
+              >
+                <p>{{ reviewStateOf(option)?.error }}</p>
+                <button
+                  type="button"
+                  class="button button--secondary"
+                  @click="loadReviews(option)"
+                >
+                  重试
+                </button>
+              </div>
+              <template v-else-if="reviewStateOf(option)?.status === 'ready'">
+                <template v-if="reviewStateOf(option)!.notes.length === 0">
+                  <p
+                    v-if="reviewStateOf(option)!.unconfirmed"
+                    class="notice notice--warning"
+                    role="status"
+                  >
+                    评价资料无法确认，不能据此说没有相关评价。
+                  </p>
+                  <p v-else class="notice" role="status">
+                    没有找到评价。这只表示当前资料里没有相关记录，不代表这位老师或这门课的评价好或不好。
+                  </p>
+                </template>
+                <template v-else>
+                  <p
+                    v-if="reviewStateOf(option)!.unconfirmed"
+                    class="notice notice--warning"
+                    role="note"
+                  >
+                    下面的评价资料无法确认，列表可能不完整。
+                  </p>
+                  <p
+                    v-if="
+                      summarizeReviews(reviewStateOf(option)!.notes).synthetic
+                    "
+                    class="notice notice--demo"
+                    role="note"
+                  >
+                    本列表含合成样例，仅用于演示流程，不是真实学生的评价。
+                  </p>
+                  <p
+                    v-if="
+                      !summarizeReviews(reviewStateOf(option)!.notes).hasMatched
+                    "
+                    class="notice notice--warning"
+                    role="note"
+                  >
+                    这位老师目前没有课程与教师均已对应的评价，下面的依据有限。
+                  </p>
+                  <div
+                    v-if="
+                      summarizeReviews(reviewStateOf(option)!.notes)
+                        .divergenceNotes.length > 0
+                    "
+                    class="notice notice--warning"
+                    role="note"
+                  >
+                    <strong>证据之间有分歧</strong>
+                    <p>
+                      {{
+                        summarizeReviews(
+                          reviewStateOf(option)!.notes,
+                        ).divergenceNotes.join("；")
+                      }}
+                    </p>
+                  </div>
+                  <ol class="summary-priorities">
+                    <li
+                      v-for="note in reviewStateOf(option)!.notes"
+                      :key="note.reviewNoteId"
+                      :class="{
+                        'review-limited':
+                          note.matchStatus !== 'COURSE_TEACHER_MATCHED',
+                      }"
+                    >
+                      <p>
+                        <strong>{{ SOURCE_LABEL[note.sourceKind] }}</strong>
+                        · {{ yearText(note.publishedAt) }}
+                      </p>
+                      <p>维度：{{ dimensionText(note.dimensions) }}</p>
+                      <p>{{ note.excerpt }}</p>
+                      <p
+                        :class="
+                          note.matchStatus === 'COURSE_TEACHER_MATCHED'
+                            ? 'microcopy'
+                            : 'notice notice--warning'
+                        "
+                      >
+                        {{ MATCH_LABEL[note.matchStatus] }}
+                      </p>
+                    </li>
+                  </ol>
+                </template>
+              </template>
+              <button
+                type="button"
+                class="button button--quiet"
+                @click="collapseReviews(option)"
+              >
+                关闭评价
               </button>
             </div>
-            <template v-else-if="reviewStateOf(option)?.status === 'ready'">
-              <template v-if="reviewStateOf(option)!.notes.length === 0">
-                <p class="notice" role="status">
-                  没有找到评价。这只表示当前资料里没有相关记录，不代表这位老师或这门课的评价好或不好。
-                </p>
-              </template>
-              <template v-else>
-                <p
-                  v-if="
-                    summarizeReviews(reviewStateOf(option)!.notes).synthetic
-                  "
-                  class="notice notice--demo"
-                  role="note"
-                >
-                  本列表含合成样例，仅用于演示流程，不是真实学生的评价。
-                </p>
-                <p
-                  v-if="
-                    !summarizeReviews(reviewStateOf(option)!.notes).hasMatched
-                  "
-                  class="notice notice--warning"
-                  role="note"
-                >
-                  这位老师目前没有课程与教师均已对应的评价，下面的依据有限。
-                </p>
-                <div
-                  v-if="
-                    summarizeReviews(reviewStateOf(option)!.notes)
-                      .divergenceNotes.length > 0
-                  "
-                  class="notice notice--warning"
-                  role="note"
-                >
-                  <strong>证据之间有分歧</strong>
-                  <p>
-                    {{
-                      summarizeReviews(
-                        reviewStateOf(option)!.notes,
-                      ).divergenceNotes.join("；")
-                    }}
-                  </p>
-                </div>
-                <ol class="summary-priorities">
-                  <li
-                    v-for="note in reviewStateOf(option)!.notes"
-                    :key="note.reviewNoteId"
-                    :class="{
-                      'review-limited':
-                        note.matchStatus !== 'COURSE_TEACHER_MATCHED',
-                    }"
-                  >
-                    <p>
-                      <strong>{{ SOURCE_LABEL[note.sourceKind] }}</strong>
-                      · {{ yearText(note.publishedAt) }}
-                    </p>
-                    <p>维度：{{ dimensionText(note.dimensions) }}</p>
-                    <p>{{ note.excerpt }}</p>
-                    <p
-                      :class="
-                        note.matchStatus === 'COURSE_TEACHER_MATCHED'
-                          ? 'microcopy'
-                          : 'notice notice--warning'
-                      "
-                    >
-                      {{ MATCH_LABEL[note.matchStatus] }}
-                    </p>
-                  </li>
-                </ol>
-              </template>
-            </template>
-            <button
-              type="button"
-              class="button button--quiet"
-              @click="collapseReviews(option)"
-            >
-              关闭评价
-            </button>
-          </div>
-        </li>
-      </ul>
+          </li>
+        </ul>
+      </template>
     </template>
 
     <section class="teacher-picks" aria-labelledby="picks-title">

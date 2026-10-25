@@ -50,6 +50,28 @@ export interface CurriculumResult {
   unknownMessages: string[];
 }
 
+/**
+ * envelope 的业务状态，只有 OK 和 UNKNOWN（docs/04）。UNKNOWN 表示快照缺失或非当前，
+ * 是无法确认；这时列表为空也不能说成「确定没有」。
+ */
+export type BusinessStatus = "OK" | "UNKNOWN";
+
+/**
+ * 带业务状态的列表结果。status 必填：空 items 只有在 OK 时才是确定的「没有」，
+ * UNKNOWN 时是「无法确认」。fixture 的空数组是确定结果，所以显式给 OK。
+ */
+export type SessionOfferingSearch = SessionOfferingList & {
+  status: BusinessStatus;
+};
+export type TeacherCourseOptionSearch = {
+  items: TeacherCourseOption[];
+  status: BusinessStatus;
+};
+export type ReviewNoteSearch = {
+  items: ReviewNote[];
+  status: BusinessStatus;
+};
+
 export interface CoursePilotApiClient {
   readonly mode: "http" | "fixture";
   createSession(signal?: AbortSignal): Promise<SessionView>;
@@ -74,12 +96,15 @@ export interface CoursePilotApiClient {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<PlanningAnswer>;
-  /** E4：本会话方案中某门课可替换的开课班次。items 为空是正常状态，候选不构成核验结论。 */
+  /**
+   * E4：本会话方案中某门课可替换的开课班次。items 为空是正常状态，候选不构成核验结论。
+   * status 为 UNKNOWN 时班次资料无法确认，空数组不代表这门课没有班次。
+   */
   searchSessionOfferings(
     previousPlanId: string,
     courseCode: string,
     signal?: AbortSignal,
-  ): Promise<SessionOfferingList>;
+  ): Promise<SessionOfferingSearch>;
   /**
    * E4：把方案里的一门课换成学生选中的班次，并由服务端对整份新方案重新核验。
    * 请求必须带 Idempotency-Key；判决原样返回，不能被页面改写。
@@ -92,18 +117,22 @@ export interface CoursePilotApiClient {
   /**
    * E4：查询教师与课程的对应。契约要求 curriculumSnapshotId；courseCode 传 null 表示
    * 不按课程过滤。只返回第一页（契约默认 limit），nextCursor 暂不翻页。
+   * status 为 UNKNOWN 时教师资料无法确认，空数组不代表没有可比较的教师。
    */
   listTeacherCourseOptions(
     curriculumSnapshotId: string,
     courseCode: string | null,
     signal?: AbortSignal,
-  ): Promise<TeacherCourseOption[]>;
-  /** E4：检索课程（可选教师）的评价证据。teacherKey 传 null 表示不按教师过滤。 */
+  ): Promise<TeacherCourseOptionSearch>;
+  /**
+   * E4：检索课程（可选教师）的评价证据。teacherKey 传 null 表示不按教师过滤。
+   * status 为 UNKNOWN 时评价资料无法确认，空数组不代表没有找到评价。
+   */
   searchReviews(
     courseCode: string,
     teacherKey: string | null,
     signal?: AbortSignal,
-  ): Promise<ReviewNote[]>;
+  ): Promise<ReviewNoteSearch>;
   /** E4：受限的老师运行报告。服务端还要求管理密钥，浏览器端拿不到时会得到 403，页面需要照实说明。 */
   getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport>;
   clearSession(): void;
@@ -240,6 +269,11 @@ function errorForResponse(
  */
 function isSuccessEnvelope(envelope: Envelope<unknown>): boolean {
   return envelope.status === "OK" || envelope.status === "UNKNOWN";
+}
+
+/** 只在 isSuccessEnvelope 通过之后调用，所以 status 只可能是 OK 或 UNKNOWN。 */
+function businessStatus(envelope: Envelope<unknown>): BusinessStatus {
+  return envelope.status === "UNKNOWN" ? "UNKNOWN" : "OK";
 }
 
 /**
@@ -487,12 +521,13 @@ export class HttpApiClient implements CoursePilotApiClient {
     previousPlanId: string,
     courseCode: string,
     signal?: AbortSignal,
-  ): Promise<SessionOfferingList> {
+  ): Promise<SessionOfferingSearch> {
     const { response, envelope } = await this.request(
       withQuery("/api/v1/session-offerings", { previousPlanId, courseCode }),
       { method: "GET", sessionToken: this.requireSession(), signal },
     );
     // 空 items 是业务状态；只有非 OK 且非 UNKNOWN 才算系统错误。
+    // UNKNOWN 要靠 status 传给页面，否则空数组会被当成「确定没有班次」。
     if (!isSuccessEnvelope(envelope)) {
       throw errorForResponse(response.status, envelope);
     }
@@ -510,7 +545,10 @@ export class HttpApiClient implements CoursePilotApiClient {
         response.status,
       );
     }
-    return envelope.data as SessionOfferingList;
+    return {
+      ...(envelope.data as SessionOfferingList),
+      status: businessStatus(envelope),
+    };
   }
 
   async replaceSessionPlanItem(
@@ -555,7 +593,7 @@ export class HttpApiClient implements CoursePilotApiClient {
     curriculumSnapshotId: string,
     courseCode: string | null,
     signal?: AbortSignal,
-  ): Promise<TeacherCourseOption[]> {
+  ): Promise<TeacherCourseOptionSearch> {
     const { response, envelope } = await this.request(
       withQuery("/api/v1/teacher-course-options", {
         curriculumSnapshotId,
@@ -578,14 +616,17 @@ export class HttpApiClient implements CoursePilotApiClient {
         response.status,
       );
     }
-    return data.items as TeacherCourseOption[];
+    return {
+      items: data.items as TeacherCourseOption[],
+      status: businessStatus(envelope),
+    };
   }
 
   async searchReviews(
     courseCode: string,
     teacherKey: string | null,
     signal?: AbortSignal,
-  ): Promise<ReviewNote[]> {
+  ): Promise<ReviewNoteSearch> {
     const { response, envelope } = await this.request(
       withQuery("/api/v1/reviews/search", { courseCode, teacherKey }),
       { method: "GET", sessionToken: this.requireSession(), signal },
@@ -605,7 +646,10 @@ export class HttpApiClient implements CoursePilotApiClient {
         response.status,
       );
     }
-    return data.items as ReviewNote[];
+    return {
+      items: data.items as ReviewNote[],
+      status: businessStatus(envelope),
+    };
   }
 
   async getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport> {

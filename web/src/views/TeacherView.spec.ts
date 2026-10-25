@@ -109,8 +109,11 @@ describe("teacher comparison page", () => {
       selectedCurriculumId: curriculum.snapshotId,
       draft: emptyPlanningDraft(),
     });
-    listOptions.mockResolvedValue([zhang, wang]);
-    listReviews.mockResolvedValue([matched, courseOnly, unverified]);
+    listOptions.mockResolvedValue({ items: [zhang, wang], status: "OK" });
+    listReviews.mockResolvedValue({
+      items: [matched, courseOnly, unverified],
+      status: "OK",
+    });
     router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -364,7 +367,7 @@ describe("teacher comparison page", () => {
   });
 
   it("explains a course with no teacher options as normal, not as an error", async () => {
-    listOptions.mockResolvedValueOnce([]);
+    listOptions.mockResolvedValueOnce({ items: [], status: "OK" });
     const wrapper = mountPage();
     await search(wrapper, "CS999");
 
@@ -374,8 +377,32 @@ describe("teacher comparison page", () => {
     expect(wrapper.find("li.teacher-option").exists()).toBe(false);
   });
 
+  it("says an UNKNOWN teacher list cannot be confirmed instead of saying there are none", async () => {
+    listOptions.mockResolvedValueOnce({ items: [], status: "UNKNOWN" });
+    const wrapper = mountPage();
+    await search(wrapper, "CS999");
+
+    expect(wrapper.text()).toContain("教师资料无法确认");
+    expect(wrapper.text()).not.toContain("没有可比较的教师资料");
+    expect(wrapper.text()).not.toContain("这是正常说明");
+    expect(wrapper.find("li.teacher-option").exists()).toBe(false);
+  });
+
+  it("marks listed teachers as possibly incomplete when the teacher list is UNKNOWN", async () => {
+    listOptions.mockResolvedValueOnce({
+      items: [zhang, wang],
+      status: "UNKNOWN",
+    });
+    const wrapper = mountPage();
+    await search(wrapper);
+
+    expect(wrapper.findAll("li.teacher-option")).toHaveLength(2);
+    expect(wrapper.text()).toContain("下面的教师资料无法确认");
+    expect(wrapper.text()).not.toContain("没有可比较的教师资料");
+  });
+
   it("does not show an empty review list as a positive review", async () => {
-    listReviews.mockResolvedValueOnce([]);
+    listReviews.mockResolvedValueOnce({ items: [], status: "OK" });
     const wrapper = mountPage();
     await search(wrapper);
     await toggle(wrapper, "王芳");
@@ -384,6 +411,32 @@ describe("teacher comparison page", () => {
     expect(wrapper.text()).not.toContain("评价良好");
     expect(wrapper.text()).not.toContain("好评");
     expect(wrapper.findAll("ol li")).toHaveLength(0);
+  });
+
+  it("says an UNKNOWN review list cannot be confirmed instead of saying none were found", async () => {
+    listReviews.mockResolvedValueOnce({ items: [], status: "UNKNOWN" });
+    const wrapper = mountPage();
+    await search(wrapper);
+    await toggle(wrapper, "王芳");
+
+    expect(wrapper.text()).toContain("评价资料无法确认");
+    expect(wrapper.text()).not.toContain("没有找到评价");
+    expect(wrapper.text()).not.toContain("评价良好");
+    expect(wrapper.findAll("ol li")).toHaveLength(0);
+  });
+
+  it("marks listed reviews as possibly incomplete when the review list is UNKNOWN", async () => {
+    listReviews.mockResolvedValueOnce({
+      items: [matched, courseOnly],
+      status: "UNKNOWN",
+    });
+    const wrapper = mountPage();
+    await search(wrapper);
+    await toggle(wrapper, "张伟");
+
+    expect(wrapper.findAll("ol li")).toHaveLength(2);
+    expect(wrapper.text()).toContain("下面的评价资料无法确认");
+    expect(wrapper.text()).not.toContain("没有找到评价");
   });
 
   it("shows a retryable message on request failure and never falls back to fixture data", async () => {
@@ -421,9 +474,10 @@ describe("teacher comparison page", () => {
   });
 
   it("renders review excerpts as text, never as HTML", async () => {
-    listReviews.mockResolvedValueOnce([
-      { ...matched, excerpt: '<img src="x" onerror="alert(1)">点击' },
-    ]);
+    listReviews.mockResolvedValueOnce({
+      items: [{ ...matched, excerpt: '<img src="x" onerror="alert(1)">点击' }],
+      status: "OK",
+    });
     const wrapper = mountPage();
     await search(wrapper);
     await toggle(wrapper, "张伟");

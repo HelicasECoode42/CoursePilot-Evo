@@ -143,10 +143,11 @@ function stubOfferings(overrides: Record<string, CourseOffering[]> = {}) {
     .mockImplementation(async (previousPlanId, courseCode) => {
       const items =
         overrides[courseCode] ?? DEFAULT_OFFERINGS[courseCode] ?? [];
-      const list: SessionOfferingList = {
+      const list: SessionOfferingList & { status: "OK" } = {
         previousPlanId,
         courseCode,
         items: structuredClone(items),
+        status: "OK",
       };
       return list;
     });
@@ -264,6 +265,64 @@ describe("result page course search and replacement", () => {
 
     expect(wrapper.text()).toContain("这门课在当前快照下没有班次");
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  });
+
+  it("does not say a course has no offerings when the offering list is UNKNOWN", async () => {
+    vi.spyOn(api, "searchSessionOfferings").mockImplementation(
+      async (previousPlanId, courseCode) => ({
+        previousPlanId,
+        courseCode,
+        items: [],
+        status: "UNKNOWN",
+      }),
+    );
+    const wrapper = mountPage();
+    await openAndSearch(wrapper, "CS999");
+
+    expect(wrapper.text()).toContain("班次无法确认");
+    expect(wrapper.text()).not.toContain("这门课在当前快照下没有班次");
+    expect(wrapper.find("li.offering-row").exists()).toBe(false);
+  });
+
+  it("does not let any offering be selected when the offering list is UNKNOWN", async () => {
+    vi.spyOn(api, "searchSessionOfferings").mockImplementation(
+      async (previousPlanId, courseCode) => ({
+        previousPlanId,
+        courseCode,
+        items: structuredClone(DEFAULT_OFFERINGS[courseCode] ?? []),
+        status: "UNKNOWN",
+      }),
+    );
+    const wrapper = mountPage();
+    await openAndSearch(wrapper, "CS103");
+
+    const clear = rowOf(wrapper, "CS103-02");
+    expect(clear?.get(".offering-tag--unknown").text()).toBe("无法确认");
+    expect(clear?.text()).not.toContain("选这个班次");
+    expect(wrapper.findAll("li.offering-row")).toHaveLength(3);
+    expect(wrapper.text()).toContain("班次无法确认");
+  });
+
+  it("does not offer a clear choice while another course's time cannot be read", async () => {
+    vi.spyOn(api, "searchSessionOfferings").mockImplementation(
+      async (previousPlanId, courseCode) => ({
+        previousPlanId,
+        courseCode,
+        // 方案里的 CS102-01 在快照中找不到，它的时间就成了缺口。
+        items:
+          courseCode === "CS102"
+            ? []
+            : structuredClone(DEFAULT_OFFERINGS[courseCode] ?? []),
+        status: "OK",
+      }),
+    );
+    const wrapper = mountPage();
+    await openAndSearch(wrapper, "CS103");
+
+    const row = rowOf(wrapper, "CS103-02");
+    expect(row?.get(".offering-tag--unknown").text()).toBe("无法确认");
+    expect(row?.text()).not.toContain("选这个班次");
+    expect(row?.text()).toContain("没能读到");
   });
 
   it("shows a replacement preview and a reminder to re-verify the whole plan after selection", async () => {
@@ -427,7 +486,12 @@ describe("result page course search and replacement", () => {
         if (courseCode === "CS103") {
           throw new ApiFailure("班次服务暂时不可用。", "http", 503);
         }
-        return { previousPlanId, courseCode, items: DEFAULT_OFFERINGS.CS102 };
+        return {
+          previousPlanId,
+          courseCode,
+          items: DEFAULT_OFFERINGS.CS102,
+          status: "OK" as const,
+        };
       },
     );
     const wrapper = mountPage();
