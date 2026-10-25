@@ -277,3 +277,14 @@ def test_unknown_envelope_still_returns_data() -> None:
         return httpx.Response(200, json=_envelope("UNKNOWN", {"items": []}))
 
     assert _client(handler).call("listAcademicRecords", None, _context()) == []
+
+
+def test_list_endpoint_with_bare_array_is_a_contract_violation() -> None:
+    # The contract wants data to be an object with items. A bare array is not
+    # a list shape the contract allows, so it must not be accepted as one.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_envelope("OK", []))
+
+    with pytest.raises(ToolContractViolation) as caught:
+        _client(handler).call("listCourses", None, _context())
+    assert "data.items" in str(caught.value)

@@ -176,8 +176,10 @@ class ToolClient:
         data = payload.get("data")
         try:
             if spec.listed:
-                items = data.get("items") if isinstance(data, dict) else data
-                if items is None:
+                # The contract says data is an object holding items. A bare array
+                # is off contract even though it looks like a list.
+                items = data.get("items") if isinstance(data, dict) else None
+                if not isinstance(items, list):
                     raise ToolContractViolation(
                         f"{tool}: list endpoints answer with data.items (java.openapi.json)"
                     )
