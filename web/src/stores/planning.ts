@@ -4,6 +4,7 @@ import { ApiFailure, type CoursePilotApiClient } from "../api/client";
 import { api } from "../api";
 import type {
   AcademicRecord,
+  AcademicRecordInput,
   AuditResult,
   CompletedCourse,
   Motive,
@@ -79,6 +80,9 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     let submitController: AbortController | null = null;
     let submitVersion = 0;
     let keyState: IdempotencyKeyState | null = null;
+    let recordKeyState: IdempotencyKeyState | null = null;
+    /** 在途的补录请求令牌；非空时拒绝再次补录（防双击落两条记录）。 */
+    let pendingSave: object | null = null;
     let expiryTimer: ReturnType<typeof setTimeout> | null = null;
 
     /**
@@ -123,6 +127,30 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
 
     function isCurrentRecordRequest(version: number): boolean {
       return version === recordVersion;
+    }
+
+    /**
+     * 唯一改变选中记录的写法：清掉旧核对与请求草稿。
+     * 让在途请求作废由调用方负责（先调 beginRecordRequest），这里不碰版本号。
+     */
+    function setSelectedRecord(recordId: string | null) {
+      selectedRecordId.value = recordId;
+      audit.value = null;
+      auditStatus.value = "idle";
+      auditError.value = "";
+      clearPlanningHandoff();
+    }
+
+    /**
+     * 同一批内容的重试复用幂等键；内容变了换新键。
+     * 与 keyForRequest 同一规则，只是输入是学业记录而不是规划请求。
+     */
+    function keyForRecordInput(input: AcademicRecordInput): string {
+      const digest = JSON.stringify(input);
+      if (recordKeyState === null || recordKeyState.digest !== digest) {
+        recordKeyState = { digest, key: newIdempotencyKey() };
+      }
+      return recordKeyState.key;
     }
 
     function clearPlanningHandoff() {
@@ -435,7 +463,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         const list = await client.listSessionRecords(signal);
         if (!isCurrentRecordRequest(version)) return;
         records.value = list.items;
-        selectedRecordId.value = list.items[0]?.academicRecordId ?? null;
+        setSelectedRecord(list.items[0]?.academicRecordId ?? null);
         recordsStatus.value = "ready";
       } catch (error) {
         if (!isCurrentRecordRequest(version)) return;
@@ -449,15 +477,12 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       }
     }
 
-    /** 切换当前使用的学业记录；换记录会让已有核对与请求草稿作废。 */
+    /** 切换当前使用的学业记录；在途的核对与记录请求作废，旧结果不得落到新记录上。 */
     function selectRecord(recordId: string) {
       if (!records.value.some((item) => item.academicRecordId === recordId))
         return;
-      selectedRecordId.value = recordId;
-      audit.value = null;
-      auditStatus.value = "idle";
-      auditError.value = "";
-      clearPlanningHandoff();
+      beginRecordRequest();
+      setSelectedRecord(recordId);
     }
 
     /** 缺记录时补录。成功返回 true，由调用方决定要不要接着跑核对。 */
@@ -465,19 +490,27 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       courses: readonly CompletedCourse[],
       transcriptComplete: boolean,
     ): Promise<boolean> {
+      if (pendingSave !== null) return false;
       const curriculumSnapshotId = selectedCurriculumId.value;
       if (!sessionId.value || !curriculumSnapshotId) {
         recordsStatus.value = "error";
         recordsError.value = "请先建立会话并选择培养方案。";
         return false;
       }
+      const input = buildRecordInput(
+        curriculumSnapshotId,
+        courses,
+        transcriptComplete,
+      );
+      const token = {};
+      pendingSave = token;
       const { version, signal } = beginRecordRequest();
       recordsStatus.value = "loading";
       recordsError.value = "";
       try {
         const saved = await client.saveSessionRecord(
-          buildRecordInput(curriculumSnapshotId, courses, transcriptComplete),
-          newIdempotencyKey(),
+          input,
+          keyForRecordInput(input),
           signal,
         );
         if (!isCurrentRecordRequest(version)) return false;
@@ -487,9 +520,8 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
             (item) => item.academicRecordId !== saved.academicRecordId,
           ),
         ];
-        selectedRecordId.value = saved.academicRecordId;
+        setSelectedRecord(saved.academicRecordId);
         recordsStatus.value = "ready";
-        clearPlanningHandoff();
         return true;
       } catch (error) {
         if (!isCurrentRecordRequest(version)) return false;
@@ -502,6 +534,8 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         recordsStatus.value = "error";
         recordsError.value = visibleError(error);
         return false;
+      } finally {
+        if (pendingSave === token) pendingSave = null;
       }
     }
 
