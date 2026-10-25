@@ -1,6 +1,6 @@
 # B 模块：Java 数据与规则核验（业务说明与 TRD）
 
-负责人：**mira-xu**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前是设计与合同，尚未实现；排期见[本期任务](../19-delivery-plan.md)。
+负责人：**mira-xu**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前已有可运行实现：课程/班次查询、学业核对、时间解析与冲突判断、服务密钥与对象级授权，54 个测试通过。契约 15 个操作实现了 5 个，其中只有 `auditRequirements` 端到端可用——`listCourses`/`listOfferings` 出参不合契约，两个学业记录端点恒返回 UNKNOWN；排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 

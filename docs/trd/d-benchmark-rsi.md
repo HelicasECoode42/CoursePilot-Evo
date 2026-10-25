@@ -1,6 +1,6 @@
 # D 模块：验收、评测与策略改进（业务说明与 TRD）
 
-负责人：**amorfatiii**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前是设计与合同，尚未实现；排期见[本期任务](../19-delivery-plan.md)。
+负责人：**amorfatiii**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前只有案例与隔离评分的骨架：12 条 evolution 题面、39 个测试通过，评分器的语义匹配仍是关键词占位且 JavaVerifier 未接线。held-out、标注与评测 Runner 尚未落地（Runner 在未合入的 PR #36），`evo-harness/` 仍只有 README；排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 

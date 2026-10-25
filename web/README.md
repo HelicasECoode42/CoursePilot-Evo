@@ -41,7 +41,7 @@ curl --fail --silent --show-error http://127.0.0.1:5173/
 
 ## 当前交付边界
 
-页面按合同实现了匿名会话创建、`GET /api/v1/curriculum-snapshots` 已发布培养方案读取、`GET`/`POST /api/v1/academic-records` 本会话学业记录的读取与补录、`POST /api/v1/requirements/audit` 学业核对，以及 `POST /api/v1/planning` 的提交与结果展示。真实模式会过滤合成培养方案；即使提供了快照 ID，`PlanningRequest` builder 也只接受来源已核验的真实培养方案。学业记录编号由服务端生成并随列表返回，页面不要求学生填写内部编号，也不伪造 `academicRecordId`；缺少真实、已核验的培养方案或学业记录时，不会生成 REAL 请求。Python 与 Java 服务尚未实现，真实后端联调仍待完成。
+页面按合同实现了匿名会话创建、`GET /api/v1/curriculum-snapshots` 已发布培养方案读取、`GET`/`POST /api/v1/academic-records` 本会话学业记录的读取与补录、`POST /api/v1/requirements/audit` 学业核对，以及 `POST /api/v1/planning` 的提交与结果展示。真实模式会过滤合成培养方案；即使提供了快照 ID，`PlanningRequest` builder 也只接受来源已核验的真实培养方案。学业记录编号由服务端生成并随列表返回，页面不要求学生填写内部编号，也不伪造 `academicRecordId`；缺少真实、已核验的培养方案或学业记录时，不会生成 REAL 请求。Python 与 Java 三端都有实现，但只有学业核对一条链路实测打通。Python 已挂载会话、规划、学业记录、学业核对、培养快照、课程、教师课程选项、评价搜索、职业方向和报告路由，其中 `GET /api/v1/reports/runs/{runId}` 是无条件返回 NotFound 的桩；Java 已实现 8 个路由（其中 `/api/v1/verification/*` 三个未在契约中声明，学业记录两个 GET 目前是返回 UNKNOWN 的桩），契约声明的 15 个路径+方法中仍有 10 个未实现；`listCourses`/`listOfferings` 的出参也不合契约（契约要求 `data = {items: […]}`，Java 返回裸数组，且每条缺必填字段）。培养快照的 Java 端点在未合入的 PR #29 中，`session-offerings` 与 `session-plans/replace` 的实现在未合入的 PR #28 中。
 
 `buildPlanningRequest` 根据已确认的目标、分别填写的必须/偏好时间条件、可选课程考核偏好和会话上下文构造请求，并用仓库中的 `contracts/schemas/domain.schema.json` 验证。只有在相关偏好页、同一时间页的两组条件和目标顺序都明确检查后才能交接；页面允许不选任何偏好或时段，留空表示没有这类要求。确认页列出目标排序、各项偏好、培养方案来源和学业记录状态，并说明真实模式缺少哪些资料。E1 只负责把答案整理成请求；提交与结果展示属于 E2，见下一节。
 
@@ -59,7 +59,7 @@ curl --fail --silent --show-error http://127.0.0.1:5173/
 - **提交与结果**：`/plan/result` 展示 `decision`（`CLARIFY` / `RECOMMENDATIONS` / `UNABLE_TO_VERIFY`）、候选与依据，以及答复级与候选级的未知项（按 `code`+`message` 去重）。
 - **展示门禁**：只有 `scope=REAL_TIMETABLE` 且 `verdict=VALID` 才允许显示为通过，`domain/answer-display.ts` 是全站唯一判定处。`COURSE_ONLY + VALID` 仍是「时间待确认」；`SIMULATION + VALID` 必须标注「不代表本学期课表」。页面不从 `violations` 为空推断通过，也不计算学分、不解析时间。
 - **幂等与竞态**：同一份请求重试复用同一个 `Idempotency-Key`，条件变化后换新键（`domain/idempotency.ts`）。改任何条件都会中止在途提交并按版本号丢弃迟到响应；重复点击在提交期间被忽略。
-- **未完成**：澄清题只展示、暂不回填——`Question.questionId` 与 `PlanningRequest` 的对应关系尚未在契约中定义。教师比较（E-F3）与老师报告（E-F6）未开始；真实 Python/Java 未联调。
+- **未完成**：澄清题只展示、暂不回填——`Question.questionId` 与 `PlanningRequest` 的对应关系尚未在契约中定义。教师比较（E-F3，`/plan/teachers`）与老师报告（E-F6，`/report/runs/:runId`）页面已实现，但尚未用真实后端验证（报告接口在 Python 侧仍是桩）；页面与真实 Python/Java 的联调仍未完成。
 
 ## 依赖与检查
 
