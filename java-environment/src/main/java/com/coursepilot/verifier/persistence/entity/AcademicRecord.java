@@ -2,6 +2,8 @@ package com.coursepilot.verifier.persistence.entity;
 
 import jakarta.persistence.*;
 
+import java.math.BigDecimal;
+
 @Entity
 @Table(name = "academic_record")
 public class AcademicRecord {
@@ -17,13 +19,13 @@ public class AcademicRecord {
     @Column(nullable = false)
     private boolean passed;
 
-    private Double creditsEarned;
+    private BigDecimal creditsEarned;
 
     private int attemptNo = 1;
 
     public AcademicRecord() {}
     public AcademicRecord(String studentId, String courseCode, boolean passed,
-                          Double creditsEarned, int attemptNo) {
+                          BigDecimal creditsEarned, int attemptNo) {
         this.studentId = studentId;
         this.courseCode = courseCode;
         this.passed = passed;
@@ -38,8 +40,8 @@ public class AcademicRecord {
     public void setCourseCode(String courseCode) { this.courseCode = courseCode; }
     public boolean isPassed() { return passed; }
     public void setPassed(boolean passed) { this.passed = passed; }
-    public Double getCreditsEarned() { return creditsEarned; }
-    public void setCreditsEarned(Double creditsEarned) { this.creditsEarned = creditsEarned; }
+    public BigDecimal getCreditsEarned() { return creditsEarned; }
+    public void setCreditsEarned(BigDecimal creditsEarned) { this.creditsEarned = creditsEarned; }
     public int getAttemptNo() { return attemptNo; }
     public void setAttemptNo(int attemptNo) { this.attemptNo = attemptNo; }
 }

@@ -2,6 +2,8 @@ package com.coursepilot.verifier.persistence.entity;
 
 import jakarta.persistence.*;
 
+import java.math.BigDecimal;
+
 @Entity
 @Table(name = "requirement")
 public class Requirement {
@@ -15,10 +17,10 @@ public class Requirement {
     private String category;
 
     @Column(nullable = false)
-    private double requiredCredits;
+    private BigDecimal requiredCredits;
 
     public Requirement() {}
-    public Requirement(String planId, String category, double requiredCredits) {
+    public Requirement(String planId, String category, BigDecimal requiredCredits) {
         this.planId = planId;
         this.category = category;
         this.requiredCredits = requiredCredits;
@@ -29,6 +31,6 @@ public class Requirement {
     public void setPlanId(String planId) { this.planId = planId; }
     public String getCategory() { return category; }
     public void setCategory(String category) { this.category = category; }
-    public double getRequiredCredits() { return requiredCredits; }
-    public void setRequiredCredits(double requiredCredits) { this.requiredCredits = requiredCredits; }
+    public BigDecimal getRequiredCredits() { return requiredCredits; }
+    public void setRequiredCredits(BigDecimal requiredCredits) { this.requiredCredits = requiredCredits; }
 }

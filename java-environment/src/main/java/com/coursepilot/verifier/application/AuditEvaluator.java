@@ -5,6 +5,7 @@ import com.coursepilot.verifier.persistence.entity.*;
 import com.coursepilot.verifier.persistence.repo.*;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.*;
 
 @Service
@@ -37,7 +38,8 @@ public class AuditEvaluator {
             .sorted(Comparator.comparingInt(AcademicRecord::getAttemptNo))
             .forEach(r -> firstPassed.putIfAbsent(r.getCourseCode(), r));
 
-        Map<String, Double> earned = new LinkedHashMap<>();
+        // 改为 BigDecimal
+        Map<String, BigDecimal> earned = new LinkedHashMap<>();
         Set<String> unknownCategories = new HashSet<>();
         List<String> unknownReasons = new ArrayList<>();
 
@@ -52,14 +54,15 @@ public class AuditEvaluator {
                     List.of("课程 " + course.getCourseCode() + " 类别为空"));
             }
 
-            Double credits = record.getCreditsEarned() != null
+            BigDecimal credits = record.getCreditsEarned() != null
                 ? record.getCreditsEarned() : course.getCredits();
             if (credits == null) {
                 unknownCategories.add(course.getCategory());
                 unknownReasons.add("课程 " + course.getCourseCode() + " 学分未知");
                 continue;
             }
-            earned.merge(course.getCategory(), credits, Double::sum);
+            // 使用 add 方法累加
+            earned.merge(course.getCategory(), credits, BigDecimal::add);
         }
 
         boolean anyFail = false;
@@ -71,11 +74,14 @@ public class AuditEvaluator {
                 anyUnknown = true;
                 continue;
             }
-            double got = earned.getOrDefault(req.getCategory(), 0.0);
-            if (got < req.getRequiredCredits()) {
+            BigDecimal got = earned.getOrDefault(req.getCategory(), BigDecimal.ZERO);
+
+            // 使用 compareTo 进行比较：如果 got 小于 required，说明还差学分
+            if (got.compareTo(req.getRequiredCredits()) < 0) {
                 anyFail = true;
-                failReasons.add(req.getCategory() + " 还差 "
-                    + (req.getRequiredCredits() - got) + " 学分");
+                // 使用 subtract 计算差额
+                BigDecimal gap = req.getRequiredCredits().subtract(got);
+                failReasons.add(req.getCategory() + " 还差 " + gap + " 学分");
             }
         }
 
