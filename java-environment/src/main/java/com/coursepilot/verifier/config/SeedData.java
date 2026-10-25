@@ -18,28 +18,40 @@ public class SeedData {
                            CourseOfferingRepository offeringRepo,
                            CurriculumSnapshotRepository snapshotRepo) {
         return args -> {
-            if (courseRepo.count() > 0) return;
+            // 快照种子用自己的「表为空才写」判断，不能放在课程种子的早退之后：
+            // 文件库（ddl-auto=update）里课程表已非空时，快照表若仍为空，
+            // listCurricula 会永远返回空数组。
+            if (snapshotRepo.count() == 0) {
+                // 演示种子一律 SYNTHETIC/SYNTHETIC：这些不是真实教学计划，
+                // 不能标成 CURRICULUM_FILE 或 VERIFIED（AGENTS.md：REAL 不能用 synthetic）。
+                snapshotRepo.save(new CurriculumSnapshot("PLAN_CS_2025",
+                    CurriculumSnapshot.Kind.CURRICULUM, CurriculumSnapshot.State.PUBLISHED,
+                    CurriculumSnapshot.SourceKind.SYNTHETIC,
+                    CurriculumSnapshot.SourceValidation.SYNTHETIC, null,
+                    Instant.parse("2025-09-01T00:00:00Z")));
+                // 自称来自浏览器快照但尚未核验，用来说明 sourceKind 不决定
+                // sourceValidation：上传者给的标签不能让它自动变 VERIFIED。
+                snapshotRepo.save(new CurriculumSnapshot("PLAN_CS_2024",
+                    CurriculumSnapshot.Kind.CURRICULUM, CurriculumSnapshot.State.PUBLISHED,
+                    CurriculumSnapshot.SourceKind.BROWSER_SNAPSHOT,
+                    CurriculumSnapshot.SourceValidation.UNVERIFIED, null,
+                    Instant.parse("2024-09-01T00:00:00Z")));
+                // 已被拒绝的培养方案，listCurricula 不应列出来。创建时间取最早，
+                // 即便误列出也只会排在已发布快照之后。
+                snapshotRepo.save(new CurriculumSnapshot("PLAN_CS_2023_REJECTED",
+                    CurriculumSnapshot.Kind.CURRICULUM, CurriculumSnapshot.State.REJECTED,
+                    CurriculumSnapshot.SourceKind.SYNTHETIC,
+                    CurriculumSnapshot.SourceValidation.SYNTHETIC, null,
+                    Instant.parse("2023-09-01T00:00:00Z")));
+                // 开课快照同表不同 kind，listCurricula 不应把它列出来。
+                snapshotRepo.save(new CurriculumSnapshot("OFFER_2025_FALL",
+                    CurriculumSnapshot.Kind.OFFERING, CurriculumSnapshot.State.PUBLISHED,
+                    CurriculumSnapshot.SourceKind.SYNTHETIC,
+                    CurriculumSnapshot.SourceValidation.SYNTHETIC, "2025-FALL",
+                    Instant.parse("2025-08-15T00:00:00Z")));
+            }
 
-            // 演示种子一律 SYNTHETIC/SYNTHETIC：这些不是真实教学计划，
-            // 不能标成 CURRICULUM_FILE 或 VERIFIED（AGENTS.md：REAL 不能用 synthetic）。
-            snapshotRepo.save(new CurriculumSnapshot("PLAN_CS_2025",
-                CurriculumSnapshot.Kind.CURRICULUM, CurriculumSnapshot.State.PUBLISHED,
-                CurriculumSnapshot.SourceKind.SYNTHETIC,
-                CurriculumSnapshot.SourceValidation.SYNTHETIC, null,
-                Instant.parse("2025-09-01T00:00:00Z")));
-            // 自称来自浏览器快照但尚未核验，用来说明 sourceKind 不决定
-            // sourceValidation：上传者给的标签不能让它自动变 VERIFIED。
-            snapshotRepo.save(new CurriculumSnapshot("PLAN_CS_2024",
-                CurriculumSnapshot.Kind.CURRICULUM, CurriculumSnapshot.State.PUBLISHED,
-                CurriculumSnapshot.SourceKind.BROWSER_SNAPSHOT,
-                CurriculumSnapshot.SourceValidation.UNVERIFIED, null,
-                Instant.parse("2024-09-01T00:00:00Z")));
-            // 开课快照同表不同 kind，listCurricula 不应把它列出来。
-            snapshotRepo.save(new CurriculumSnapshot("OFFER_2025_FALL",
-                CurriculumSnapshot.Kind.OFFERING, CurriculumSnapshot.State.PUBLISHED,
-                CurriculumSnapshot.SourceKind.SYNTHETIC,
-                CurriculumSnapshot.SourceValidation.SYNTHETIC, "2025-FALL",
-                Instant.parse("2025-08-15T00:00:00Z")));
+            if (courseRepo.count() > 0) return;
 
             courseRepo.save(new Course("CS101", "Java 程序设计", 3.0, "必修"));
             courseRepo.save(new Course("CS102", "数据结构", 4.0, "必修"));

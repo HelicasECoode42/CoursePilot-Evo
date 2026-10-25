@@ -11,4 +11,8 @@ public interface CurriculumSnapshotRepository extends JpaRepository<CurriculumSn
 
     /** 按种类取，最新在前。契约 items 上限 200，由调用方传 Limit 挡住。 */
     List<CurriculumSnapshot> findByKind(CurriculumSnapshot.Kind kind, Sort sort, Limit limit);
+
+    /** 按种类与状态取，最新在前。listCurricula 只用它取 PUBLISHED，见契约 operation summary。 */
+    List<CurriculumSnapshot> findByKindAndState(CurriculumSnapshot.Kind kind, CurriculumSnapshot.State state,
+                                                Sort sort, Limit limit);
 }

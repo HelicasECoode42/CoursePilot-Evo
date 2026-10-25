@@ -74,6 +74,15 @@ class CurriculumControllerTest {
     }
 
     @Test
+    @DisplayName("REJECTED 的培养方案不出现在列表里（契约：列出已发布培养快照）")
+    void rejectedSnapshotsAreNotListed() throws Exception {
+        // 种子里有一条 PLAN_CS_2023_REJECTED（state=REJECTED），它必须被过滤掉。
+        mvc.perform(get("/api/v1/curriculum-snapshots").header(KEY, "test-key").header(SUBJECT, "S001"))
+            .andExpect(jsonPath("$.data.items[?(@.snapshotId=='PLAN_CS_2023_REJECTED')]").isEmpty())
+            .andExpect(jsonPath("$.data.items[?(@.state!='PUBLISHED')]").isEmpty());
+    }
+
+    @Test
     @DisplayName("没有服务密钥读不到快照列表")
     void requiresServiceKey() throws Exception {
         mvc.perform(get("/api/v1/curriculum-snapshots").header(SUBJECT, "S001"))
