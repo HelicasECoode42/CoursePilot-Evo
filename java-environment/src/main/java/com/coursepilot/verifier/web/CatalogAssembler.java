@@ -1,0 +1,108 @@
+package com.coursepilot.verifier.web;
+
+import com.coursepilot.verifier.application.TimeParser;
+import com.coursepilot.verifier.domain.MeetingTime;
+import com.coursepilot.verifier.persistence.entity.Course;
+import com.coursepilot.verifier.persistence.entity.CourseOffering;
+import com.coursepilot.verifier.web.dto.CatalogDtos;
+import com.coursepilot.verifier.web.dto.CatalogDtos.Meeting;
+import com.coursepilot.verifier.web.dto.CatalogDtos.ParseStatus;
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 把持久化实体映射成契约形状的 DTO。
+ *
+ * 时间只从 meetingTextRaw 由唯一的 TimeParser 重新解析（AGENTS.md：Java 重新解析
+ * meetingTextRaw，不信任任何外部给的 meetings / parseStatus）。解析失败时如实标
+ * UNPARSED 并给空 meetings，绝不能当成「没有时间所以不冲突」。
+ */
+@Component
+public class CatalogAssembler {
+
+    /** contracts: Meeting / CourseOffering.meetings 的上限。 */
+    static final int MAX_MEETINGS = 40;
+    static final int MAX_SECTION = 64;
+    static final int MAX_WEEK = 60;
+
+    /** 实体里 teacher / category 允许为空；契约要求非空字符串，缺失时写字面量 UNKNOWN，不编造。 */
+    static final String UNKNOWN_TEXT = "UNKNOWN";
+
+    private final TimeParser timeParser;
+
+    public CatalogAssembler(TimeParser timeParser) {
+        this.timeParser = timeParser;
+    }
+
+    public CatalogDtos.Course toCourse(Course c) {
+        return new CatalogDtos.Course(
+            c.getCourseCode(),
+            c.getName(),
+            c.getCredits(),
+            orUnknown(c.getCategory()),
+            // 当前实体没有快照关联，来源只能落到课程行本身。它是库内记录的引用，
+            // 不是培养方案或教务来源的真实出处。
+            List.of("course:" + c.getCourseCode()));
+    }
+
+    public CatalogDtos.CourseOffering toOffering(CourseOffering o) {
+        String raw = o.getMeetingTextRaw() == null ? "" : o.getMeetingTextRaw();
+        TimeParser.ParseOutcome outcome = timeParser.parse(raw);
+
+        ParseStatus status;
+        List<Meeting> meetings;
+        if (!outcome.isOk()) {
+            // 解析不出来：未解析 + 空 meetings。调用方必须据此判为未知，不能判为无冲突。
+            status = ParseStatus.UNPARSED;
+            meetings = List.of();
+        } else if (!withinContract(outcome.getMeetings())) {
+            // 解析出了时间，但超出契约上限（节次、周次或段数），不能原样返回。
+            status = ParseStatus.INVALID;
+            meetings = List.of();
+        } else {
+            status = ParseStatus.PARSED;
+            meetings = outcome.getMeetings().stream().map(CatalogAssembler::toMeeting).toList();
+        }
+
+        return new CatalogDtos.CourseOffering(
+            o.getCourseCode(),
+            o.getOfferingId(),
+            null,                        // 当前没有教师主键
+            orUnknown(o.getTeacher()),
+            null,                        // 实体没有学分
+            null,                        // 实体没有容量
+            raw,
+            meetings,
+            status,
+            "offering:" + o.getOfferingId());
+    }
+
+    private static Meeting toMeeting(MeetingTime m) {
+        return new Meeting(
+            m.getDayOfWeek(),
+            m.getStartSection(),
+            m.getEndSection(),
+            m.getWeeks().stream().sorted().toList());
+    }
+
+    private static boolean withinContract(List<MeetingTime> meetings) {
+        if (meetings.isEmpty() || meetings.size() > MAX_MEETINGS) return false;
+        for (MeetingTime m : meetings) {
+            if (m.getDayOfWeek() < 1 || m.getDayOfWeek() > 7) return false;
+            if (m.getStartSection() < 1 || m.getEndSection() > MAX_SECTION) return false;
+            if (m.getStartSection() > m.getEndSection()) return false;
+            List<Integer> weeks = new ArrayList<>(m.getWeeks());
+            if (weeks.isEmpty() || weeks.size() > MAX_WEEK) return false;
+            for (int w : weeks) {
+                if (w < 1 || w > MAX_WEEK) return false;
+            }
+        }
+        return true;
+    }
+
+    private static String orUnknown(String value) {
+        return (value == null || value.isBlank()) ? UNKNOWN_TEXT : value;
+    }
+}
