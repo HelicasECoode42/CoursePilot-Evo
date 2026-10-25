@@ -9,7 +9,6 @@ import com.coursepilot.verifier.web.dto.CatalogDtos.Meeting;
 import com.coursepilot.verifier.web.dto.CatalogDtos.ParseStatus;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -21,11 +20,6 @@ import java.util.List;
  */
 @Component
 public class CatalogAssembler {
-
-    /** contracts: Meeting / CourseOffering.meetings 的上限。 */
-    static final int MAX_MEETINGS = 40;
-    static final int MAX_SECTION = 64;
-    static final int MAX_WEEK = 60;
 
     /** 实体里 teacher / category 允许为空；契约要求非空字符串，缺失时写字面量 UNKNOWN，不编造。 */
     static final String UNKNOWN_TEXT = "UNKNOWN";
@@ -53,13 +47,13 @@ public class CatalogAssembler {
 
         ParseStatus status;
         List<Meeting> meetings;
-        if (!outcome.isOk()) {
+        if (outcome.isOutOfContract()) {
+            // 时间能读出，但超出契约上限（上限由 TimeParser 判定）：不能原样返回。
+            status = ParseStatus.INVALID;
+            meetings = List.of();
+        } else if (!outcome.isOk()) {
             // 解析不出来：未解析 + 空 meetings。调用方必须据此判为未知，不能判为无冲突。
             status = ParseStatus.UNPARSED;
-            meetings = List.of();
-        } else if (!withinContract(outcome.getMeetings())) {
-            // 解析出了时间，但超出契约上限（节次、周次或段数），不能原样返回。
-            status = ParseStatus.INVALID;
             meetings = List.of();
         } else {
             status = ParseStatus.PARSED;
@@ -85,21 +79,6 @@ public class CatalogAssembler {
             m.getStartSection(),
             m.getEndSection(),
             m.getWeeks().stream().sorted().toList());
-    }
-
-    private static boolean withinContract(List<MeetingTime> meetings) {
-        if (meetings.isEmpty() || meetings.size() > MAX_MEETINGS) return false;
-        for (MeetingTime m : meetings) {
-            if (m.getDayOfWeek() < 1 || m.getDayOfWeek() > 7) return false;
-            if (m.getStartSection() < 1 || m.getEndSection() > MAX_SECTION) return false;
-            if (m.getStartSection() > m.getEndSection()) return false;
-            List<Integer> weeks = new ArrayList<>(m.getWeeks());
-            if (weeks.isEmpty() || weeks.size() > MAX_WEEK) return false;
-            for (int w : weeks) {
-                if (w < 1 || w > MAX_WEEK) return false;
-            }
-        }
-        return true;
     }
 
     private static String orUnknown(String value) {

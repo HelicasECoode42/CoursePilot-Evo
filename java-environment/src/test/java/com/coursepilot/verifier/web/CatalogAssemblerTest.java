@@ -118,4 +118,21 @@ class CatalogAssemblerTest {
         assertEquals(ParseStatus.INVALID, o.parseStatus());
         assertTrue(o.meetings().isEmpty());
     }
+
+    @Test
+    @DisplayName("节次数字过大：UNPARSED 且不抛异常（与冲突判定一样是未知）")
+    void hugeSectionNumberIsUnparsed() {
+        CatalogDtos.CourseOffering o = assertDoesNotThrow(() ->
+            assembler.toOffering(offering("O1", "张老师", "星期一第99999999999节{1周}")));
+        assertEquals(ParseStatus.UNPARSED, o.parseStatus());
+        assertTrue(o.meetings().isEmpty());
+    }
+
+    @Test
+    @DisplayName("周次 0 超出契约下界：INVALID")
+    void weekZeroIsInvalid() {
+        CatalogDtos.CourseOffering o = assembler.toOffering(offering("O1", "张老师", "周一第1-2节{0-3周}"));
+        assertEquals(ParseStatus.INVALID, o.parseStatus());
+        assertTrue(o.meetings().isEmpty());
+    }
 }
