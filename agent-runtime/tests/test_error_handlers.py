@@ -21,7 +21,7 @@ from agent_runtime.adapters.tool_client import (
     ToolRejected,
     ToolUnavailable,
 )
-from agent_runtime.api.errors import register_error_handlers
+from agent_runtime.api.errors import ApiError, register_error_handlers
 
 
 def _client(exc: BaseException) -> TestClient:
@@ -146,3 +146,16 @@ def test_retryable_follows_status_not_a_fixed_flag(
     issue = _issue(response)
     assert issue["code"] == expected_code
     assert issue["retryable"] is expected_retryable
+
+
+def test_long_field_is_bounded_so_the_handler_does_not_500() -> None:
+    # Issue.field is capped at 200. A deeply nested validation `loc` joins into a
+    # long path, and an unbounded field makes Issue() raise inside the handler —
+    # the same class of bug as an unbounded message.
+    exc = ApiError("字段不合法", field="a." * 300)
+    response = _client(exc).get("/boom")
+
+    assert response.status_code == 500
+    field = _issue(response)["field"]
+    assert len(field) <= 200
+    assert field.endswith("……[已截断]")

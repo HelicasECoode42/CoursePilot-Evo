@@ -47,6 +47,20 @@ def _bounded(text: str, limit: int = _MESSAGE_LIMIT) -> str:
     return text[: limit - len(_TRUNCATED_MARK)] + _TRUNCATED_MARK
 
 
+_FIELD_LIMIT = 200
+
+
+def _bounded_field(text: str | None) -> str | None:
+    """Same guard as _bounded, for Issue.field (capped at 200, or absent).
+
+    A deeply nested validation `loc` joins into a long path, and an over-long
+    field makes Issue() raise inside the handler just like an over-long message.
+    """
+    if not text:
+        return None
+    return _bounded(text, _FIELD_LIMIT)
+
+
 def _transient(status_code: int) -> bool:
     """Retry hint by status: 429 (rate limit) and 503/504 (dependency down or deadline).
 
@@ -175,7 +189,7 @@ def register_error_handlers(app: FastAPI) -> None:
         issue = Issue(
             code=_bounded(exc.issue_code or "ERROR", _CODE_LIMIT),
             message=_bounded(exc.message),
-            field=exc.field,
+            field=_bounded_field(exc.field),
             retryable=exc.retryable,
         )
         return _json(request, exc.status_code, exc.status, [issue])
@@ -288,7 +302,7 @@ def register_error_handlers(app: FastAPI) -> None:
             Issue(
                 code="INVALID_INPUT",
                 message=_bounded(str(err.get("msg"))),
-                field=".".join(str(part) for part in err.get("loc", [])),
+                field=_bounded_field(".".join(str(part) for part in err.get("loc", []))),
                 retryable=False,
             )
             for err in exc.errors()
