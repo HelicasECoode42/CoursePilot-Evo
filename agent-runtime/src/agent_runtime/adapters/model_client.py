@@ -23,7 +23,14 @@ FACTS_MESSAGE_PREFIX = "AVAILABLE_FACTS:"
 
 
 class ModelInvalidOutput(RuntimeError):
-    """Unusable JSON / schema-invalid candidates (-> one repair, then 422)."""
+    """Unusable JSON / schema-invalid candidates (-> terminal 422, no automatic retry).
+
+    Carries the provider usage of the failed call when it is known, so the Runner
+    can still charge those tokens to the budget (docs/04 section 3).
+    """
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class ModelTimeout(RuntimeError):
@@ -188,7 +195,12 @@ class HttpModelAdapter:
         if not isinstance(content, str) or not content.strip():
             raise ModelInvalidOutput("模型响应缺少 content")
         input_tokens, output_tokens = _usage_tokens(payload_json)
-        reply = _reply_from_content(content)
+        try:
+            reply = _reply_from_content(content)
+        except ModelInvalidOutput as exc:
+            exc.input_tokens = input_tokens
+            exc.output_tokens = output_tokens
+            raise
         return ModelReply(
             clarify=reply.clarify,
             items=reply.items,

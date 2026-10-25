@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -395,3 +395,51 @@ def test_reports_requires_admin_key() -> None:
         "/api/v1/reports/runs/run:demo", headers={**headers, "X-Admin-Key": "secret"}
     )
     assert with_admin.status_code == 404
+
+
+def test_unknown_session_token_returns_401_not_404() -> None:
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/v1/academic-records",
+        json=_record_body(),
+        headers={
+            "Authorization": "Bearer not-a-real-token",
+            "Idempotency-Key": "k-expired",
+            "X-Request-Id": "req:expired",
+        },
+    )
+    assert response.status_code == 401
+    assert response.json()["status"] == "UNAUTHORIZED"
+    assert response.json()["issues"][0]["code"] == "UNAUTHORIZED"
+
+
+def test_expired_session_token_returns_401_not_404() -> None:
+    app = create_app()
+    client = TestClient(app)
+    token = _token(client)
+    store = app.state.session_store
+    session_id, _ = store._by_hash[store._hash(token)]
+    store._by_hash[store._hash(token)] = (session_id, datetime.now(UTC) - timedelta(seconds=1))
+    response = client.get(
+        "/api/v1/academic-records",
+        headers={"Authorization": f"Bearer {token}", "X-Request-Id": "req:expired"},
+    )
+    assert response.status_code == 401
+    assert response.json()["issues"][0]["code"] == "UNAUTHORIZED"
+
+
+def test_valid_session_for_missing_object_stays_404() -> None:
+    # A valid session asking for an object it does not own (here: a report the
+    # session may not see, with the admin key) must stay 404, never 401.
+    client = TestClient(create_app(Settings(admin_key="secret")))
+    response = client.get(
+        "/api/v1/reports/runs/run:other",
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "X-Request-Id": "req:other",
+            "X-Admin-Key": "secret",
+        },
+    )
+    assert response.status_code == 404
+    assert response.json()["status"] == "NOT_FOUND"
+    assert response.json()["issues"][0]["code"] == "NOT_FOUND"

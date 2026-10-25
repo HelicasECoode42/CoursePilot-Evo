@@ -13,7 +13,6 @@ from agent_runtime.adapters.model_client import (
     ModelAdapter,
     ModelInvalidOutput,
     ModelReply,
-    ModelTimeout,
 )
 from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient
@@ -259,27 +258,25 @@ class PlanningRunner:
                 ),
             },
         ]
-        last_error: ModelInvalidOutput | None = None
-        for _attempt in range(2):
-            budget.record_model_call()
-            budget.check_deadline()
-            try:
-                reply = self._model.generate(context=context, messages=messages, tool_schemas=[])
-            except ModelTimeout:
-                raise
-            except ModelInvalidOutput as exc:
-                last_error = exc
-                continue
-            budget.record_tokens(reply.input_tokens, reply.output_tokens)
-            if reply.clarify is not None:
-                return reply
-            # An empty candidate list is missing data, not a broken model payload.
-            return ModelReply(
-                items=list(reply.items or []),
-                input_tokens=reply.input_tokens,
-                output_tokens=reply.output_tokens,
-            )
-        raise last_error or ModelInvalidOutput("模型输出无法解析为候选，已停止修复")
+        # docs/04 section 3: no hidden automatic retry or repair. A malformed reply is a
+        # terminal failure; re-running is an explicit user action with a new Idempotency-Key.
+        budget.record_model_call()
+        budget.check_deadline()
+        try:
+            reply = self._model.generate(context=context, messages=messages, tool_schemas=[])
+        except ModelInvalidOutput as exc:
+            # The failed call still consumed provider tokens; charge them before failing.
+            budget.record_tokens(exc.input_tokens, exc.output_tokens)
+            raise
+        budget.record_tokens(reply.input_tokens, reply.output_tokens)
+        if reply.clarify is not None:
+            return reply
+        # An empty candidate list is missing data, not a broken model payload.
+        return ModelReply(
+            items=list(reply.items or []),
+            input_tokens=reply.input_tokens,
+            output_tokens=reply.output_tokens,
+        )
 
     def _call_tool(
         self,
