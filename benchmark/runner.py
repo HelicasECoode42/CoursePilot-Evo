@@ -252,6 +252,17 @@ def unknown_codes(data: dict[str, Any]) -> list[str]:
     return codes
 
 
+def describe_failure(status: int, issues: list[dict[str, Any]] | None = None) -> str:
+    """按状态码说清「谁的问题」，别把 4xx 一律写成上游挂了（#37 之后 C 侧已经区分）。"""
+    codes = [str(item.get("code")) for item in issues or [] if item.get("code")]
+    detail = ", ".join(codes) if codes else f"HTTP {status}"
+    if 400 <= status < 500:
+        return f"请求被拒（{detail}）：属请求或契约问题，不是上游不可用"
+    if status == 502:
+        return f"上游契约不一致（{detail}）：Java 返回与 java.openapi.json 不符"
+    return f"上游不可用（{detail}）"
+
+
 def load_manifest_schema(contracts_root: Path) -> dict[str, Any]:
     """取 contracts 里的 RunManifest 定义，作为 manifest 的唯一真源。"""
     schema_path = contracts_root / "schemas" / "domain.schema.json"
@@ -371,11 +382,8 @@ class BenchmarkRunner:
                 status, payload = self.transport.get(step.path, params, headers)
                 outcome.http_status = status
                 if status != 200:
-                    issues = payload.get("issues") or []
-                    codes = [str(item.get("code")) for item in issues if item.get("code")]
-                    outcome.error = f"上游不可用（第 {index} 步 {step.label}）：" + (
-                        ", ".join(codes) or f"HTTP {status}"
-                    )
+                    reason = describe_failure(status, payload.get("issues"))
+                    outcome.error = f"第 {index} 步 {step.label}：{reason}"
                     outcome.measured_latency_ms = int((time.perf_counter() - started) * 1000)
                     return outcome
                 data = payload.get("data") or {}
@@ -390,8 +398,7 @@ class BenchmarkRunner:
             outcome.http_status = status
             if status != 200 and status != 201:
                 issues = payload.get("issues") or []
-                codes = [str(item.get("code")) for item in issues if item.get("code")]
-                outcome.error = f"上游不可用（第 {index} 步 {step.label}）：" + (", ".join(codes) or f"HTTP {status}")
+                outcome.error = f"第 {index} 步 {step.label}：" + describe_failure(status, issues)
                 outcome.measured_latency_ms = int((time.perf_counter() - started) * 1000)
                 return outcome
             data = payload.get("data") or {}

@@ -326,6 +326,7 @@ def test_blocked_when_upstream_503(tmp_path: Path) -> None:
     )
     assert outcome.status == BLOCKED
     assert "TOOL_UNAVAILABLE" in (outcome.error or "")
+    assert "上游不可用" in (outcome.error or "")
 
 
 # -- 成本与汇总 -----------------------------------------------------------
@@ -850,3 +851,34 @@ def test_prompt_text_only_fixture_goes_planning() -> None:
     body = plan.steps[-1].body({"data": {"academicRecordId": "record:test"}})
     assert body["intent"]["hardConstraints"] == []
     assert "微积分" in body["promptText"]
+
+
+def test_4xx_is_reported_as_request_problem_not_upstream(tmp_path: Path) -> None:
+    """#37 之后 C 侧把 4xx 与依赖故障分开了，我们的判定文案也要分开。"""
+    payload = {"schemaVersion": "1.0", "status": "INVALID_INPUT", "data": {}, "issues": [{"code": "INVALID_INPUT"}]}
+    runner = make_runner(tmp_path, FakeTransport([(422, payload)]), write_case(tmp_path))
+    outcome = runner.run_case(
+        {
+            "caseId": "G2-001",
+            "groupId": "G2",
+            "inputFixtureRef": "fixtures/G2-001.json",
+            "curriculumSnapshotId": "3c405feaa6d7",
+        }
+    )
+    assert outcome.status == BLOCKED
+    assert "请求被拒" in (outcome.error or "")
+    assert "上游不可用（" not in (outcome.error or "")
+
+
+def test_502_is_reported_as_contract_mismatch(tmp_path: Path) -> None:
+    payload = {"schemaVersion": "1.0", "status": "ERROR", "data": {}, "issues": [{"code": "CONTRACT"}]}
+    runner = make_runner(tmp_path, FakeTransport([(502, payload)]), write_case(tmp_path))
+    outcome = runner.run_case(
+        {
+            "caseId": "G2-001",
+            "groupId": "G2",
+            "inputFixtureRef": "fixtures/G2-001.json",
+            "curriculumSnapshotId": "3c405feaa6d7",
+        }
+    )
+    assert "契约不一致" in (outcome.error or "")
