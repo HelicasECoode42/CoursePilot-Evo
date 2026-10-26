@@ -1,13 +1,13 @@
 """Session offering search and one-course replacement.
 
 These two routes call the existing Java tools ``listOfferings`` and
-``validatePlan``. Their paths are not in ``planning.openapi.json`` yet: the
-field names below are the ones already shared with B and E, and the contract
-document stays unchanged until those two confirm this shape.
+``validatePlan``. Both paths are in ``planning.openapi.json``.
 
-A missing Java service stays ``503 TOOL_UNAVAILABLE``. A missing offering
-snapshot is rejected before any tool call. The returned ``verification`` is
-Java's object, including ``INVALID`` and ``UNKNOWN``.
+A missing Java service stays ``503 TOOL_UNAVAILABLE``. A saved plan with no
+offering snapshot never calls Java: search answers ``200`` with envelope
+``UNKNOWN`` and empty ``items`` (the page must not read that as "no classes").
+Replace still does not invent a ``PlanValidation``. The returned
+``verification`` is Java's object, including ``INVALID`` and ``UNKNOWN``.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from agent_runtime.api.deps import (
 )
 from agent_runtime.api.errors import InvalidInputError, NotFoundError, envelope
 from agent_runtime.api.idempotency import IdempotencyStore
-from agent_runtime.api.schemas import DomainModel
+from agent_runtime.api.schemas import DomainModel, Issue
 from agent_runtime.api.schemas._base import Id
 from agent_runtime.application.ids import digest
 from agent_runtime.application.plan_replacement import (
@@ -62,9 +62,11 @@ def _reject(error: Exception) -> None:
     if isinstance(error, CourseNotInPlan):
         raise InvalidInputError(str(error), field="courseCode") from error
     if isinstance(error, OfferingSnapshotMissing):
+        # Replace cannot return an empty offering list: its contract requires a
+        # Java PlanValidation, and this module does not write one. The field is
+        # omitted because the client never sent offeringSnapshotId.
         raise InvalidInputError(
-            "这份方案没有班次快照，不能搜索或替换班次",
-            field="offeringSnapshotId",
+            "这份方案没有班次快照，不能替换班次",
         ) from error
     if isinstance(error, ReusedVerification):
         raise InvalidInputError(
@@ -105,7 +107,27 @@ def search_session_offerings(
             course_code=query.courseCode,
             context=context,
         )
-    except (PlanNotInSession, OfferingSnapshotMissing) as exc:
+    except OfferingSnapshotMissing:
+        # The missing id is on the stored plan, not in this query. 200 UNKNOWN
+        # with empty items matches the page: it must not say the course has no classes.
+        return envelope(
+            x_request_id,
+            "UNKNOWN",
+            {
+                "previousPlanId": query.previousPlanId,
+                "courseCode": query.courseCode,
+                "items": [],
+            },
+            issues=[
+                Issue(
+                    code="OFFERING_SNAPSHOT_MISSING",
+                    message="这份方案没有班次快照，不能确认有哪些班次",
+                    field=None,
+                    retryable=False,
+                )
+            ],
+        ).model_dump(mode="json")
+    except PlanNotInSession as exc:
         _reject(exc)
         raise
     return envelope(

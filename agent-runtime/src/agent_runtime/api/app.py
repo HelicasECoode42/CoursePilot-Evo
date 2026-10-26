@@ -59,7 +59,13 @@ def create_app(
     verifier_version = (
         "verifier:fake" if isinstance(tool_client, TypedFakeToolClient) else "verifier:local-unset"
     )
-    budget = Budget()
+    budget = Budget(
+        max_input_tokens=settings.max_input_tokens,
+        max_output_tokens=settings.max_output_tokens,
+        max_tool_calls=settings.max_tool_calls,
+        max_model_calls=settings.max_model_calls,
+        deadline_ms=settings.deadline_ms,
+    )
     app.state.runner = runner or PlanningRunner(
         tool_client=tool_client,
         harness=harness,

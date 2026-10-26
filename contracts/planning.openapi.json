@@ -1978,7 +1978,7 @@
       "get": {
         "operationId": "searchSessionOfferings",
         "summary": "按课程查询本会话方案可替换的开课班次",
-        "description": "结果页搜索班次用。范围由会话 bearer 决定，previousPlanId 必须属于当前会话，否则 404。返回的是该课程在方案所用开课快照下的全部班次，items 为空数组表示该快照里这门课没有可选班次，不是错误。\n\n这里返回的每个班次只是候选，**不构成核验结论**：候选自身无冲突不代表放进整份方案后无冲突，必须经 session-plans/replace 对整份方案重新核验。",
+        "description": "结果页搜索班次用。范围由会话 bearer 决定，previousPlanId 必须属于当前会话，否则 404。返回的是该课程在方案所用开课快照下的全部班次。封套 OK 且 items 为空数组，表示该快照里这门课没有可选班次，不是错误。方案没有班次快照时返回 HTTP 200、封套 UNKNOWN、items 为空，并在 issues 说明原因；这不是「确定没有班次」。\n\n这里返回的每个班次只是候选，**不构成核验结论**：候选自身无冲突不代表放进整份方案后无冲突，必须经 session-plans/replace 对整份方案重新核验。",
         "parameters": [
           {
             "name": "previousPlanId",
@@ -2015,7 +2015,7 @@
         ],
         "responses": {
           "200": {
-            "description": "成功；items 为空数组表示该快照下这门课没有班次，属正常业务状态",
+            "description": "成功或业务 UNKNOWN。OK 且 items 为空表示该快照下这门课没有班次；UNKNOWN 且 items 为空表示没有班次快照，不能确认",
             "content": {
               "application/json": {
                 "schema": {

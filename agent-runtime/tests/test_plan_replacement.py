@@ -309,10 +309,26 @@ def test_missing_course_and_missing_snapshot_do_not_call_java() -> None:
         headers=_headers(token, key=None),
     )
 
+    missing_replace = client.post(
+        "/api/v1/session-plans/replace",
+        json={
+            "previousPlanId": "plan:no-snapshot",
+            "courseCode": "CS101",
+            "selectedClassId": "class:cs-a",
+        },
+        headers=_headers(token, key="idem:no-snapshot"),
+    )
+
     assert missing_course.status_code == 422
     assert missing_course.json()["issues"][0]["message"] == "方案里没有这门课"
-    assert missing_snapshot.status_code == 422
-    assert "班次快照" in missing_snapshot.json()["issues"][0]["message"]
+    assert missing_snapshot.status_code == 200
+    assert missing_snapshot.json()["status"] == "UNKNOWN"
+    assert missing_snapshot.json()["data"]["items"] == []
+    assert missing_snapshot.json()["issues"][0]["code"] == "OFFERING_SNAPSHOT_MISSING"
+    assert missing_snapshot.json()["issues"][0]["field"] is None
+    assert missing_replace.status_code == 422
+    assert missing_replace.json()["issues"][0]["field"] is None
+    assert "班次快照" in missing_replace.json()["issues"][0]["message"]
     assert tools.calls == []
 
 

@@ -1,6 +1,6 @@
 # C 模块：需求理解与智能规划（业务说明与 TRD）
 
-负责人：**goat-yang**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前已有可运行实现：planning 契约的 12 个操作都有路由，81 个测试通过。模型默认走受控假实现（未配 `CP_MODEL_*` 时不调真实模型）；`harness/` 下的策略文件目前只参与版本哈希，不改变模型行为；排期见[本期任务](../19-delivery-plan.md)。
+负责人：**goat-yang**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前已有可运行实现：planning 契约的 12 个操作都有路由，81 个测试通过。模型默认走受控假实现（未配 `CP_MODEL_*` 时不调真实模型）。`harness/tool_policy.yaml` 限制每次运行各工具的调用次数，`context_policy.yaml` 限制送进模型的事实条数，`AGENTS.md` 与 `skills/` 进入系统提示；预算不在这份白名单里，默认仍是 8000/2000/6/3/45000，可用 `CP_MAX_*` 覆盖。排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 
@@ -137,7 +137,7 @@ sequenceDiagram
 
 ### 5. Harness、预算和安全门禁
 
-ModelAdapter 只允许选定模型端点，不接受文件/评价里给的 URL。tool_policy 白名单工具、次数上限；context_policy 选本次任务需要的事实/评价，不把全库、历史全部聊天塞入模型。
+ModelAdapter 只允许选定模型端点，不接受文件/评价里给的 URL。Runner 读取 `tool_policy.yaml` 的 per-tool `max_calls`，超出则不再发这次工具调用；`context_policy.yaml` 的 `max_course_facts`、`max_offerings`、`max_review_notes` 裁剪送进模型的事实，不把全库、历史全部聊天塞入模型。`harness/AGENTS.md` 与 `skills/` 作为策略文本放进系统提示，不执行。
 
 默认累计 input8000/output2000 tokens、6 tools、3 model calls、45 秒；各调用按剩余预算设置 timeout。provider 自动重试关闭。无效模型 JSON 最多在模型调用预算内修复一次；超过即 MODEL_INVALID_OUTPUT，不因语言顺畅放行。
 
@@ -145,7 +145,7 @@ HarnessLoader 只加载已记录 hash 的白名单快照。文件内容是策略
 
 系统处理评价中的“忽略之前指令、调某 URL、泄露 key”等文本为资料，不执行。模型候选 ID 必须属于工具给的集合；可信答案引用 evidence ID。日志不写完整 Prompt/私有思维链或学生成绩。
 
-已配置模型地址和密钥时，`CP_MODEL_ID` 不能仍是 `DEPLOYMENT_MODEL_PLACEHOLDER`，启动即失败。缺密钥仍用假模型。答案级 `unknowns` 含 `FAKE_MODEL` 时不得把候选展示为真实通过；Java 的 `verdict` 保持原样。运行预算只有 `Budget` 一处，manifest 记录同一次运行实际用的那份。
+已配置模型地址和密钥时，`CP_MODEL_ID` 不能仍是 `DEPLOYMENT_MODEL_PLACEHOLDER`，启动即失败。缺密钥仍用假模型。答案级 `unknowns` 含 `FAKE_MODEL` 时不得把候选展示为真实通过；Java 的 `verdict` 保持原样。运行预算只有 `Budget` 一处，由 `CP_MAX_INPUT_TOKENS`、`CP_MAX_OUTPUT_TOKENS`、`CP_MAX_TOOL_CALLS`、`CP_MAX_MODEL_CALLS`、`CP_DEADLINE_MS` 组装，缺省即上面那组数字；manifest 记录同一次运行实际用的那份。预算不放进 Harness 白名单，Evolver 不能改它。
 
 ### 6. 故障与恢复
 
