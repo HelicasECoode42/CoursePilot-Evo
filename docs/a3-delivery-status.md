@@ -1,32 +1,34 @@
-# A3 delivery status: A-F3, A-F4, A-F5
+# A3 交付状态：A-F3、A-F4、A-F5
 
-Status as of 2026-10-26: **partial; evaluation coverage and several data rules remain under review.** This note records the safe, shareable deliverables. It does not publish school PDFs, raw OCR, course-level review text, teacher names, the original curriculum workbook, or complete historical offering data. Those materials remain in the ignored local `data/private/a3/` directory.
+截至 2026-10-26，A3 **尚未全部完成**：教师评价覆盖和若干数据规则仍在审核中。本文只记录可安全共享的交付内容，不包含学校 PDF、OCR 原文、逐条课程评价、教师姓名、原始培养计划工作簿或完整历史班次数据。这些资料保留在本机被忽略的 `data/private/a3/` 目录。
 
-## A-F3: academic-record input
+## A-F3：已修课程输入
 
-The current `AcademicRecordInput` contract can represent complete and incomplete transcripts, passed/failed/in-progress/unknown outcomes, and nullable credits/terms. Synthetic positive and negative examples are included in the contract example index. Two attempts for the same course can be represented as separate rows, but the contract has no attempt number or repeat-grade selection rule. That policy still needs confirmation with B before the example can define production behavior.
+当前 `AcademicRecordInput` 契约可以表达完整或不完整的成绩单、通过/未通过/进行中/未知的课程结果，以及允许为空的学分和学期。契约样例索引中增加了虚构的正例和反例。
 
-## A-F4: teacher reviews
+同一课程的多次修读可以用多条不同学期的记录表示，但契约没有修读次数字段，也没有规定重修成绩采用规则。该规则仍需与 B 确认；在确认前，样例不能代表生产系统已确定的重修行为。
 
-The private working set contains schema-valid ReviewImport records and separate source maps. Public examples include only a fictional ReviewImport record. The source material is incomplete and does not support a complete review catalog:
+## A-F4：教师评价
 
-- Across 667 A1 course-path rows, current winter-issue TOC comparison has 52 exact course-section matches, 56 title variants that need manual review, and 559 rows with no title match in the processed table of contents. These are matching states, not proof that every course in a matched section has a publishable review, nor proof that unmatched courses have no reviews.
-- The private winter working set has 142 schema-valid review notes and four additional long teacher-section records that exceed the ReviewImport `excerpt` limit. Six more teacher headings were not recognized by OCR. These records remain local for manual review.
-- The faculty booklet's teacher-only comments have only limited, unverified course candidates from a static SHUOSC history crosswalk. Unmatched comments are not assigned to guessed courses.
-- A1-path-by-path course coverage and all real teacher names/reviews remain in local private files. The owner is manually auditing the missing coverage and investigating ways to resolve it.
+本机整理区包含符合 `ReviewImport` Schema 的评价草稿及独立来源映射；公开样例只有一条虚构评价。现有资料尚不足以形成完整的课程评价目录：
 
-Do not use candidate or OCR-only associations as verified teacher/course/term facts. The shared `ReviewImport` contract was not changed for this work.
+- 对照 A1 的 667 条培养路径课程行，目前在冬季刊目录中找到 52 条课程名称精确匹配；另有 56 条课程名称变体待人工核对；559 条在本次处理的目录中没有找到课程名称匹配。这些数字反映目录匹配情况，不表示对应课程一定有可发布评价，也不能证明未匹配课程没有评价。
+- 本机冬季刊整理中有 142 条符合 Schema 的评价记录，另有 4 条教师评价超过 `ReviewImport` 的 `excerpt` 字数上限；还有 6 个教师小节标题未被 OCR 识别。上述记录仍需人工审核。
+- 计机学院小本本只有少量教师评价能通过 SHUOSC 历史数据得到未核实的课程候选。其他评价不强行猜测课程归属。
+- A1 各路径的详细评价状态、真实教师姓名和评价内容继续保存在本机私有文件中。我正在手动审核缺失覆盖，并寻找补全办法。
 
-## A-F5: offerings and time examples
+不得把候选或仅经 OCR 识别的关系当作已核实的教师、课程或学期事实。本次没有修改共享 `ReviewImport` 契约。
 
-Four public fixtures use only synthetic data: two different class IDs under one course code, a time conflict, a no-conflict pair, and an unknown-time case. Expected outcomes are: preserve the two distinct class IDs; detect overlapping meetings; detect no conflict for non-overlapping meetings; and keep unknown time as `UNPARSED`, without deciding that it is conflict-free. These are expected outcomes for B to verify, not evidence that Java's unique TimeParser has produced those results.
+## A-F5：班次与时间样例
 
-The local audit of the published historical source found that it does not provide the project's required `classId` field. Historical source rows were not relabeled as current browser snapshots or synthetic records, and no complete historical dataset is published here. A real historical import still needs a source-type/mapping decision with B/C and validation by B's TimeParser.
+公开的四个班次样例全部使用虚构数据：同一课程编号下的两个不同班次编号、时间冲突、无时间冲突、时间未知。预期结果分别是：保留两个不同班次编号；发现时间重叠；对不重叠时间不报告冲突；对未知时间保持 `UNPARSED`，不能据此判定无冲突。这些只是交给 B 核验的预期，不代表 Java 唯一 `TimeParser` 已经运行并验证。
 
-## Public synthetic examples
+本机对已发布历史数据的审计发现，来源没有项目所需的 `classId` 字段。因此没有把历史记录冒充为当前浏览器快照或虚构数据，也没有发布完整历史数据。真实历史数据导入仍需与 B/C 确认来源类型和字段映射，并由 B 使用唯一 `TimeParser` 核验。
 
-The ten A3 fixtures are listed in [`contracts/examples/index.json`](../contracts/examples/index.json) and checked against the current shared schemas by `scripts/check_contracts.py`. Their `SYNTHETIC` values are illustrative only.
+## 公开虚构样例
 
-## Local-only review materials
+10 个 A3 虚构样例已登记在 [`contracts/examples/index.json`](../contracts/examples/index.json)，并由 `scripts/check_contracts.py` 按当前共享 Schema 检查。样例中的 `SYNTHETIC` 数据仅用于说明格式和预期。
 
-The detailed course coverage, merged review rows, teacher sidecars, unmatched records, OCR outputs, and source PDFs stay under ignored `data/private/a3/`. They are not included in this branch. The coverage work is ongoing; the absence of a public review record must not be interpreted as evidence that no student evaluation exists.
+## 仅保留在本机的评价资料
+
+详细课程覆盖表、合并后的评价记录、教师姓名映射、未匹配清单、OCR 文件和原始 PDF 均保留在被 `.gitignore` 忽略的 `data/private/a3/` 中，不属于本次公开提交。评价覆盖审核仍在继续；当前公开目录没有某门课程的评价记录，不应被理解为已经证实没有学生评价。
