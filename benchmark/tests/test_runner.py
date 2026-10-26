@@ -175,6 +175,7 @@ def make_runner(tmp_path: Path, transport, cases: Path) -> BenchmarkRunner:
         cases_root=cases,
         gold_root=gold,
         contracts_root=ROOT / "contracts",
+        pass_threshold=0.0,  # 这里只验判定语义，阈值单独测
     )
 
 
@@ -503,8 +504,8 @@ def test_audit_body_records_outcome_assumption(tmp_path: Path) -> None:
 
     plan = build_plan({"caseId": "G1-001", "groupId": "G1", "curriculumSnapshotId": "3c405feaa6d7"}, fixture)
     body = plan.steps[0].body
-    assert body["completedCourses"][0]["outcome"] == "PASSED"
-    assert any("兜底" in note for note in plan.notes)
+    assert body["completedCourses"][0]["outcome"] == "UNKNOWN"
+    assert any("不当作已通过" in note for note in plan.notes)
 
 
 # -- 重复运行校验（#35 验收条件：同 manifest 可复跑）------------------------
@@ -753,7 +754,9 @@ def test_runner_calls_get_for_review_route(tmp_path: Path) -> None:
     (gold / "G4-004.json").write_text(json.dumps(GOLD, ensure_ascii=False), encoding="utf-8")
 
     transport = FakeTransport(gets=[(200, envelope({"items": REVIEW_FIXTURE["reviewNotes"]}))])
-    runner = BenchmarkRunner(transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts")
+    runner = BenchmarkRunner(
+        transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts", pass_threshold=0.0
+    )
     outcome = runner.run_case(
         {
             "caseId": "G4-004",
@@ -765,3 +768,70 @@ def test_runner_calls_get_for_review_route(tmp_path: Path) -> None:
     assert outcome.route == "REVIEW"
     assert outcome.status == PASS
     assert transport.get_calls[0][1]["courseCode"] == "08306029"
+
+
+# -- #44：没有判据不得判 PASS --------------------------------------------
+def test_missing_gold_is_unscored_not_pass(tmp_path: Path) -> None:
+    cases = write_case(tmp_path)
+    empty_gold = tmp_path / "gold_empty"
+    empty_gold.mkdir()
+    transport = FakeTransport([(200, envelope(answer()))])
+    runner = BenchmarkRunner(transport, cases_root=cases, gold_root=empty_gold, contracts_root=ROOT / "contracts")
+    result = runner.run(MANIFEST)
+    outcome = result["outcomes"][0]
+    assert outcome.status == "UNSCORED"
+    assert outcome.score is None
+    assert result["summary"]["scoredCount"] == 0
+    assert result["summary"]["scoredCoverage"] == 0.0
+    assert result["report"]["failureCategories"] == ["UNSCORED"]
+
+
+def test_score_below_threshold_is_not_pass(tmp_path: Path) -> None:
+    cases = write_case(tmp_path)
+    gold = tmp_path / "gold_threshold"
+    gold.mkdir()
+    (gold / "G2-001.json").write_text(json.dumps(GOLD, ensure_ascii=False), encoding="utf-8")
+    transport = FakeTransport([(200, envelope(answer()))])
+    strict = BenchmarkRunner(
+        transport, cases_root=cases, gold_root=gold, contracts_root=ROOT / "contracts", pass_threshold=0.99
+    )
+    loose = BenchmarkRunner(
+        FakeTransport([(200, envelope(answer()))]),
+        cases_root=cases,
+        gold_root=gold,
+        contracts_root=ROOT / "contracts",
+        pass_threshold=0.0,
+    )
+    assert (
+        strict.run_case(
+            {
+                "caseId": "G2-001",
+                "groupId": "G2",
+                "inputFixtureRef": "fixtures/G2-001.json",
+                "curriculumSnapshotId": "3c405feaa6d7",
+            }
+        ).status
+        == "FAIL"
+    )
+    assert (
+        loose.run_case(
+            {
+                "caseId": "G2-001",
+                "groupId": "G2",
+                "inputFixtureRef": "fixtures/G2-001.json",
+                "curriculumSnapshotId": "3c405feaa6d7",
+            }
+        ).status
+        == "PASS"
+    )
+
+
+def test_missing_outcome_is_unknown_not_passed() -> None:
+    from case_adapters import build_plan
+
+    plan = build_plan(
+        {"caseId": "G1-001", "groupId": "G1", "curriculumSnapshotId": "3c405feaa6d7"},
+        {"completedCourses": [{"courseCode": "08305011", "credits": 5.0}]},
+    )
+    assert plan.steps[0].body["completedCourses"][0]["outcome"] == "UNKNOWN"
+    assert any("不当作已通过" in note for note in plan.notes)

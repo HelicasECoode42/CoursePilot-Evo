@@ -50,7 +50,11 @@ PASS = "PASS"
 DEGRADED = "DEGRADED"
 FAIL = "FAIL"
 BLOCKED = "BLOCKED"
+UNSCORED = "UNSCORED"
 PLAN = "PLAN"
+
+#: 单例判定为 PASS 的分数门槛。基线阈值，待复核；只影响「过没过」，不影响分数本身。
+PASS_SCORE_THRESHOLD = 0.6
 
 #: 答案里出现这些 code 说明走的是占位实现或缺上游数据，只能算链路通。
 PLACEHOLDER_CODES = ("FAKE_MODEL", "FAKE_TOOL", "OFFERING_UNAVAILABLE", "DRY_TRANSPORT")
@@ -70,6 +74,7 @@ __all__ = [
     "FAIL",
     "PASS",
     "PLAN",
+    "UNSCORED",
     "BenchmarkRunner",
     "CaseOutcome",
     "CaseRequest",
@@ -268,6 +273,7 @@ class BenchmarkRunner:
         java_verifier=None,
         mode: str = "SIMULATION",
         missing_outcome: str = MISSING_OUTCOME_DEFAULT,
+        pass_threshold: float = PASS_SCORE_THRESHOLD,
         session_path: str = "/api/v1/sessions",
     ) -> None:
         self.transport = transport
@@ -278,6 +284,7 @@ class BenchmarkRunner:
         self.java_verifier = java_verifier
         self.mode = mode
         self.missing_outcome = missing_outcome
+        self.pass_threshold = pass_threshold
         self.session_path = session_path
         self._defs: dict[str, Any] = {}
         if contracts_root is not None:
@@ -408,7 +415,7 @@ class BenchmarkRunner:
         gold = self.load_gold(case_id)
         report: JudgeReport | None = None
         if gold is None:
-            outcome.notes.append("缺少判据文件，未评分（判据在仓库外的标注目录）")
+            outcome.notes.append("缺少判据文件：未评分（判据在仓库外的标注目录），不得计入通过")
         else:
             report = judge(
                 data,
@@ -421,12 +428,17 @@ class BenchmarkRunner:
             outcome.blocked = report.blocked
             outcome.score_report = report.as_dict()
 
-        if report is not None and report.blocked:
+        if report is None:
+            # 没有判据就没有分数依据：单独一个状态，绝不落到 PASS
+            outcome.status = UNSCORED
+        elif report.blocked:
             outcome.status = FAIL
         elif outcome.placeholders:
             outcome.status = DEGRADED
-        else:
+        elif (outcome.score or 0.0) >= self.pass_threshold:
             outcome.status = PASS
+        else:
+            outcome.status = FAIL
         return outcome
 
     def _run_once(self, cases: list[dict[str, Any]], *, repo_root: Path | None, plan_only: bool) -> list[CaseOutcome]:
@@ -569,6 +581,7 @@ class BenchmarkRunner:
         comparable = bool(all_groups) and sorted(groups) == all_groups
 
         total = len(outcomes)
+        scored = sum(1 for outcome in outcomes if outcome.score is not None)
         with_input = sum(1 for outcome in outcomes if outcome.input_tokens is not None)
         with_output = sum(1 for outcome in outcomes if outcome.output_tokens is not None)
         status_counts: dict[str, int] = {}
@@ -590,6 +603,9 @@ class BenchmarkRunner:
         fallbacks = sum(1 for outcome in outcomes for note in outcome.notes if "兜底" in note)
         return {
             "caseCount": total,
+            "scoredCount": scored,
+            "scoredCoverage": round(scored / total, 4) if total else None,
+            "passThreshold": self.pass_threshold,
             "upstreamDependent": upstream,
             "fallbackAssumptions": fallbacks,
             "statusCounts": status_counts,

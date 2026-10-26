@@ -25,8 +25,8 @@ AUDIT = "AUDIT"
 CATALOG = "CATALOG"
 REVIEW = "REVIEW"
 
-#: fixture 没写 outcome 时的折算值。写进 notes，别让它变成看不见的假设。
-MISSING_OUTCOME_DEFAULT = "PASSED"
+#: fixture 没写 outcome 时的取值。按未知处理：缺成绩不能当成已通过（AGENTS.md「unknown 不能通过」）。
+MISSING_OUTCOME_DEFAULT = "UNKNOWN"
 
 OUTCOMES = ("PASSED", "FAILED", "IN_PROGRESS", "UNKNOWN")
 
@@ -245,7 +245,7 @@ def record_body(
         )
     if filled_outcome:
         notes.append(
-            f"{filled_outcome} 门已修课程 fixture 未写 outcome，按 {missing_outcome} 兜底（应在 fixture 补字段，不靠这条）"
+            f"{filled_outcome} 门已修课程 fixture 未写 outcome，按 {missing_outcome} 处理（缺成绩不当作已通过；应在 fixture 补字段）"
         )
     if any("completedTerm" in course for course in fixture.get("completedCourses") or []):
         notes.append("completedTerm 取 fixture 字段；fixture 没写就不传（契约允许 null，不自行编学期编号）")

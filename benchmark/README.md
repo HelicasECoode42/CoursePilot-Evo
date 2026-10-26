@@ -38,11 +38,15 @@ python benchmark/run_benchmark.py --manifest benchmark/manifests/example.json \
 
 | 判定 | 含义 |
 | --- | --- |
-| PASS | HTTP 200、评分未 blocked、答案没有占位或缺失标记 |
-| DEGRADED | HTTP 200 但答案带 FAKE_MODEL / FAKE_TOOL / OFFERING_UNAVAILABLE，只证明链路通 |
-| FAIL | HTTP 200 但评分 blocked（命中禁止结论或引用核验不通过） |
+| PASS | HTTP 200、**有判据且已评分**、分数达到 `--pass-threshold`（默认 0.6）、无占位标记 |
+| DEGRADED | HTTP 200 但答案带 FAKE_MODEL / FAKE_TOOL / OFFERING_UNAVAILABLE / DRY_TRANSPORT，只证明链路通 |
+| FAIL | 已评分但 blocked（命中禁止结论、引用核验不通过），或分数低于门槛 |
+| UNSCORED | 没有判据文件，未评分：**不计入通过**，CLI 退出码仍为非 0 |
 | BLOCKED | 用例按契约构造不出请求，或上游 503、缺依赖，本例没有有效结果 |
 | PLAN | 只登记不执行 |
+
+没有判据时不会落到 PASS：默认判据目录 `../restricted/gold` 在干净检出与 CI 里不存在，
+所以「没标判据」必须表现为 `UNSCORED` 而不是通过；`summary.json` 另报已评分覆盖率。
 
 成本口径：Provider 没给 token 用量时记 `null`，不记 0、不估算；`summary.json` 另报成本可用样本覆盖率。
 

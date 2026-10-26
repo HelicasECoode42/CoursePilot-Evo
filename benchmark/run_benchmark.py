@@ -56,6 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="重复运行轮数（缺省取 manifest 的 repeatCount）；第二轮起逐例比对判定类字段",
     )
     parser.add_argument(
+        "--pass-threshold",
+        type=float,
+        default=0.6,
+        help="单例判 PASS 的分数门槛（只影响过没过，不影响分数）",
+    )
+    parser.add_argument(
         "--missing-outcome",
         default="PASSED",
         choices=("PASSED", "FAILED", "IN_PROGRESS", "UNKNOWN"),
@@ -86,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         contracts_root=REPO_ROOT / "contracts",
         mode=args.mode,
         missing_outcome=args.missing_outcome,
+        pass_threshold=args.pass_threshold,
     )
     result = runner.run(manifest, repo_root=REPO_ROOT, plan_only=args.plan, repeats=args.repeats)
 
@@ -100,6 +107,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{outcome.case_id:<10}{outcome.group_id:<5}{outcome.route or '-':<9}{outcome.status:<10}{note[:40]}")
     print("-" * 78)
     print(f"用例数 {summary['caseCount']}，判定分布 {summary['statusCounts']}")
+    print(
+        f"已评分 {summary['scoredCount']}/{summary['caseCount']}（覆盖率 {summary['scoredCoverage']}），"
+        f"PASS 门槛 {summary['passThreshold']}"
+    )
+    if summary["scoredCount"] < summary["caseCount"]:
+        print("  未评分的用例判 UNSCORED，不计入通过；退出码仍为非 0", file=sys.stderr)
     print(f"路线分布 {summary['routeCounts']}")
     if summary["upstreamDependent"]:
         print(f"依赖上游（本轮只标记不判定）{summary['upstreamDependent']}")
