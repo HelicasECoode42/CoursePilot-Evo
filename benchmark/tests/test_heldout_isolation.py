@@ -132,15 +132,18 @@ def test_missing_gold_directory_raises(tmp_path: Path) -> None:
         )
 
 
-def test_in_repo_heldout_cases_are_allowed_but_gold_must_stay_outside(tmp_path: Path) -> None:
-    """编写人决定：题面可在仓库内，判据必须在外。"""
-    make_heldout(tmp_path)
+def test_in_repo_heldout_cases_are_allowed(tmp_path: Path) -> None:
+    """编写人决定：题面可在仓库内（判据仍用工作区外的目录）。
+
+    判据用临时目录，避免依赖本机的 restricted/gold —— 干净检出与 CI 里没有那个目录。
+    """
     in_repo_cases = ROOT / "benchmark" / "cases" / "held-out"
     if not in_repo_cases.is_dir():
         pytest.skip("仓库内没有 held-out 题面目录")
+    make_heldout(tmp_path)  # 只为拿到一个工作区外的判据目录
     payload = run_heldout(
         cases_root=in_repo_cases,
-        gold_root=ROOT.parent / "restricted" / "gold",
+        gold_root=tmp_path / "gold",
         manifest_path=ROOT / "benchmark" / "manifests" / "example.json",
         workspace_root=ROOT,
         transport="dry",
