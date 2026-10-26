@@ -4,7 +4,8 @@
 模型可用受控假响应，但 Java / HTTP / DB / UI 必须真实。
 
 现在是 **W1 骨架的扩展**：配置入口、组合启动、主链路检查与异常覆盖都已可用；
-Java 与 MySQL 尚未落地，跑起来会如实报缺谁、缺在哪一步，不用假结果补位。
+Java 已有可运行实现（H2 文件库，端口 8081）；MySQL 当前栈不适用，登记为 `N/A`（见服务登记表）。
+跑起来会如实报缺谁、缺在哪一步，不用假结果补位。
 
 ## 一条入口
 
@@ -104,7 +105,7 @@ cd integration && python -m pytest -q                      # 自测（不联网�
 | web_shell | 页面挂载成功、品牌/模式徽标/footer 齐备、无未捕获 JS 错误 | 需浏览器 | 缺 playwright 判 `BLOCKED` |
 | web_api_down | Python 不可达时给出错误提示与重试入口、不白屏 | 需浏览器 | 需先停掉 Python 再跑；若 `web_stub_path` 失败则本条降级为 `BLOCKED`（页面连不上可用上游时，它只能证明页面会报错） |
 | web_unknown | 接口答未知/无法核验时如实呈现并可继续 | 需浏览器 + 受控假响应 | 缺页面的稳定步骤标识，判 `BLOCKED`（转交 E） |
-| web_stub_path | 受控假响应当上游时页面进入引导第一问 | 需浏览器 + `--with-stub` | 本机实测 `FAIL`：页面真实模式无法连接后端，定位见下方「已知故障」 |
+| web_stub_path | 受控假响应当上游时页面进入引导第一问 | 需浏览器 + `--with-stub` | 修复前本机实测 `FAIL`（页面真实模式无法连接后端）；已在提交 `09a5e68` 修复，**本轮未复测**，结果以下次真跑为准。见下方「已知故障」 |
 | web_narrow | `390x844` 视口无横向溢出（`scrollWidth - clientWidth <= 2px`） | 需浏览器 | 缺 playwright 判 `BLOCKED` |
 
 驱动两档：`--driver http` 只用标准库取文档与脚本；`--driver auto`（默认）在装了 playwright 时用真浏览器，
@@ -128,15 +129,15 @@ python -m pip install playwright && python -m playwright install chromium
 | --- | --- |
 | 触发 | Actions 页面手动 `workflow_dispatch`；每天定时 `30 1 * * *`（UTC，即北京时间 09:30） |
 | 权限 | `contents: read`，不碰 Issue/Project |
-| 服务 | MySQL 由 workflow 的 `services: mysql:8.4` 提供（含 healthcheck）；Java 目前没有 → 判 `MISSING` |
+| 服务 | MySQL 由 workflow 的 `services: mysql:8.4` 提供（含 healthcheck），与本地 `start_stack` 的判定无关（本地登记为 `N/A`）；Java 模块已存在（`java-environment`），但 workflow 注入的 `CP_JAVA_BASE_URL` 仍是 `:8080`，需同步改为 `:8081`（该 workflow 文件本轮未改，见下方缺口表） |
 | 步骤 | 装 `integration[test]` 与 `agent-runtime[test]` → `npm ci` → 装 chromium → `check_all.py --driver playwright`（内部按同样的顺序跑六项检查，含受控假响应） |
 | 门禁 | 全链路检查步骤或浏览器安装步骤不是 success → 末尾门禁步骤失败；不允许 SKIP 算通过 |
 | 证据 | `runs/stack/`（服务日志、`check_web` 截图）上传为 `stack-evidence` 工件；五段式失败块在各步骤输出里 |
 | 配置 | 只用环境变量注入 CI 专用值（`CP_*`），不在仓库里放密钥；缺必填项时 `stack_config` 直接失败 |
 
-按当前依赖，这个 job 会是红的，且红的原因逐条可查：`record`/`audit` 停在 `DEGRADED`（Java 未落地）、
+本轮只在本地做了 `start_stack` 的 Java 段与 `--plan` 的复核，**CI 没有复跑**。下面是修改前的预期，未逐条复核，以 CI 真跑为准：
 `planning` 停在 `DEGRADED`（C 的 W1 骨架拒答）、`web_api_down` 与 `web_unknown` 判 `BLOCKED`（需要停掉 Python／需要受控假响应）。
-`smoke_stack` 的四条在 Python 起着的情况下应全绿 —— 它验证的正是「Java 缺失时必须报 503」这类异常行为。
+`record`/`audit` 原先写的「停在 `DEGRADED`（Java 未落地）」已过时：Java 已有实现，CI 若注入 `:8080` 会连不上 Java，需先改 workflow。
 
 ## 失败登记与转交
 
@@ -171,9 +172,9 @@ python integration/check_web.py --with-stub --driver playwright   # 用它在 Py
 边界：它**不是**真实服务，也不是 C 的模型适配器替身。C 的真实行为仍由 `check_stack.py` 对真实服务验证；
 `--with-stub` 只用于驱动页面行为。每次请求与响应的 sha256 追加到 `runs/stack/stub/records.jsonl`。
 
-## 已知故障：页面真实模式无法连接后端（转交代定）
+## 已修复的故障：页面真实模式无法连接后端（提交 09a5e68）
 
-本机实测：页面点「开始」后一律显示「暂时无法连接服务，请确认服务已启动后重试」，而受控假响应就在
+修复前本机实测：页面点「开始」后一律显示「暂时无法连接服务，请确认服务已启动后重试」，而受控假响应就在
 `127.0.0.1:8000`、CORS 已放行、页面内直接 `fetch` 能拿到 `201`。最小对照（浏览器控制台）：
 
 | 写法 | 结果 |
@@ -185,14 +186,15 @@ python integration/check_web.py --with-stub --driver playwright   # 用它在 Py
 `web/src/api/client.ts` 把原生 `fetch` 存成类字段（`private readonly fetcher: typeof fetch = fetch`），
 随后以 `this.fetcher(...)` 调用 —— 方法调用会把 `this` 绑成客户端实例，浏览器据此判定 `Illegal invocation`，
 异常被其自身 `catch` 折成 `network` 失败。页面自身的单元测试注入的是 mock fetcher，所以测不到。
-影响：真实服务模式在任何后端下都连不上。定位归本模块，修复归 E；本条只登记现象与最小复现，不改对方代码。
+影响：真实服务模式在任何后端下都连不上。
+**已修（提交 `09a5e68`，归 E）**：`web/src/api/client.ts` 构造时改为 `fetcher.bind(globalThis)`，默认参数为 `globalThis.fetch`，并补了两条在 Node 下也会失败的回归测试。本轮（D 侧）只核对了提交内容，**未在浏览器里复测**，故不据此宣称 `web_stub_path` 已通过。
 
 ## 服务登记表
 
 | 服务 | 归属 | 实现清单（判断是否落地） | 启动命令 | 依据 |
 | --- | --- | --- | --- | --- |
-| mysql | B / 环境 | — | 未登记 | 本地启动方式环境相关；CI 侧用 workflow 的 `services: mysql` |
-| java | B | `java-environment/pom.xml` | `./mvnw -B spring-boot:run` | Spring Boot 约定；待 B 的 README 确认后转正 |
+| mysql | B / 环境 | — | 不适用（`N/A`） | B 当前用 H2 文件库，`pom.xml` 无 MySQL 驱动、无 Flyway；B 引入 MySQL 后删掉 `stack_config.NOT_APPLICABLE` 中的 `mysql` 条目即恢复为必需服务（配置必填与 `start_stack` 的 N/A 标记都从这一处来）。CI 侧仍用 workflow 的 `services: mysql` |
+| java | B | `java-environment/pom.xml`（`mvnw` 已存在） | `./mvnw -B spring-boot:run`（Windows 为 `./mvnw.cmd`，相对模块目录解析；需 JDK 21+） | `java-environment/README.md` 已登记；就绪只判到 TCP `8081`，**不探 `/actuator/health`**（pom 未引入 actuator），行为级由主链路承担。启动子进程时把 `CP_SERVICE_KEY` 映射为 `COURSEPILOT_SERVICE_KEY` |
 | api | C | `agent-runtime/pyproject.toml` | `python -m uvicorn agent_runtime.api.app:app --port 8000` | `agent-runtime/README.md` 已登记（需先在该模块内 `pip install -e .[test]`） |
 | web | E | `web/package.json` | `npm run dev` | Vite 约定；待 E 的 `package.json` 确认后转正 |
 
@@ -203,9 +205,9 @@ python integration/check_web.py --with-stub --driver playwright   # 用它在 Py
 | 键 | 服务 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `CP_MYSQL_HOST` / `CP_MYSQL_PORT` | mysql | `127.0.0.1` / `3306` | docs/03 默认端口 |
-| `CP_MYSQL_DB` / `CP_MYSQL_USER` / `CP_MYSQL_PASSWORD` | mysql | 无默认（必填） | 口令只放环境变量或 `data/private/stack.env` |
-| `CP_JAVA_BASE_URL` | java | `http://127.0.0.1:8080` | B 的事实 API |
-| `CP_SERVICE_KEY` | java | 无默认（必填） | Python→Java 的 `X-Service-Key`（docs/04） |
+| `CP_MYSQL_DB` / `CP_MYSQL_USER` / `CP_MYSQL_PASSWORD` | mysql | 无默认（当前不适用） | 当前栈不适用，留空只产生 warning、不挡配置校验；口令只放环境变量或 `data/private/stack.env` |
+| `CP_JAVA_BASE_URL` | java | `http://127.0.0.1:8081` | B 的事实 API；与 `application.properties` 的 `server.port=8081` 对齐。`docs/03` 写的 8080 与实际不一致，以实际为准（docs/03 归其所有者） |
+| `CP_SERVICE_KEY` | java | 无默认（必填） | Python→Java 的 `X-Service-Key`（docs/04）。Java 读的变量名是 `COURSEPILOT_SERVICE_KEY`（不改 Java）：`start_stack` 启动 Java 时把本键的值映射为该子进程环境变量；没配 Java 会对 `/api/v1` 返回 503 |
 | `CP_API_BASE_URL` | api | `http://127.0.0.1:8000` | C 的网关 |
 | `CP_MODEL_BASE_URL` / `CP_MODEL_API_KEY` | api | 空 | 留空 = 用受控 stub；真实模型属每周验收另跑 |
 | `CP_WEB_BASE_URL` / `CP_CORS_ORIGINS` | web / api | 5173 | CORS 只允许配置的 origin，禁通配 |
@@ -217,7 +219,9 @@ python integration/check_web.py --with-stub --driver playwright   # 用它在 Py
 | --- | --- | --- |
 | `agent-runtime` 未提供健康端点（无 `/health`） | 组合启动的就绪判定只能到 TCP 层，行为级就绪由主链路检查的第一步（建会话必须 `201`）承担 | C |
 | `planning.openapi.json` 的 `listSessionRecords` 依赖 Java 侧 `listAcademicRecords` | 网关列表端点走 Java，未接线时只会 `503` | C / B |
-| `java-environment` 无 `pom.xml` 与 `mvnw` | JVM 服务无法启动，`record`/`audit` 两步停在 `DEGRADED` | B |
+| `java-environment` 未引入 actuator，无 `/actuator/health` | 组合启动对 Java 只能判 TCP 层；行为级就绪由主链路第一步之后的 Java 调用承担 | B（如需健康端点再登记） |
+| `java-environment/README.md` 写有 `GET /api/v1/curriculum-snapshots`，但源码中无该映射（实测 `404 NOT_FOUND`） | 文档与代码不一致；本检查不依赖该端点 | B |
+| `.github/workflows/integration-checks.yml` 注入 `CP_JAVA_BASE_URL=http://127.0.0.1:8080` | 与 Java 实际端口 8081 不一致，CI 里 Java 会连不上 | workflow 维护者（本轮未改） |
 | 页面缺少稳定的步骤标识（`data-testid` 之类） | 浏览器检查目前只能断言挂载、失败提示与版式，无法逐步断言「第 N 问推进到第 N+1 问」 | E |
 
 ## 边界

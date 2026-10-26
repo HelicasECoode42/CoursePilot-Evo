@@ -750,3 +750,56 @@ fieldset {
   font-size: 13px;
   text-decoration: underline;
 }
+
+/* 引导流程里指向其他页面的入口，和主按钮区分开：它不是「继续」。 */
+.handoff-link {
+  align-self: flex-start;
+  margin-top: 10px;
+  color: var(--green);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.handoff-link:hover,
+.handoff-link:focus-visible {
+  color: var(--ink);
+}
+
+/*
+ * 教师列表是单列，不能复用 .choice-grid 的两列布局。
+ * 每张卡片里可以展开历史评价，而两列把卡片压到 315px，嵌在里面的评价块只剩
+ * 一百来像素宽，中文会一个字一个字竖着排。可展开的内容需要整行宽度。
+ */
+.teacher-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.teacher-option {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+/* 姓名和两个强度按钮占一行，别被挤到换行：中文按钮一断行就成了竖排。 */
+.teacher-option > .choice-copy {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.teacher-option .seg button,
+.teacher-option > .button {
+  white-space: nowrap;
+}
+
+/* 展开的评价独占整行。它和上面的控件挤在同一行时只剩三百来像素，
+   里面还要再嵌引用块，中文就会一个字一个字竖着排。 */
+.teacher-reviews {
+  flex: 1 0 100%;
+  margin-top: 4px;
+}

@@ -1,6 +1,7 @@
 package com.coursepilot.verifier.application;
 
 import com.coursepilot.verifier.domain.MeetingTime;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -9,6 +10,16 @@ import java.util.regex.Pattern;
 
 @Service
 public class TimeParser {
+
+    /**
+     * 契约上限，只在这里定义一次（contracts/schemas/domain.schema.json）：
+     * Meeting.sectionStart / sectionEnd 为 1..64，Meeting.weeks 的元素为 1..60 且最多 60 个，
+     * CourseOffering.meetings 最多 40 段。dayOfWeek 的 1..7 由正则 BLOCK 保证。
+     * CatalogAssembler 与 ConflictChecker 都读本类的结论，不得各自再写一份上限。
+     */
+    public static final int MAX_SECTION = 64;
+    public static final int MAX_WEEK = 60;
+    public static final int MAX_MEETINGS = 40;
 
     /**
      * 一个完整的排课段：星期 + 节次 + 周次块。
@@ -50,15 +61,30 @@ public class TimeParser {
             cursor = matcher.end();
 
             int day = DAY_MAP.get(matcher.group(1));
-            int start = Integer.parseInt(matcher.group(2));
-            int end = matcher.group(3) == null ? start : Integer.parseInt(matcher.group(3));
+            int start;
+            int end;
+            try {
+                start = Integer.parseInt(matcher.group(2));
+                end = matcher.group(3) == null ? start : Integer.parseInt(matcher.group(3));
+            } catch (NumberFormatException e) {
+                // 正则只保证是数字串，不保证能放进 int。这段文本来自调用方，不能让它逃成 500。
+                return ParseOutcome.unknown("节次数字过大无法识别：" + raw);
+            }
             if (start > end) {
                 return ParseOutcome.unknown("节次起始大于结束：" + raw);
+            }
+            if (start < 1 || end > MAX_SECTION) {
+                return ParseOutcome.outOfContract("节次超出契约上限 1-" + MAX_SECTION + "：" + raw);
+            }
+            if (meetings.size() >= MAX_MEETINGS) {
+                return ParseOutcome.outOfContract("段数超出契约上限 " + MAX_MEETINGS + "：" + raw);
             }
 
             Set<Integer> weeks;
             try {
                 weeks = parseWeeks(matcher.group(4));
+            } catch (OutOfContractException e) {
+                return ParseOutcome.outOfContract(e.getMessage() + "：" + raw);
             } catch (RuntimeException e) {
                 return ParseOutcome.unknown("周次格式无法识别：" + matcher.group(4));
             }
@@ -100,11 +126,15 @@ public class TimeParser {
             // 兼容“第1-16周”“1-16周”“第1-16”等写法
             part = part.replaceAll("^第", "").replaceAll("周$", "").trim();
             if (part.matches("\\d+")) {
-                weeks.add(Integer.parseInt(part));
+                int w = Integer.parseInt(part);
+                if (w < 1 || w > MAX_WEEK) throw new OutOfContractException("周次超出契约上限 1-" + MAX_WEEK);
+                weeks.add(w);
             } else if (part.matches("\\d+-\\d+")) {
                 String[] se = part.split("-");
                 int s = Integer.parseInt(se[0]), e = Integer.parseInt(se[1]);
                 if (s > e) throw new IllegalArgumentException("周次范围倒置");
+                // 先判上限再展开：{1-999999999周} 不能在请求线程里造出十亿个元素。
+                if (s < 1 || e > MAX_WEEK) throw new OutOfContractException("周次超出契约上限 1-" + MAX_WEEK);
                 for (int w = s; w <= e; w++) weeks.add(w);
             } else {
                 throw new IllegalArgumentException("未知周次片段：" + part);
@@ -115,18 +145,32 @@ public class TimeParser {
         return weeks;
     }
 
+    /** 周次解析内部用：格式正确但数值超出契约上限。 */
+    private static final class OutOfContractException extends RuntimeException {
+        OutOfContractException(String message) { super(message); }
+    }
+
     public static class ParseOutcome {
-        private final boolean ok;
+        /** OK：解析成功；UNKNOWN：看不懂或缺信息；OUT_OF_CONTRACT：能读出但超出契约上限。 */
+        public enum Kind { OK, UNKNOWN, OUT_OF_CONTRACT }
+
+        private final Kind kind;
         private final List<MeetingTime> meetings;
         private final String reason;
 
-        private ParseOutcome(boolean ok, List<MeetingTime> meetings, String reason) {
-            this.ok = ok; this.meetings = meetings; this.reason = reason;
+        private ParseOutcome(Kind kind, List<MeetingTime> meetings, String reason) {
+            this.kind = kind; this.meetings = meetings; this.reason = reason;
         }
-        public static ParseOutcome ok(List<MeetingTime> m) { return new ParseOutcome(true, m, null); }
-        public static ParseOutcome unknown(String r) { return new ParseOutcome(false, List.of(), r); }
+        public static ParseOutcome ok(List<MeetingTime> m) { return new ParseOutcome(Kind.OK, m, null); }
+        public static ParseOutcome unknown(String r) { return new ParseOutcome(Kind.UNKNOWN, List.of(), r); }
+        /** 时间能读出，但超出契约上限。meetings 恒为空，调用方不得据此判冲突。 */
+        public static ParseOutcome outOfContract(String r) {
+            return new ParseOutcome(Kind.OUT_OF_CONTRACT, List.of(), r);
+        }
 
-        public boolean isOk() { return ok; }
+        public boolean isOk() { return kind == Kind.OK; }
+        @JsonIgnore public boolean isOutOfContract() { return kind == Kind.OUT_OF_CONTRACT; }
+        @JsonIgnore public Kind getKind() { return kind; }
         public List<MeetingTime> getMeetings() { return meetings; }
         public String getReason() { return reason; }
     }

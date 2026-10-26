@@ -3,6 +3,8 @@ package com.coursepilot.verifier.application;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.coursepilot.verifier.domain.MeetingTime;
+import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -142,5 +144,73 @@ class TimeParserTest {
   @DisplayName("无法识别的残余片段不被静默丢掉")
   void unparsedRemainderIsUnknown() {
     assertFalse(parser.parse("周一第1-2节{待定}").isOk());
+  }
+
+  @Test
+  @DisplayName("超大节次数字不抛异常，返回未知（调用方不能借此让服务返回 500）")
+  void hugeSectionNumberIsUnknownNotException() {
+    // 回归：start 的 Integer.parseInt 原先在 try 外面，99999999999 会以 NumberFormatException 逃出 parse()。
+    TimeParser.ParseOutcome single = assertDoesNotThrow(
+        () -> parser.parse("星期一第99999999999节{1周}"));
+    assertFalse(single.isOk());
+    assertFalse(single.isOutOfContract(), "数字放不进 int 时按无法识别处理，不是超限：" + single.getReason());
+    assertTrue(single.getMeetings().isEmpty());
+
+    TimeParser.ParseOutcome range = assertDoesNotThrow(
+        () -> parser.parse("周一第1-99999999999节{第1-16周}"));
+    assertFalse(range.isOk());
+    assertTrue(range.getMeetings().isEmpty());
+  }
+
+  @Test
+  @DisplayName("超大周次区间不展开：{1-999999999周} 直接判超限，且很快返回")
+  void hugeWeekRangeIsNotExpanded() {
+    // 回归：原先会把 999999999 个周次全部塞进 TreeSet。超时保护只防挂起，不能证明没展开，
+    // 所以再断言结果：超限、meetings 为空。
+    TimeParser.ParseOutcome outcome = assertTimeoutPreemptively(Duration.ofSeconds(5),
+        () -> parser.parse("周一第1-2节{1-999999999周}"));
+    assertTrue(outcome.isOutOfContract(), outcome.getReason());
+    assertTrue(outcome.getMeetings().isEmpty());
+  }
+
+  @Test
+  @DisplayName("周次下界：0 和 0-3 都超限，不再被接受")
+  void weekBelowOneIsOutOfContract() {
+    assertTrue(parser.parse("周一第1节{0周}").isOutOfContract());
+    assertTrue(parser.parse("周一第1节{0-3周}").isOutOfContract());
+  }
+
+  @Test
+  @DisplayName("周次上限 60：第 60 周可用，61 周超限")
+  void weekUpperBound() {
+    assertTrue(parser.parse("周一第1节{第60周}").isOk());
+    assertTrue(parser.parse("周一第1节{第1-60周}").isOk());
+    assertTrue(parser.parse("周一第1节{第61周}").isOutOfContract());
+    assertTrue(parser.parse("周一第1节{第1-61周}").isOutOfContract());
+  }
+
+  @Test
+  @DisplayName("节次上限 64：第 64 节可用，65 节或第 0 节超限")
+  void sectionBounds() {
+    assertTrue(parser.parse("周一第1-64节{1周}").isOk());
+    assertTrue(parser.parse("周一第1-65节{1周}").isOutOfContract());
+    assertTrue(parser.parse("周一第0节{1周}").isOutOfContract());
+  }
+
+  @Test
+  @DisplayName("段数上限 40：第 40 段可用，第 41 段超限")
+  void meetingCountBound() {
+    String block = "周一第1节{1周}";
+    assertTrue(parser.parse(String.join(",", Collections.nCopies(40, block))).isOk());
+    assertTrue(parser.parse(String.join(",", Collections.nCopies(41, block))).isOutOfContract());
+  }
+
+  @Test
+  @DisplayName("超限结论不带 meetings，且不是 ok")
+  void outOfContractCarriesNoMeetings() {
+    TimeParser.ParseOutcome outcome = parser.parse("周一第1-70节{第1-16周}");
+    assertFalse(outcome.isOk());
+    assertTrue(outcome.isOutOfContract());
+    assertTrue(outcome.getMeetings().isEmpty());
   }
 }

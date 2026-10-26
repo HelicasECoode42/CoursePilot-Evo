@@ -492,3 +492,50 @@ describe("PlanningRequest handoff", () => {
     expect(result).toEqual({ ok: false, missing: ["真实培养方案"] });
   });
 });
+
+describe("课程与教师的选择", () => {
+  it("把比较页选的课程+教师交给 pinnedTeacherCoursePairs", () => {
+    // 契约的 GoalIntent 早就留好了这个字段（元素是 TeacherPreference）。
+    // 之前这里恒为空数组，学生在比较页标的「必须保留」永远到不了后端。
+    const draft = readyDraft({
+      teacherPicks: [
+        { courseCode: "CS103", teacherKey: "teacher-zhang-02", mode: "MUST" },
+        { courseCode: "CS102", teacherKey: "teacher-li-01", mode: "PREFER" },
+      ],
+    });
+
+    const built = buildPlanningRequest(draft, verifiedContext);
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+
+    expect(built.request.intent.pinnedTeacherCoursePairs).toEqual([
+      { courseCode: "CS103", teacherKey: "teacher-zhang-02", mode: "MUST" },
+      { courseCode: "CS102", teacherKey: "teacher-li-01", mode: "PREFER" },
+    ]);
+    expect(validatePlanningRequest!(built.request)).toBe(true);
+  });
+
+  it("没选教师时是空数组，不是缺字段", () => {
+    const built = buildPlanningRequest(readyDraft(), verifiedContext);
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.request.intent.pinnedTeacherCoursePairs).toEqual([]);
+    expect(validatePlanningRequest!(built.request)).toBe(true);
+  });
+
+  it("超过契约的 20 条上限时给可操作提示，不截断", () => {
+    // 截断会把学生明确标过的教师悄悄丢掉，和「不静默删除必须项」冲突。
+    const draft = readyDraft({
+      teacherPicks: Array.from({ length: 21 }, (_, index) => ({
+        courseCode: `CS${100 + index}`,
+        teacherKey: `teacher-${index}`,
+        mode: "MUST" as const,
+      })),
+    });
+
+    const built = buildPlanningRequest(draft, verifiedContext);
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.hints?.join("")).toContain("课程与教师太多");
+  });
+});

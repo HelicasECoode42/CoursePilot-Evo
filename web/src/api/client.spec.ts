@@ -605,3 +605,335 @@ describe("HTTP API client · E2 academic records, audit and planning", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
+
+const weeks = Array.from({ length: 16 }, (_, index) => index + 1);
+
+const offering = {
+  courseCode: "CS103",
+  classId: "CS103-02",
+  teacherKey: "teacher-wang-03",
+  teacherText: "王芳（测试数据）",
+  credits: 3,
+  capacity: 60,
+  meetingTextRaw: "周二 3-4 节 1-16 周",
+  meetings: [{ dayOfWeek: 2, sectionStart: 3, sectionEnd: 4, weeks }],
+  parseStatus: "PARSED",
+  sourceRefId: "source:offering-cs103-02",
+};
+
+const teacherOption = {
+  courseCode: "CS103",
+  teacherKey: "teacher-wang-03",
+  teacherDisplayName: "王芳（测试数据）",
+  availability: "UNKNOWN",
+  reviewNoteIds: ["review-cs103-wang-01"],
+  classIds: ["CS103-02"],
+};
+
+const reviewNote = {
+  reviewNoteId: "review-cs103-zhang-01",
+  courseCode: "CS103",
+  teacherKey: "teacher-zhang-02",
+  termId: "2024-2025-1",
+  sourceKind: "SYNTHETIC",
+  publishedAt: "2025-01-10T00:00:00Z",
+  sourceUrl: null,
+  excerpt: "（测试数据）作业量适中。",
+  dimensions: ["WORKLOAD"],
+  matchStatus: "COURSE_TEACHER_MATCHED",
+  sourceRefId: "source:review-cs103-zhang-01",
+};
+
+const runReport = {
+  runId: "run-e7",
+  harnessVersion: "test-harness-v0",
+  parentVersion: null,
+  decision: "BASELINE",
+  heldOutScore: null,
+  averageInputTokens: null,
+  averageOutputTokens: null,
+  averageToolCalls: null,
+  averageLatencyMs: null,
+  failureCategories: ["TEST_NO_EVALUATION"],
+};
+
+const replaceInput = {
+  previousPlanId: "plan-1",
+  courseCode: "CS103",
+  selectedClassId: "CS103-02",
+};
+
+const planConstraint = {
+  kind: "BLOCK_DAY",
+  courseCode: null,
+  teacherKey: null,
+  dayOfWeek: 5,
+  section: null,
+  value: null,
+  sourceText: "周五不排课（测试数据）",
+};
+
+function planVerification(verdict: "VALID" | "UNKNOWN") {
+  return {
+    verifierResultId: "verifier-test",
+    verdict,
+    scope: "SIMULATION",
+    curriculumSnapshotId: "curriculum-2026",
+    offeringSnapshotId: "offering-2026",
+    recordRevision: 1,
+    violations: [],
+    unknownChecks:
+      verdict === "UNKNOWN"
+        ? [
+            {
+              code: "CLASS_NOT_SELECTED",
+              message: "CS103 尚未选定班次（测试数据）",
+              field: null,
+              retryable: false,
+            },
+          ]
+        : [],
+    performedChecks: ["PLAN_TIME_OVERLAP"],
+    sourceRefIds: [],
+  };
+}
+
+function replacement(verdict: "VALID" | "UNKNOWN") {
+  return {
+    previousPlanId: "plan-1",
+    planId: "plan-2",
+    items: [
+      { courseCode: "CS102", teacherKey: "teacher-li-01", classId: "CS102-01" },
+      {
+        courseCode: "CS103",
+        teacherKey: "teacher-wang-03",
+        classId: "CS103-02",
+      },
+    ],
+    hardConstraints: [planConstraint],
+    verification: planVerification(verdict),
+  };
+}
+
+describe("HTTP API client · E4 offerings, replacement, teachers, reviews and report", () => {
+  it("searches offerings with GET query parameters and passes an OK list through with status OK", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          200,
+          envelope("OK", {
+            previousPlanId: "plan-1",
+            courseCode: "CS103",
+            items: [offering],
+          }),
+        ),
+      );
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.searchSessionOfferings("plan-1", "CS103"),
+    ).resolves.toEqual({
+      previousPlanId: "plan-1",
+      courseCode: "CS103",
+      items: [offering],
+      status: "OK",
+    });
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe(
+      "http://127.0.0.1:8000/api/v1/session-offerings?previousPlanId=plan-1&courseCode=CS103",
+    );
+    expect(options.method).toBe("GET");
+    expect((options.headers as Headers).get("Authorization")).toBe(
+      `Bearer ${session.sessionToken}`,
+    );
+  });
+
+  it("keeps an UNKNOWN offering search as status UNKNOWN, not as a confirmed empty list", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          200,
+          envelope("UNKNOWN", {
+            previousPlanId: "plan-1",
+            courseCode: "CS103",
+            items: [],
+          }),
+        ),
+      );
+    const client = await authedClient(fetcher);
+
+    const result = await client.searchSessionOfferings("plan-1", "CS103");
+    expect(result.items).toEqual([]);
+    expect(result.status).toBe("UNKNOWN");
+  });
+
+  it("posts the replacement with an Idempotency-Key and returns the server verdict unchanged", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(200, envelope("OK", replacement("VALID"))),
+      );
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.replaceSessionPlanItem(replaceInput, "key-replace-1"),
+    ).resolves.toEqual(replacement("VALID"));
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/session-plans/replace");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body as string)).toEqual(replaceInput);
+    expect((options.headers as Headers).get("Idempotency-Key")).toBe(
+      "key-replace-1",
+    );
+    expect((options.headers as Headers).get("Authorization")).toBe(
+      `Bearer ${session.sessionToken}`,
+    );
+  });
+
+  it("accepts a replacement whose envelope is UNKNOWN and keeps the UNKNOWN verdict visible", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(200, envelope("UNKNOWN", replacement("UNKNOWN"))),
+      );
+    const client = await authedClient(fetcher);
+
+    const result = await client.replaceSessionPlanItem(
+      replaceInput,
+      "key-replace-2",
+    );
+    expect(result.verification.verdict).toBe("UNKNOWN");
+    expect(result.verification.unknownChecks).toHaveLength(1);
+  });
+
+  it("lists teacher options by snapshot and leaves courseCode out of the query when it is null", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(200, envelope("OK", { items: [teacherOption] })),
+      );
+    const client = await authedClient(fetcher);
+
+    const result = await client.listTeacherCourseOptions(
+      "curriculum-2026",
+      null,
+    );
+    expect(result.items).toEqual([teacherOption]);
+    expect(result.status).toBe("OK");
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe(
+      "http://127.0.0.1:8000/api/v1/teacher-course-options?curriculumSnapshotId=curriculum-2026",
+    );
+    expect(url).not.toContain("null");
+    expect(options.method).toBe("GET");
+  });
+
+  it("keeps an UNKNOWN teacher list as status UNKNOWN, not as a confirmed empty list", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(200, envelope("UNKNOWN", { items: [] })));
+    const client = await authedClient(fetcher);
+
+    const result = await client.listTeacherCourseOptions(
+      "curriculum-2026",
+      "CS103",
+    );
+    expect(result.items).toEqual([]);
+    expect(result.status).toBe("UNKNOWN");
+    const [url] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toContain("courseCode=CS103");
+  });
+
+  it("searches reviews by course and leaves teacherKey out of the query when it is null", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(200, envelope("OK", { items: [reviewNote] })),
+      );
+    const client = await authedClient(fetcher);
+
+    await expect(client.searchReviews("CS103", null)).resolves.toEqual({
+      items: [reviewNote],
+      status: "OK",
+    });
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe(
+      "http://127.0.0.1:8000/api/v1/reviews/search?courseCode=CS103",
+    );
+    expect(options.method).toBe("GET");
+  });
+
+  it("keeps an UNKNOWN review search as status UNKNOWN, not as a failure or a confirmed empty list", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(200, envelope("UNKNOWN", { items: [] })));
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.searchReviews("CS103", "teacher-wang-03"),
+    ).resolves.toEqual({ items: [], status: "UNKNOWN" });
+  });
+
+  it("requests a run report with the run id encoded in the path", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(200, envelope("OK", { ...runReport, runId: "run/e7" })),
+      );
+    const client = await authedClient(fetcher);
+
+    await expect(client.getRunReport("run/e7")).resolves.toMatchObject({
+      runId: "run/e7",
+    });
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/reports/runs/run%2Fe7");
+    expect(options.method).toBe("GET");
+  });
+
+  it("does not turn an UNKNOWN run report into a failure", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(200, envelope("UNKNOWN", runReport)));
+    const client = await authedClient(fetcher);
+
+    await expect(client.getRunReport("run-e7")).resolves.toEqual(runReport);
+  });
+
+  it("explains a 403 from the report endpoint as a permission problem", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          403,
+          envelope("FORBIDDEN", null, [
+            {
+              code: "ADMIN_KEY_REQUIRED",
+              message: "report requires an admin key",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+
+    await expect(client.getRunReport("run-e7")).rejects.toMatchObject({
+      status: 403,
+      code: "ADMIN_KEY_REQUIRED",
+      message: "当前会话没有查看这些资料的权限。",
+    });
+  });
+});

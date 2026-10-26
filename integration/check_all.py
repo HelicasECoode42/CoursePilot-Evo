@@ -134,6 +134,9 @@ def main(argv: list[str] | None = None) -> int:
     if failed:
         print("未通过：" + "、".join(f"{item['name']}({item['exitCode']}) → {item['owner']}" for item in failed))
         print("五段式失败块在上面对应步骤的输出里；缺服务与行为不符契约都算未通过。")
+    elif args.plan:
+        # 计划模式只核对了配置和每步的计划，没有连过服务，不能说成全链路通过（AGENTS：不把计划写成真实能力）。
+        print("计划检查通过：配置与各步计划一致。这不是全链路通过——计划模式没有连任何服务，真跑请去掉 --plan。")
     else:
         print("全链路通过。")
     print(f"退出码 {code}")

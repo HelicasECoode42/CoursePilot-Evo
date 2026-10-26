@@ -32,6 +32,7 @@
 /agent-runtime/                 @goat-yang
 /benchmark/                     @amorfatiii
 /evo-harness/                   @amorfatiii
+/integration/                   @amorfatiii
 /web/                           @HelicasECoode42
 
 # 独立 HTML 原型已冻结为设计存档，新增交互在 web/ 实现
