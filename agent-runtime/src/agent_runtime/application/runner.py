@@ -120,7 +120,7 @@ class PlanningRunner:
             return self._deliver(answer, trace, context)
 
         facts = self._collect_facts(request, audit, context, budget, trace)
-        reply = self._propose(request, context, facts, budget, trace)
+        reply = self._propose(request, context, facts, audit, budget, trace)
         usage = self._usage(budget, started)
 
         if reply.clarify is not None:
@@ -266,26 +266,30 @@ class PlanningRunner:
         request: PlanningRequest,
         context: ExecutionContext,
         facts: KnownFacts,
+        audit: AuditResult,
         budget: BudgetTracker,
         trace: TracePort,
     ) -> ModelReply | None:
+        limits = self._harness.context
+        payload: dict[str, object] = {
+            "courseCodes": sorted(facts.course_codes)[: limits.max_course_facts],
+            "teacherKeys": sorted(facts.teacher_keys)[: limits.max_course_facts],
+            "classIds": sorted(facts.class_ids)[: limits.max_offerings],
+        }
+        if limits.include_unknowns:
+            payload["unknowns"] = [
+                issue.code for issue in audit.unknowns[: limits.max_review_notes]
+            ]
+        instructions = "只从 AVAILABLE_FACTS 里的 id 提候选，最多 3 条，禁止编造。"
+        strategy = self._harness.strategy_text.strip()
+        if strategy:
+            instructions = f"{strategy}\n\n{instructions}"
         messages = [
-            {
-                "role": "system",
-                "content": "只从 AVAILABLE_FACTS 里的 id 提候选，最多 3 条，禁止编造。",
-            },
+            {"role": "system", "content": instructions},
             {"role": "user", "content": request.promptText},
             {
                 "role": "user",
-                "content": FACTS_MESSAGE_PREFIX
-                + json.dumps(
-                    {
-                        "courseCodes": sorted(facts.course_codes),
-                        "teacherKeys": sorted(facts.teacher_keys),
-                        "classIds": sorted(facts.class_ids),
-                    },
-                    ensure_ascii=False,
-                ),
+                "content": FACTS_MESSAGE_PREFIX + json.dumps(payload, ensure_ascii=False),
             },
         ]
         # docs/04 section 3: no hidden automatic retry or repair. A malformed reply is a
@@ -318,7 +322,7 @@ class PlanningRunner:
         *,
         params: dict[str, object] | None = None,
     ) -> Any:
-        budget.record_tool_call()
+        budget.record_tool_call(name, self._harness.tool_caps)
         budget.check_deadline()
         trace.emit("TOOL_CALLED", tool_name=name)
         started = datetime.now(UTC)

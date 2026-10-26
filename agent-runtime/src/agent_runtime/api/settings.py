@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agent_runtime.adapters.model_client import PLACEHOLDER_MODEL_ID
@@ -39,6 +40,14 @@ class Settings(BaseSettings):
 
     # Harness whitelist directory (relative to the agent-runtime module root).
     harness_dir: str = "harness"
+
+    # Run budget. Defaults are docs/04 section 3. These are deployment settings,
+    # not harness files: the evolver must not be able to change the budget.
+    max_input_tokens: int = Field(default=8000, ge=1)
+    max_output_tokens: int = Field(default=2000, ge=1)
+    max_tool_calls: int = Field(default=6, ge=1)
+    max_model_calls: int = Field(default=3, ge=1)
+    deadline_ms: int = Field(default=45000, ge=1)
 
     @property
     def cors_origin_list(self) -> list[str]:
