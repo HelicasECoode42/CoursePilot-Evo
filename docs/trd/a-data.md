@@ -41,7 +41,7 @@ Java 保存数据并负责学分/时间判定；Agent 理解需求；网页收�
 | 责任 | JiangYiLin-Q121，模块 A |
 | 技术 | Java 21、Apache POI、JSON Schema、JUnit 5 |
 | 所有权 | java-environment/importer、输入模板、黄金样例、来源映射 |
-| 输入 | 本地 xls、受控已修/评价输入、插件静态字段研究 |
+| 输入 | 经核对的标准化 `.xlsx` 课程清单、受控已修/评价输入、插件静态字段研究 |
 | 输出 | Curriculum draft、ImportResult、ReviewImport、原始班次 fixture |
 | 当前状态 | 无导入服务；原始文件不进入公开仓库 |
 
@@ -73,7 +73,7 @@ flowchart LR
 
 ### 3. 接口与输入约束
 
-Java `POST /api/v1/curriculum-snapshots/import`，multipart fields= schemaVersion、trackId、file；Service Key+Admin Key。10 MiB 上限、仅 .xls、检查文件签名，不信任后缀。文件路径/输出目录由服务端生成，接口不能接受任意 sourcePath。
+Java `POST /api/v1/curriculum-snapshots/import`，multipart fields= schemaVersion、trackId、file；Service Key+Admin Key。10 MiB 上限、仅 `.xlsx`，同时校验 ZIP/OOXML 内容结构，不信任后缀。文件路径/输出目录由服务端生成，接口不能接受任意 sourcePath。A1 清单含 8 条并行专业路径；每次请求必须显式指定一个 ASCII 路径 ID，不把 8 张路径表当成前后阶段。路径与工作表映射见 [导入器说明](../../java-environment/importer/README.md)。
 
 `WorkbookReader.read(stream, trackId) -> CurriculumSnapshotDraft`；`RuleTemplateCompiler.compile(rawRule, templateVersion) -> CompiledRule|ImportIssue`；`ImportQualityGate.check(draft, baseline) -> publishable + issues`；`PublishPort.publish(draft, inputHash, importerVersion) -> ImportResult`。
 
