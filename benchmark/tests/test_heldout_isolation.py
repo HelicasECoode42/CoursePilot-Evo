@@ -130,3 +130,34 @@ def test_missing_gold_directory_raises(tmp_path: Path) -> None:
             transport="dry",
             timeout=120,
         )
+
+
+def test_in_repo_heldout_cases_are_allowed_but_gold_must_stay_outside(tmp_path: Path) -> None:
+    """编写人决定：题面可在仓库内，判据必须在外。"""
+    make_heldout(tmp_path)
+    in_repo_cases = ROOT / "benchmark" / "cases" / "held-out"
+    if not in_repo_cases.is_dir():
+        pytest.skip("仓库内没有 held-out 题面目录")
+    payload = run_heldout(
+        cases_root=in_repo_cases,
+        gold_root=ROOT.parent / "restricted" / "gold",
+        manifest_path=ROOT / "benchmark" / "manifests" / "example.json",
+        workspace_root=ROOT,
+        transport="dry",
+        timeout=180,
+    )
+    assert payload["leakFree"] is True
+    assert payload["caseCount"] >= 12
+
+
+def test_gold_inside_workspace_is_still_refused(tmp_path: Path) -> None:
+    cases, _ = make_heldout(tmp_path)
+    with pytest.raises(IsolationError):
+        run_heldout(
+            cases_root=cases,
+            gold_root=ROOT / "benchmark" / "tests",
+            manifest_path=ROOT / "benchmark" / "manifests" / "example.json",
+            workspace_root=ROOT,
+            transport="dry",
+            timeout=120,
+        )

@@ -1,0 +1,11 @@
+{
+  "caseId": "G1-004",
+  "groupId": "G1",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G1-004-academic-record.json",
+  "userQuery": "我专业选修已经修了 18 学分，还差多少才够毕业要求？另外培养方案上通识课那一行写的是“8+4”，那就是 12 学分吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 A45/B45/F45（专业选修 24）、A6/B6/F6（通识课12 与 8+4）、A51（附表模块下限）、A48/F48（总计 257）。已修记录为虚构汇总值，故意不给课程明细。"
+}

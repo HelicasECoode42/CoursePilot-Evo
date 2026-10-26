@@ -1,0 +1,11 @@
+{
+  "caseId": "G3-005",
+  "groupId": "G3",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G3-005-replan-input.json",
+  "userQuery": "我改主意了：大三下学期我想整个学期去实习，课程表要往前压一个学期。你帮我改一下方案，改完告诉我改了什么。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学2 的三(秋)/三(春)课程行、计科3 的三(夏)实践环节行，以及总计行。改目标重算的场景，与 G3-004 的目标不同。"
+}

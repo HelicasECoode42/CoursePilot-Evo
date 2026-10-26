@@ -1,0 +1,11 @@
+{
+  "caseId": "G4-006",
+  "groupId": "G4",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G4-006-academic-record.json",
+  "userQuery": "我这门课按我手里 2023 级的方案是第 7 学期开，你系统里怎么写成第 9 学期？按我那份旧版算，我还差多少学分？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 A1 标明本表为 2024 级教学计划表；系统绑定的培养方案快照为 2024 级 20250306 版。考的是来源版本不一致时不得混用。"
+}

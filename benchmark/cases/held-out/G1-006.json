@@ -1,0 +1,11 @@
+{
+  "caseId": "G1-006",
+  "groupId": "G1",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G1-006-academic-record.json",
+  "userQuery": "我现在是一年级春季学期（第3学期）。这学期我想同时选《新生研讨课》《劳动教育理论课》和《军事理论A》，可以吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 A50 的 ★ 规则文字与 A12/B20/B26 三个课程行的学分。学期口径：一年级为三学期制，第 3 学期即一年级春季学期。"
+}

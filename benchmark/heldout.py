@@ -3,7 +3,9 @@
 为什么这样做
   docs/07 第 4 节要求「独立 Runner 才能读取 held-out 题面与标签并评分」，候选与归因侧不得读取标准答案。
   本机没有真正的进程隔离沙箱，所以用两条可验证的约束来近似：
-    1 路径约束：held-out 与判据目录必须在仓库工作区之外，且路径上不得有软链（软链会把内容带回工作区）；
+    1 路径约束：判据目录必须在仓库工作区之外，且路径上不得有软链（软链会把内容带回工作区）；
+       held-out 题面按编写人 2026-10-26 的决定可以留在仓库内（`benchmark/cases/held-out/`），
+       隔离由「Evolver 不读该目录」的约定承担，判据仍然只在仓库外；
     2 数据约束：判据只在子进程里读，子进程只输出聚合结果，并在输出前自检输出里不含判据原句。
 
 边界
@@ -59,7 +61,9 @@ def run_heldout(
     python: str | None = None,
 ) -> dict[str, Any]:
     """在子进程里跑 held-out，返回子进程给出的聚合结果。"""
-    cases = assert_outside_workspace(cases_root, workspace_root, label="held-out 题面目录")
+    cases = Path(cases_root)
+    if not cases.is_dir():
+        raise IsolationError(f"held-out 题面目录不存在：{cases}")
     gold = assert_outside_workspace(gold_root, workspace_root, label="判据目录")
     manifest = Path(manifest_path)
     if not manifest.is_file():

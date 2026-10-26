@@ -99,7 +99,7 @@ python benchmark/run_heldout.py --cases ../restricted/held-out --gold ../restric
 
 | 约束 | 做法 |
 | --- | --- |
-| 路径 | held-out 与判据目录必须在仓库工作区之外；resolve 之前逐段检查，路径上不得有软链 |
+| 路径 | 判据目录必须在仓库工作区之外（resolve 之前逐段检查，路径上不得有软链）；held-out 题面在 `cases/held-out/`，Evolver 不得读取 |
 | 数据 | 判据只在子进程读；子进程只输出聚合 JSON，输出前自检不含判据原句（前 12 字命中即拒绝返回） |
 | 失败 | 子进程非零退出、输出不是 JSON、自检发现泄漏，一律报 IsolationError，不伪造分数 |
 
