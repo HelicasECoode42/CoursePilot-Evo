@@ -12,6 +12,7 @@ from agent_runtime.api.errors import ForbiddenError, UnauthorizedError
 from agent_runtime.api.idempotency import IdempotencyStore
 from agent_runtime.api.session_store import SessionNotFound, SessionStore
 from agent_runtime.application.context import ExecutionContext
+from agent_runtime.application.plan_store import SessionPlanStore
 from agent_runtime.application.runner import PlanningRunner
 
 
@@ -21,6 +22,10 @@ def get_session_store(request: Request) -> SessionStore:
 
 def get_idempotency(request: Request) -> IdempotencyStore:
     return request.app.state.idempotency
+
+
+def get_plan_store(request: Request) -> SessionPlanStore:
+    return request.app.state.plan_store
 
 
 def get_tool_client(request: Request) -> ToolClient:

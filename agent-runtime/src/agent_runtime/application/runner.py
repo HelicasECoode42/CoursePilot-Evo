@@ -32,6 +32,8 @@ from agent_runtime.api.schemas import (
 from agent_runtime.application.budget import Budget, BudgetTracker
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.ids import digest, new_id
+from agent_runtime.application.plan_replacement import ReusedVerification
+from agent_runtime.application.plan_store import PlanNotInSession, SavedPlan, SessionPlanStore
 from agent_runtime.application.run_manifest import RunIdentity, build_run_manifest
 from agent_runtime.domain.policies.answer_compiler import AnswerCompiler
 from agent_runtime.domain.policies.candidate_guard import CandidateGuard, KnownFacts
@@ -60,6 +62,7 @@ class PlanningRunner:
         result_repository: FileResultRepository | None = None,
         run_identity: RunIdentity | None = None,
         budget: Budget | None = None,
+        plan_store: SessionPlanStore | None = None,
     ) -> None:
         self._tools = tool_client
         self._harness = harness
@@ -71,6 +74,7 @@ class PlanningRunner:
         self._guard = candidate_guard or CandidateGuard()
         self._results = result_repository
         self._run_identity = run_identity or RunIdentity()
+        self._plans = plan_store
 
     def run(self, request: PlanningRequest, context: ExecutionContext) -> PlanningAnswer:
         task_id = new_id("task")
@@ -86,6 +90,7 @@ class PlanningRunner:
         started = datetime.now(UTC)
 
         trace.emit("USER_INPUT", input_digest=digest(request.promptText))
+        previous = self._previous_plan(request.previousPlanId, context.subject_id)
 
         resolved = self._intent_resolver.resolve(request)
         trace.emit("GOAL_EXTRACTED", input_digest=digest(request.promptText))
@@ -170,6 +175,8 @@ class PlanningRunner:
             ),
         )
         trace.emit("VERIFIER_RETURNED", output_ref=verdict.verifierResultId)
+        if previous is not None and verdict.verifierResultId == previous.verifier_result_id:
+            raise ReusedVerification
 
         recommendation = self._answer.recommend(
             plan_id=new_id("plan"),
@@ -181,6 +188,18 @@ class PlanningRunner:
             review_note_ids=[],
             verdict=verdict,
         )
+        if self._plans is not None:
+            self._plans.remember(
+                session_id=context.subject_id,
+                plan_id=recommendation.planId,
+                curriculum_snapshot_id=request.curriculumSnapshotId,
+                offering_snapshot_id=request.offeringSnapshotId,
+                academic_record_id=request.academicRecordId,
+                mode=request.mode,
+                items=recommendation.items,
+                hard_constraints=request.intent.hardConstraints,
+                verifier_result_id=verdict.verifierResultId,
+            )
         unknowns = self._with_fake_model_issue(list(verdict.unknownChecks) + list(audit.unknowns))
         answer = self._answer.recommendations(
             task_id=task_id,
@@ -191,6 +210,17 @@ class PlanningRunner:
             unknowns=unknowns,
         )
         return self._deliver(answer, trace, context)
+
+    def _previous_plan(self, plan_id: str | None, session_id: str) -> SavedPlan | None:
+        """docs/04: previousPlanId must belong to this session. Absent means a new plan."""
+        if plan_id is None:
+            return None
+        if self._plans is None:
+            raise PlanNotInSession
+        saved = self._plans.get(session_id, plan_id)
+        if saved is None:
+            raise PlanNotInSession
+        return saved
 
     def _collect_facts(
         self,
