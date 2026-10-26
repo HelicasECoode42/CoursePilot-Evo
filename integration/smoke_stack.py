@@ -5,7 +5,7 @@
   no_time_claim  没有班次快照时不得断言时间无冲突：不许出现 REAL_TIMETABLE / SIMULATION 的核验结论
                  （该情形下「答未知或先澄清」才是正确行为，本检查把它判为通过）
   bad_input      违反契约的请求必须被 422 拒绝，不得 200
-  no_auth        无令牌 → 401；假令牌 → 404（会话不存在）；都不许 200
+  no_auth        无令牌 → 401；假令牌 → 401（会话不存在或已过期，docs/04 第 36 行）；都不许 200
 
 每条同样是「状态码 + Envelope + 语义」三层断言；任一条 FAIL 即非零退出，缺服务判 BLOCKED 后退出码也是 1。
 
@@ -142,7 +142,7 @@ def case_no_auth(chain: Chain) -> StepResult:
     step = "no_auth"
     request_id = chain.next_request_id(step)
     url = chain.api + "/api/v1/academic-records"
-    expect = "无令牌 → 401 UNAUTHORIZED；假令牌 → 404 NOT_FOUND；两者都不许 200"
+    expect = "无令牌 → 401 UNAUTHORIZED；假令牌 → 401 UNAUTHORIZED；两者都不许 200"
     no_token = chain.transport.request("GET", url, chain.headers(request_id))
     result = evaluate(
         step,
@@ -161,7 +161,7 @@ def case_no_auth(chain: Chain) -> StepResult:
         request_id,
         expect,
         fake,
-        [Attempt("404 会话不存在或已过期", 404, "NOT_FOUND")],
+        [Attempt("401 会话不存在或已过期", 401, "UNAUTHORIZED")],
         repro_curl("GET", url, fake_headers, token=True),
     )
     if fake_result.verdict == FAIL:
