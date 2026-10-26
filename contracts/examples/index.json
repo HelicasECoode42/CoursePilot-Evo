@@ -68,5 +68,55 @@
     "file": "invalid-academic-record-missing-revision.json",
     "definition": "AcademicRecord",
     "valid": false
+  },
+  {
+    "file": "a3-academic-record-complete.json",
+    "definition": "AcademicRecordInput",
+    "valid": true
+  },
+  {
+    "file": "a3-academic-record-incomplete.json",
+    "definition": "AcademicRecordInput",
+    "valid": true
+  },
+  {
+    "file": "a3-academic-record-repeat-attempts-needs-rule.json",
+    "definition": "AcademicRecordInput",
+    "valid": true
+  },
+  {
+    "file": "a3-invalid-academic-record-unknown-outcome.json",
+    "definition": "AcademicRecordInput",
+    "valid": false
+  },
+  {
+    "file": "a3-invalid-academic-record-missing-earned-credits.json",
+    "definition": "AcademicRecordInput",
+    "valid": false
+  },
+  {
+    "file": "a3-review-import-synthetic.json",
+    "definition": "ReviewImport",
+    "valid": true
+  },
+  {
+    "file": "a3-offering-same-course-multiple-class-ids.json",
+    "definition": "OfferingImport",
+    "valid": true
+  },
+  {
+    "file": "a3-offering-conflict.json",
+    "definition": "OfferingImport",
+    "valid": true
+  },
+  {
+    "file": "a3-offering-no-conflict.json",
+    "definition": "OfferingImport",
+    "valid": true
+  },
+  {
+    "file": "a3-offering-unknown-time.json",
+    "definition": "OfferingImport",
+    "valid": true
   }
 ]

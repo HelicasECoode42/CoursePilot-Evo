@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "1.0",
+  "termId": "2026-SYNTHETIC",
+  "sourceKind": "SYNTHETIC",
+  "capturedAt": "2026-10-26T00:00:00Z",
+  "calendar": {
+    "weeks": 16,
+    "sectionsPerDay": 12
+  },
+  "offerings": [
+    {
+      "courseCode": "DEMO101",
+      "classId": "DEMO101-A",
+      "teacherKey": null,
+      "teacherText": "虚构教师",
+      "credits": 3,
+      "capacity": 60,
+      "meetingTextRaw": "虚构时间原文",
+      "meetings": [
+        {
+          "dayOfWeek": 1,
+          "sectionStart": 3,
+          "sectionEnd": 4,
+          "weeks": [
+            1,
+            3,
+            5
+          ]
+        }
+      ],
+      "parseStatus": "PARSED",
+      "sourceRefId": "synthetic:DEMO101-A"
+    },
+    {
+      "courseCode": "DEMO101",
+      "classId": "DEMO101-B",
+      "teacherKey": null,
+      "teacherText": "虚构教师",
+      "credits": 3,
+      "capacity": 60,
+      "meetingTextRaw": "虚构时间原文",
+      "meetings": [
+        {
+          "dayOfWeek": 2,
+          "sectionStart": 3,
+          "sectionEnd": 4,
+          "weeks": [
+            1,
+            3,
+            5
+          ]
+        }
+      ],
+      "parseStatus": "PARSED",
+      "sourceRefId": "synthetic:DEMO101-B"
+    }
+  ]
+}

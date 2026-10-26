@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.0",
+  "termId": "2026-SYNTHETIC",
+  "sourceKind": "SYNTHETIC",
+  "capturedAt": "2026-10-26T00:00:00Z",
+  "calendar": {
+    "weeks": 16,
+    "sectionsPerDay": 12
+  },
+  "offerings": [
+    {
+      "courseCode": "DEMO101",
+      "classId": "DEMO101-UNKNOWN",
+      "teacherKey": null,
+      "teacherText": "虚构教师",
+      "credits": 3,
+      "capacity": 60,
+      "meetingTextRaw": "每逢适当时机安排；格式未知",
+      "meetings": [],
+      "parseStatus": "UNPARSED",
+      "sourceRefId": "synthetic:DEMO101-UNKNOWN"
+    }
+  ]
+}

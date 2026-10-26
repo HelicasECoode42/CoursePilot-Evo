@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0",
+  "curriculumSnapshotId": "curr:synthetic-cs-2024",
+  "sourceKind": "SYNTHETIC",
+  "completedCourses": [
+    {
+      "courseCode": "DEMO101",
+      "earnedCredits": 3,
+      "outcome": "PASSED",
+      "completedTerm": "2024-2025-1"
+    },
+    {
+      "courseCode": "DEMO102",
+      "earnedCredits": 2.5,
+      "outcome": "PASSED",
+      "completedTerm": "2024-2025-1"
+    }
+  ],
+  "transcriptComplete": true
+}
