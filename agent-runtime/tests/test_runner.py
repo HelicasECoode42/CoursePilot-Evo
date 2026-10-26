@@ -27,7 +27,7 @@ from agent_runtime.api.schemas import (
     RunManifest,
     TeacherPreference,
 )
-from agent_runtime.application.budget import Budget
+from agent_runtime.application.budget import Budget, BudgetExceeded
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.runner import PlanningRunner
 
@@ -98,7 +98,7 @@ def test_run_rejects_invented_course_ids(planning_request: PlanningRequest) -> N
     assert any(issue.code == "UNKNOWN_COURSE" for issue in answer.unknowns)
 
 
-def test_run_stops_after_one_invalid_output_repair(planning_request: PlanningRequest) -> None:
+def test_run_does_not_retry_invalid_model_output(planning_request: PlanningRequest) -> None:
     class AlwaysInvalid:
         calls = 0
 
@@ -111,7 +111,30 @@ def test_run_stops_after_one_invalid_output_repair(planning_request: PlanningReq
     planning_request.intent.priorityOrder = ["GPA"]
     with pytest.raises(ModelInvalidOutput):
         _runner(AlwaysInvalid()).run(planning_request, _context(planning_request))
-    assert AlwaysInvalid.calls == 2
+    assert AlwaysInvalid.calls == 1
+
+
+def test_run_charges_tokens_of_invalid_model_output(planning_request: PlanningRequest) -> None:
+    class InvalidWithUsage:
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            error = ModelInvalidOutput("broken json")
+            error.input_tokens = 7
+            error.output_tokens = 3
+            raise error
+
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    runner = PlanningRunner(
+        tool_client=TypedFakeToolClient(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=InvalidWithUsage(),
+        budget=Budget(max_input_tokens=5),
+    )
+    # The failed call's 7 input tokens exceed the 5-token cap, so the budget error wins
+    # over the invalid-output error: the tokens were charged, not silently dropped.
+    with pytest.raises(BudgetExceeded):
+        runner.run(planning_request, _context(planning_request))
 
 
 def test_run_does_not_repair_model_timeout(planning_request: PlanningRequest) -> None:

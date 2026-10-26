@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -288,3 +289,43 @@ def test_list_endpoint_with_bare_array_is_a_contract_violation() -> None:
     with pytest.raises(ToolContractViolation) as caught:
         _client(handler).call("listCourses", None, _context())
     assert "data.items" in str(caught.value)
+
+
+def test_get_retries_transient_error_once_within_budget() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ConnectError("transient")
+        return httpx.Response(200, json=_envelope("OK", {"items": []}))
+
+    assert _client(handler).call("listCourses", None, _context()) == []
+    assert calls == 2
+
+
+def test_get_skips_retry_when_remaining_budget_is_too_small() -> None:
+    """docs/04: a read-only retry must stay inside the time budget."""
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        time.sleep(0.15)
+        raise httpx.ConnectError("transient")
+
+    context = ExecutionContext(
+        subject_id="subject:demo",
+        request_id="req:demo",
+        curriculum_snapshot_id="curr:demo",
+        offering_snapshot_id=None,
+        model_id="m",
+        temperature=0.0,
+        deadline=datetime.now(UTC) + timedelta(seconds=0.2),
+        harness_version="harness:v0",
+    )
+    with pytest.raises(ToolUnavailable):
+        _client(handler).call("listCourses", None, context)
+    # Only ~50 ms of the 200 ms budget is left after the first attempt: no retry.
+    assert calls == 1

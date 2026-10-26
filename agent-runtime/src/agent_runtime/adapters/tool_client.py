@@ -147,8 +147,13 @@ class ToolClient:
         except httpx.HTTPError as exc:
             if spec.method != "GET":
                 raise ToolUnavailable(tool) from exc
+            # The retry must fit the budget left *now*, not the timeout computed before
+            # the first attempt; with no usable budget left, report unavailable instead.
+            retry_timeout = _remaining_timeout_seconds(context)
+            if retry_timeout is None:
+                raise ToolUnavailable(tool) from exc
             try:
-                response = self._send(spec.method, url, headers, query, body, timeout)
+                response = self._send(spec.method, url, headers, query, body, retry_timeout)
             except httpx.HTTPError as retry_exc:
                 raise ToolUnavailable(tool) from retry_exc
 
@@ -209,9 +214,20 @@ class ToolClient:
             return client.post(url, headers=headers, params=query, json=body)
 
 
+_MIN_TIMEOUT_SECONDS = 0.1
+
+
 def _timeout_seconds(context: ExecutionContext) -> float:
     remaining = (context.deadline - datetime.now(UTC)).total_seconds()
-    return max(0.1, min(5.0, remaining))
+    return max(_MIN_TIMEOUT_SECONDS, min(5.0, remaining))
+
+
+def _remaining_timeout_seconds(context: ExecutionContext) -> float | None:
+    """Timeout for a retry, or None when the remaining budget cannot cover one attempt."""
+    remaining = (context.deadline - datetime.now(UTC)).total_seconds()
+    if remaining < _MIN_TIMEOUT_SECONDS:
+        return None
+    return min(5.0, remaining)
 
 
 def _rejection(tool: str, response: httpx.Response) -> ToolRejected:
