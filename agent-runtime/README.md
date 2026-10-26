@@ -86,6 +86,8 @@ python -m uvicorn agent_runtime.api.app:app --port 8000
   时返回 `TOOL_UNAVAILABLE`(503)，不冒充无冲突。`listSessionRecords` 对应的 Java 列表工具
   （`listAcademicRecords`）尚待模块 B 在 `java.openapi.json` 补齐。
 - 会话内搜班次 `GET /api/v1/session-offerings` 和换一门课 `POST /api/v1/session-plans/replace`
-  已能调用现有的 `listOfferings` 与 `validatePlan`。路径还没写进 `planning.openapi.json`，
-  等 B 和 E 确认后再补契约。没有班次快照会拒绝，Java 不可用仍是 503，不会写成 `VALID`。
+  已写进 `planning.openapi.json`（随 #28 合入），并有 `CourseOffering` 正反例。
+  它们调 `listOfferings` 与 `validatePlan`，但 **`POST /api/v1/plans/validate` 在 Java 侧
+  还没有实现**，所以真实环境下换班次一律失败（接口不存在）。没有班次快照会拒绝，
+  Java 不可用仍是 503，不会写成 `VALID`。
 - 预算默认值（8000/2000 tokens、6 tools、3 model calls、45 s）只写在 `Budget`，manifest 记录同一份，未做性能实测。页面看到答案级 `FAKE_MODEL` 时不得显示真实通过。

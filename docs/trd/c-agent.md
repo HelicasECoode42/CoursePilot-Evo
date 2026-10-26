@@ -92,7 +92,7 @@ PlanningAnswer decision=CLARIFY 必须有 Question 且无 recommendations；每�
 
 `POST /api/v1/planning` 带 `previousPlanId` 时，先确认该方案属于当前会话，不属于就返回 404，文案与其他「不在本会话」一致。确认之后按这次请求里的硬条件重新核验，不把旧 `verifierResultId` 当成新结果，也不因为重规划删掉请求里仍在的必须项。
 
-会话内换班先用已有 Java 工具，不新造字段：`GET /api/v1/session-offerings` 按当前会话里的 `previousPlanId` 和 `courseCode` 调 `listOfferings`；`POST /api/v1/session-plans/replace` 只替换这一门，其余课程和 `hardConstraints` 原样交给 `validatePlan`。旧 `verifierResultId` 不复用。这两条路径还没写入 `planning.openapi.json`，要等 B、E 确认后再改契约。没有班次快照或 Java 不可用时拒绝，不把结果写成 `VALID`。
+会话内换班先用已有 Java 工具，不新造字段：`GET /api/v1/session-offerings` 按当前会话里的 `previousPlanId` 和 `courseCode` 调 `listOfferings`；`POST /api/v1/session-plans/replace` 只替换这一门，其余课程和 `hardConstraints` 原样交给 `validatePlan`。旧 `verifierResultId` 不复用。这两条路径已随 #28 写入 `planning.openapi.json`；但 `plans/validate` 在 Java 侧尚未实现，真实环境下换班次会得到「接口不存在」。
 
 ### 4. 正常与重规划时序
 
