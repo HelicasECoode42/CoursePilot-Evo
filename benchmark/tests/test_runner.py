@@ -835,3 +835,18 @@ def test_missing_outcome_is_unknown_not_passed() -> None:
     )
     assert plan.steps[0].body["completedCourses"][0]["outcome"] == "UNKNOWN"
     assert any("不当作已通过" in note for note in plan.notes)
+
+
+def test_prompt_text_only_fixture_goes_planning() -> None:
+    """培养方案规则类题面（G1-007 起）只给自由文本：按规划路线提交，intent 留空。"""
+    from case_adapters import build_plan
+
+    plan = build_plan(
+        {"caseId": "G1-007", "groupId": "G1", "curriculumSnapshotId": "3c405feaa6d7"},
+        {"promptText": "微积分(1-3) 的 01014125~127 是一门课还是三门课？"},
+    )
+    assert plan.route == "PLANNING"
+    assert plan.steps[0].label == "落空记录"
+    body = plan.steps[-1].body({"data": {"academicRecordId": "record:test"}})
+    assert body["intent"]["hardConstraints"] == []
+    assert "微积分" in body["promptText"]

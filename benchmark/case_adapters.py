@@ -315,6 +315,8 @@ def classify(case: dict[str, Any], fixture: dict[str, Any]) -> tuple[str, str]:
         return PLANNING, "fixture 带班次与自报人数，题面问的是能否选上，按规划类题面处理（容量事实由快照提供）"
     if isinstance(fixture.get("uploadedSnapshot"), dict):
         return PLANNING, "fixture 只有学生上传件与自由文本，intent 留空由 Runner 澄清"
+    if isinstance(fixture.get("promptText"), str) and fixture["promptText"].strip():
+        return PLANNING, "fixture 只有自由文本：按规划路线提交，intent 留空由 Runner 自行解析或澄清"
     raise UnsupportedCase(f"fixture 形态无法归入规划类或核查类（含键：{', '.join(sorted(fixture))}）")
 
 

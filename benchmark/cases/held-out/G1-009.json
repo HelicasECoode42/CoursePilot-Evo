@@ -1,0 +1,11 @@
+{
+  "caseId": "G1-009",
+  "groupId": "G1",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G1-009-curriculum-rule.json",
+  "userQuery": "培养方案最后写着总计 257 学分，这个数是各类别加起来的吗？专业选修的 24 学分算在 257 里面了吗？我修够 257 就能毕业吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 F48 总计、F45 专业选修、F43 学科基础课。考的是总计构成与「修满即毕业」的过度推断。"
+}
