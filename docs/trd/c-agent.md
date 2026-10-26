@@ -137,7 +137,7 @@ sequenceDiagram
 
 ### 5. Harness、预算和安全门禁
 
-ModelAdapter 只允许选定模型端点，不接受文件/评价里给的 URL。Runner 读取 `tool_policy.yaml` 的 per-tool `max_calls`，超出则不再发这次工具调用；`context_policy.yaml` 的 `max_course_facts`、`max_offerings`、`max_review_notes` 裁剪送进模型的事实，不把全库、历史全部聊天塞入模型。`harness/AGENTS.md` 与 `skills/` 作为策略文本放进系统提示，不执行。
+ModelAdapter 只允许选定模型端点，不接受文件/评价里给的 URL。Runner 读取 `tool_policy.yaml` 的 per-tool `max_calls`，超出则抛 `BudgetExceeded`，整次运行以 503 `BUDGET_EXCEEDED` 结束——**不是只跳过这一次调用**，所以不会把「没查到」当成「没有」；上限只作用于规划运行，会话内换班次的搜索/替换不经过预算计数。`context_policy.yaml` 的 `max_course_facts`、`max_offerings`、`max_review_notes` 裁剪送进模型的事实（**当前裁剪是静默的**，模型看到的是子集但不知道被截断过），不把全库、历史全部聊天塞入模型。`harness/AGENTS.md` 与 `skills/` 作为策略文本放进系统提示，不执行。
 
 默认累计 input8000/output2000 tokens、6 tools、3 model calls、45 秒；各调用按剩余预算设置 timeout。provider 自动重试关闭。无效模型 JSON 最多在模型调用预算内修复一次；超过即 MODEL_INVALID_OUTPUT，不因语言顺畅放行。
 

@@ -93,4 +93,6 @@ python -m uvicorn agent_runtime.api.app:app --port 8000
   `PlanValidation`。Java 不可用仍是 503，不会写成 `VALID`。
 - 预算默认值（8000/2000 tokens、6 tools、3 model calls、45 s）由环境变量组装成一份
   `Budget`，manifest 记录同一份，未做性能实测。`harness/tool_policy.yaml` 的次数和
-  `context_policy.yaml` 的条数会实际限制这一轮运行。页面看到答案级 `FAKE_MODEL` 时不得显示真实通过。
+  `context_policy.yaml` 的条数会实际限制**规划运行**（会话内换班次的搜索/替换不经过预算计数）。
+  超出 per-tool 上限是整次运行以 503 `BUDGET_EXCEEDED` 结束，不是跳过这一次调用；
+  事实裁剪目前是静默的，没有在 `unknowns` 里标记。页面看到答案级 `FAKE_MODEL` 时不得显示真实通过。
