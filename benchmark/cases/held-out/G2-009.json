@@ -1,0 +1,11 @@
+{
+  "caseId": "G2-009",
+  "groupId": "G2",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G2-009-teacher-must-prefer.json",
+  "userQuery": "张老师的课我必须选上；李老师的课最好也能选上。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考同一句话里 MUST 与 PREFER 两种强度不能混为一谈。"
+}

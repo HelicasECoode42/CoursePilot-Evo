@@ -1,0 +1,11 @@
+{
+  "caseId": "G3-010",
+  "groupId": "G3",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G3-010-required-conflict.json",
+  "userQuery": "两门必修课时间撞了，我该怎么办？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考不得替学生决定放弃必修；培养方案学期安排是建议不是硬性。"
+}

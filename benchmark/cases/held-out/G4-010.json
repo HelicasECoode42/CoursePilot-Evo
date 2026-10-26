@@ -1,0 +1,11 @@
+{
+  "caseId": "G4-010",
+  "groupId": "G4",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G4-010-no-job-mapping.json",
+  "userQuery": "我想进大厂做测试，应该修哪些课？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考岗位映射缺失：培养方案不含岗位课程映射，不得编造。"
+}

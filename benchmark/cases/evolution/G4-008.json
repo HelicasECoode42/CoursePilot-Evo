@@ -1,0 +1,11 @@
+{
+  "caseId": "G4-008",
+  "groupId": "G4",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G4-008-stale-snapshot.json",
+  "userQuery": "我这份课表是去年导出的，现在还能用来排课吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考过期快照：必须标采集时间，不得当本学期事实。"
+}

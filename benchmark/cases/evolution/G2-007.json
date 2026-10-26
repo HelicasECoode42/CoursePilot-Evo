@@ -1,0 +1,11 @@
+{
+  "caseId": "G2-007",
+  "groupId": "G2",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G2-007-hard-soft.json",
+  "userQuery": "我周一上午必须空着去实习，其他时间随便排，最好别排晚上。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考硬软区分：『必须空着』是硬约束，『最好别排晚上』是偏好，不能同等对待。"
+}

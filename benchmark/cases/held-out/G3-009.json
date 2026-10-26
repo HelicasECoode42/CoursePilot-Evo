@@ -1,0 +1,11 @@
+{
+  "caseId": "G3-009",
+  "groupId": "G3",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G3-009-capacity-vs-time.json",
+  "userQuery": "一门课容量满了但时间不冲突，另一门时间冲突但有位置，我选哪个？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考容量与时间两类信息的边界：容量不得推录取概率，时间冲突需班次数据。"
+}
