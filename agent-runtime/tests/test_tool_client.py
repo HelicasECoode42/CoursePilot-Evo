@@ -5,7 +5,13 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from agent_runtime.adapters.tool_client import InvalidTool, ToolClient, ToolUnavailable
+from agent_runtime.adapters.tool_client import (
+    InvalidTool,
+    ToolClient,
+    ToolContractViolation,
+    ToolRejected,
+    ToolUnavailable,
+)
 from agent_runtime.api.schemas import AuditRequest
 from agent_runtime.application.context import ExecutionContext
 
@@ -145,3 +151,140 @@ def test_http_error_is_unavailable() -> None:
     client = ToolClient("http://java.test", "svc", transport=httpx.MockTransport(handler))
     with pytest.raises(ToolUnavailable):
         client.call("listCourses", None, _context())
+
+
+def _envelope(status: str, data: object, issues: list | None = None) -> dict:
+    return {
+        "schemaVersion": "1.0",
+        "requestId": "req:demo",
+        "traceId": None,
+        "status": status,
+        "data": data,
+        "provenance": [],
+        "issues": issues or [],
+    }
+
+
+def _client(handler) -> ToolClient:
+    return ToolClient("http://java.test", "svc", transport=httpx.MockTransport(handler))
+
+
+def test_contract_violation_is_not_reported_as_unavailable() -> None:
+    """A provider that answers off-contract is a provider defect, not an outage.
+
+    Regression: Pydantic's ValidationError subclasses ValueError, so the old
+    ``except (ValueError, TypeError, KeyError)`` turned every contract break into
+    TOOL_UNAVAILABLE. Measured against the real Java service, five of seven tools
+    failed with that single indistinguishable error.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Course requires sourceRefIds (domain.schema.json); this one omits it.
+        return httpx.Response(
+            200,
+            json=_envelope(
+                "OK",
+                {
+                    "items": [
+                        {
+                            "courseCode": "CS101",
+                            "name": "程序设计",
+                            "credits": "4.00",
+                            "category": "必修",
+                        }
+                    ]
+                },
+            ),
+        )
+
+    with pytest.raises(ToolContractViolation) as caught:
+        _client(handler).call("listCourses", None, _context())
+    assert "sourceRefIds" in str(caught.value)
+
+
+def test_list_endpoint_without_items_is_a_contract_violation() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_envelope("OK", None))
+
+    with pytest.raises(ToolContractViolation):
+        _client(handler).call("listCourses", None, _context())
+
+
+def test_null_data_on_single_object_is_a_contract_violation() -> None:
+    # Java answers UNKNOWN with data=null for records it cannot assemble yet.
+    # Validating None must say so, not look like the service died.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_envelope("UNKNOWN", None))
+
+    with pytest.raises(ToolContractViolation):
+        _client(handler).call("getAcademicRecord", None, _context(), params={"recordId": "r"})
+
+
+def test_bad_service_key_keeps_its_401() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json=_envelope(
+                "ERROR",
+                None,
+                [{"code": "SERVICE_KEY_INVALID", "message": "缺少或错误的 X-Service-Key"}],
+            ),
+        )
+
+    with pytest.raises(ToolRejected) as caught:
+        _client(handler).call("listCourses", None, _context())
+    assert caught.value.status_code == 401
+    assert caught.value.issue_code == "SERVICE_KEY_INVALID"
+
+
+def test_not_visible_keeps_its_404() -> None:
+    # java.openapi.json defines 404 as "object not visible or absent". Flattening
+    # it to 503 would hide an authorization outcome behind "dependency down".
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404, json=_envelope("ERROR", None, [{"code": "NOT_VISIBLE", "message": "不可见"}])
+        )
+
+    with pytest.raises(ToolRejected) as caught:
+        _client(handler).call("getAcademicRecord", None, _context(), params={"recordId": "other"})
+    assert caught.value.status_code == 404
+    assert caught.value.issue_code == "NOT_VISIBLE"
+
+
+def test_rejection_is_not_retried() -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(401, json=_envelope("ERROR", None, [{"code": "X", "message": "y"}]))
+
+    with pytest.raises(ToolRejected):
+        _client(handler).call("listCourses", None, _context())
+    assert len(calls) == 1, "密钥被拒不会因为重试而变对"
+
+
+def test_server_error_is_still_unavailable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"status": "ERROR"})
+
+    with pytest.raises(ToolUnavailable):
+        _client(handler).call("listCourses", None, _context())
+
+
+def test_unknown_envelope_still_returns_data() -> None:
+    # UNKNOWN means "this is as far as the facts go", not "the query failed".
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_envelope("UNKNOWN", {"items": []}))
+
+    assert _client(handler).call("listAcademicRecords", None, _context()) == []
+
+
+def test_list_endpoint_with_bare_array_is_a_contract_violation() -> None:
+    # The contract wants data to be an object with items. A bare array is not
+    # a list shape the contract allows, so it must not be accepted as one.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_envelope("OK", []))
+
+    with pytest.raises(ToolContractViolation) as caught:
+        _client(handler).call("listCourses", None, _context())
+    assert "data.items" in str(caught.value)
