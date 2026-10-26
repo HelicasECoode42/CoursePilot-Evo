@@ -201,8 +201,22 @@ def test_bad_input_requires_422():
     assert case_bad_input(make_chain(swallowed)).verdict == FAIL
 
 
-def test_no_auth_requires_401_then_404():
+def test_no_auth_requires_401_for_both_missing_and_fake_token():
+    # docs/04 第 36 行：会话过期或不存在都是 401。假令牌原来期望 404，那会把
+    # 「会话失效」和「别人的记录」混成一个码；前端只认 401 才会引导重新开始。
     transport = FakeTransport(
+        {
+            "academic-records": [
+                Response(401, envelope("UNAUTHORIZED", issues=[{"code": "UNAUTHORIZED"}])),
+                Response(401, envelope("UNAUTHORIZED", issues=[{"code": "UNAUTHORIZED"}])),
+            ]
+        }
+    )
+    assert case_no_auth(make_chain(transport)).verdict == PASS
+    wrong = FakeTransport({"academic-records": Response(200, envelope(data={"items": []}))})
+    assert case_no_auth(make_chain(wrong)).verdict == FAIL
+    # 旧行为（假令牌 404）现在必须被判失败，否则这条检查又会放过回归。
+    stale = FakeTransport(
         {
             "academic-records": [
                 Response(401, envelope("UNAUTHORIZED", issues=[{"code": "UNAUTHORIZED"}])),
@@ -210,9 +224,7 @@ def test_no_auth_requires_401_then_404():
             ]
         }
     )
-    assert case_no_auth(make_chain(transport)).verdict == PASS
-    wrong = FakeTransport({"academic-records": Response(200, envelope(data={"items": []}))})
-    assert case_no_auth(make_chain(wrong)).verdict == FAIL
+    assert case_no_auth(make_chain(stale)).verdict == FAIL
 
 
 def test_contract_examples_are_the_request_source():

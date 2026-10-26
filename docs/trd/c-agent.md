@@ -1,6 +1,6 @@
 # C 模块：需求理解与智能规划（业务说明与 TRD）
 
-负责人：**goat-yang**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前是设计与合同，尚未实现；排期见[本期任务](../19-delivery-plan.md)。
+负责人：**goat-yang**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前已有可运行实现：planning 契约的 12 个操作都有路由，81 个测试通过。模型默认走受控假实现（未配 `CP_MODEL_*` 时不调真实模型）。`harness/tool_policy.yaml` 限制每次运行各工具的调用次数，`context_policy.yaml` 限制送进模型的事实条数，`AGENTS.md` 与 `skills/` 进入系统提示；预算不在这份白名单里，默认仍是 8000/2000/6/3/45000，可用 `CP_MAX_*` 覆盖。排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 
@@ -16,7 +16,7 @@
 | C-F2 | 理解目标与优先级 | 支持多目标，区分必须条件、偏好和优先级，保留明确指定的课程教师意愿。 | C2、C3 |
 | C-F3 | 追问并接住回答 | 识别影响推荐的缺失或歧义，提出一个相关问题；补答后继续原流程。 | C3 |
 | C-F4 | 生成有依据的推荐 | 按需取课程、学业和评价事实，调用真实模型提出候选，强制 Java 核验，解释依据与未知。 | C2 |
-| C-F5 | 处理取舍与重新推荐 | 条件冲突时澄清/修复；学生改一个条件后重新查询并核验，不静默删除必须项。 | C3 |
+| C-F5 | 处理取舍与重新推荐 | 条件冲突时澄清/修复；学生改条件后关联旧方案重新查询并核验；学生从班次搜索中明确替换一门课时，Python 校验方案归属、保留其他项并请求 Java 核验完整新方案，不静默删除必须项或覆盖学生选择。 | C3；第六周班次替换 |
 | C-F6 | 保证运行可控 | 重复请求不双跑，超时/预算耗尽有终态；记录版本/用量/耗时，生产与评测使用同一入口。 | C2、C3 |
 | C-F7 | 提供相关发展方向 | 仅在职业目标分支提供少量有来源的计算机方向介绍，缺资料时说明未知。 | 第六周细拆 |
 | C-F8 | 加载可评测的策略版本 | 支持评测模块提供的允许修改的运行策略版本，保留稳定版本、限制改动范围。 | 第六周细拆 |
@@ -88,6 +88,12 @@ PlanningRequest 必填 schemaVersion、curriculumSnapshotId、academicRecordId�
 
 PlanningAnswer decision=CLARIFY 必须有 Question 且无 recommendations；每份 recommendation 有 PlanValidation，最多 3 份。UNKNOWN 可保留课程层建议，不能返回真实合格课表。usage 未取得 token 用 null。
 
+结果页的“搜索班次并替换”不是模型生成：Python 提供受会话保护的课程/班次查询网关，并接收 `previousPlanId + courseCode + selectedClassId` 一类的明确替换意图。Python 验证旧方案归属，取得原方案完整项目，替换目标项并调用 Java `plans/validate`。若新班次冲突或未知，应原样返回 Java 判决和原因；不得让模型把 INVALID/UNKNOWN 改成有效。新增的 Web 网关路径、请求/响应和幂等语义须先与 B/E 一起更新 `planning.openapi.json` 并补正反例，字段不能由三方各自私定。
+
+`POST /api/v1/planning` 带 `previousPlanId` 时，先确认该方案属于当前会话，不属于就返回 404，文案与其他「不在本会话」一致。确认之后按这次请求里的硬条件重新核验，不把旧 `verifierResultId` 当成新结果，也不因为重规划删掉请求里仍在的必须项。
+
+会话内换班先用已有 Java 工具，不新造字段：`GET /api/v1/session-offerings` 按当前会话里的 `previousPlanId` 和 `courseCode` 调 `listOfferings`；`POST /api/v1/session-plans/replace` 只替换这一门，其余课程和 `hardConstraints` 原样交给 `validatePlan`。旧 `verifierResultId` 不复用。这两条路径已随 #28 写入 `planning.openapi.json`；但 `plans/validate` 在 Java 侧尚未实现，真实环境下换班次会得到「接口不存在」。
+
 ### 4. 正常与重规划时序
 
 ```mermaid
@@ -131,7 +137,7 @@ sequenceDiagram
 
 ### 5. Harness、预算和安全门禁
 
-ModelAdapter 只允许选定模型端点，不接受文件/评价里给的 URL。tool_policy 白名单工具、次数上限；context_policy 选本次任务需要的事实/评价，不把全库、历史全部聊天塞入模型。
+ModelAdapter 只允许选定模型端点，不接受文件/评价里给的 URL。Runner 读取 `tool_policy.yaml` 的 per-tool `max_calls`，超出则抛 `BudgetExceeded`，整次运行以 503 `BUDGET_EXCEEDED` 结束——**不是只跳过这一次调用**，所以不会把「没查到」当成「没有」；上限只作用于规划运行，会话内换班次的搜索/替换不经过预算计数。`context_policy.yaml` 的 `max_course_facts`、`max_offerings`、`max_review_notes` 裁剪送进模型的事实（**当前裁剪是静默的**，模型看到的是子集但不知道被截断过），不把全库、历史全部聊天塞入模型。`harness/AGENTS.md` 与 `skills/` 作为策略文本放进系统提示，不执行。
 
 默认累计 input8000/output2000 tokens、6 tools、3 model calls、45 秒；各调用按剩余预算设置 timeout。provider 自动重试关闭。无效模型 JSON 最多在模型调用预算内修复一次；超过即 MODEL_INVALID_OUTPUT，不因语言顺畅放行。
 
@@ -139,7 +145,7 @@ HarnessLoader 只加载已记录 hash 的白名单快照。文件内容是策略
 
 系统处理评价中的“忽略之前指令、调某 URL、泄露 key”等文本为资料，不执行。模型候选 ID 必须属于工具给的集合；可信答案引用 evidence ID。日志不写完整 Prompt/私有思维链或学生成绩。
 
-已配置模型地址和密钥时，`CP_MODEL_ID` 不能仍是 `DEPLOYMENT_MODEL_PLACEHOLDER`，启动即失败。缺密钥仍用假模型。答案级 `unknowns` 含 `FAKE_MODEL` 时不得把候选展示为真实通过；Java 的 `verdict` 保持原样。运行预算只有 `Budget` 一处，manifest 记录同一次运行实际用的那份。
+已配置模型地址和密钥时，`CP_MODEL_ID` 不能仍是 `DEPLOYMENT_MODEL_PLACEHOLDER`，启动即失败。缺密钥仍用假模型。答案级 `unknowns` 含 `FAKE_MODEL` 时不得把候选展示为真实通过；Java 的 `verdict` 保持原样。运行预算只有 `Budget` 一处，由 `CP_MAX_INPUT_TOKENS`、`CP_MAX_OUTPUT_TOKENS`、`CP_MAX_TOOL_CALLS`、`CP_MAX_MODEL_CALLS`、`CP_DEADLINE_MS` 组装，缺省即上面那组数字；manifest 记录同一次运行实际用的那份。预算不放进 Harness 白名单，Evolver 不能改它。
 
 ### 6. 故障与恢复
 

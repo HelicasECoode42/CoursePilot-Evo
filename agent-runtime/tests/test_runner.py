@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from agent_runtime.adapters.fake_tools import TypedFakeToolClient
-from agent_runtime.adapters.harness_loader import HarnessSnapshot
+from agent_runtime.adapters.harness_loader import ContextLimits, HarnessSnapshot
 from agent_runtime.adapters.model_client import (
     FakeModelAdapter,
     ModelInvalidOutput,
@@ -27,7 +27,7 @@ from agent_runtime.api.schemas import (
     RunManifest,
     TeacherPreference,
 )
-from agent_runtime.application.budget import Budget
+from agent_runtime.application.budget import Budget, BudgetExceeded
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.runner import PlanningRunner
 
@@ -98,7 +98,7 @@ def test_run_rejects_invented_course_ids(planning_request: PlanningRequest) -> N
     assert any(issue.code == "UNKNOWN_COURSE" for issue in answer.unknowns)
 
 
-def test_run_stops_after_one_invalid_output_repair(planning_request: PlanningRequest) -> None:
+def test_run_does_not_retry_invalid_model_output(planning_request: PlanningRequest) -> None:
     class AlwaysInvalid:
         calls = 0
 
@@ -111,7 +111,30 @@ def test_run_stops_after_one_invalid_output_repair(planning_request: PlanningReq
     planning_request.intent.priorityOrder = ["GPA"]
     with pytest.raises(ModelInvalidOutput):
         _runner(AlwaysInvalid()).run(planning_request, _context(planning_request))
-    assert AlwaysInvalid.calls == 2
+    assert AlwaysInvalid.calls == 1
+
+
+def test_run_charges_tokens_of_invalid_model_output(planning_request: PlanningRequest) -> None:
+    class InvalidWithUsage:
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            error = ModelInvalidOutput("broken json")
+            error.input_tokens = 7
+            error.output_tokens = 3
+            raise error
+
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    runner = PlanningRunner(
+        tool_client=TypedFakeToolClient(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=InvalidWithUsage(),
+        budget=Budget(max_input_tokens=5),
+    )
+    # The failed call's 7 input tokens exceed the 5-token cap, so the budget error wins
+    # over the invalid-output error: the tokens were charged, not silently dropped.
+    with pytest.raises(BudgetExceeded):
+        runner.run(planning_request, _context(planning_request))
 
 
 def test_run_does_not_repair_model_timeout(planning_request: PlanningRequest) -> None:
@@ -340,3 +363,69 @@ def test_run_raises_tool_unavailable_without_java(planning_request: PlanningRequ
     runner = PlanningRunner(tool_client=ToolClient(base_url=None, service_key=""), harness=harness)
     with pytest.raises(ToolUnavailable):
         runner.run(planning_request, _context(planning_request))
+
+
+def test_tool_policy_refuses_before_the_tool_runs(planning_request: PlanningRequest) -> None:
+    harness = HarnessSnapshot(
+        version="harness:v0",
+        root=Path("."),
+        tool_caps={"auditRequirements": 0},
+    )
+    runner = PlanningRunner(
+        tool_client=TypedFakeToolClient(),
+        harness=harness,
+        model_adapter=FakeModelAdapter(),
+    )
+    with pytest.raises(BudgetExceeded, match="auditRequirements"):
+        runner.run(planning_request, _context(planning_request))
+
+
+def test_context_policy_and_strategy_text_reach_the_model(
+    planning_request: PlanningRequest,
+) -> None:
+    class RecordingModel:
+        def __init__(self) -> None:
+            self.messages: list[dict[str, str]] | None = None
+
+        def generate(self, *, context, messages, tool_schemas):
+            del context, tool_schemas
+            self.messages = messages
+            return ModelReply(items=[])
+
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    model = RecordingModel()
+    harness = HarnessSnapshot(
+        version="harness:v0",
+        root=Path("."),
+        context=ContextLimits(
+            max_course_facts=1,
+            max_offerings=0,
+            max_review_notes=0,
+            include_unknowns=False,
+        ),
+        strategy_text="策略甲",
+    )
+    runner = PlanningRunner(
+        tool_client=TypedFakeToolClient(),
+        harness=harness,
+        model_adapter=model,
+    )
+    runner.run(planning_request, _context(planning_request))
+    assert model.messages is not None
+    assert model.messages[0]["content"].startswith("策略甲")
+    facts = model.messages[2]["content"]
+    assert '"courseCodes": ["CS101"]' in facts
+    assert "MATH201" not in facts
+    assert "unknowns" not in facts
+
+
+def test_budget_follows_settings() -> None:
+    from agent_runtime.api.app import create_app
+    from agent_runtime.api.settings import Settings
+
+    app = create_app(Settings(max_tool_calls=2, use_fake_tools=True))
+    budget = app.state.runner._budget
+    assert budget.max_tool_calls == 2
+    assert budget.max_input_tokens == 8000
+    assert budget.deadline_ms == 45000

@@ -14,10 +14,18 @@ from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient
 from agent_runtime.api.errors import register_error_handlers
 from agent_runtime.api.idempotency import IdempotencyStore
-from agent_runtime.api.routes import academic_records, gateway, planning, reports, sessions
+from agent_runtime.api.routes import (
+    academic_records,
+    gateway,
+    plan_replacement,
+    planning,
+    reports,
+    sessions,
+)
 from agent_runtime.api.session_store import SessionStore
 from agent_runtime.api.settings import Settings, load_settings
 from agent_runtime.application.budget import Budget
+from agent_runtime.application.plan_store import SessionPlanStore
 from agent_runtime.application.run_manifest import RunIdentity
 from agent_runtime.application.runner import PlanningRunner
 
@@ -44,13 +52,20 @@ def create_app(
     app = FastAPI(title="CoursePilot planning API", version="1.0.0")
     app.state.settings = settings
     app.state.session_store = SessionStore(settings.session_ttl_seconds)
+    app.state.plan_store = SessionPlanStore()
     app.state.idempotency = IdempotencyStore()
     app.state.harness = harness
     app.state.tool_client = tool_client
     verifier_version = (
         "verifier:fake" if isinstance(tool_client, TypedFakeToolClient) else "verifier:local-unset"
     )
-    budget = Budget()
+    budget = Budget(
+        max_input_tokens=settings.max_input_tokens,
+        max_output_tokens=settings.max_output_tokens,
+        max_tool_calls=settings.max_tool_calls,
+        max_model_calls=settings.max_model_calls,
+        deadline_ms=settings.deadline_ms,
+    )
     app.state.runner = runner or PlanningRunner(
         tool_client=tool_client,
         harness=harness,
@@ -63,6 +78,7 @@ def create_app(
         result_repository=result_repository,
         run_identity=RunIdentity(verifier_version=verifier_version),
         budget=budget,
+        plan_store=app.state.plan_store,
     )
 
     app.add_middleware(
@@ -81,6 +97,7 @@ def create_app(
     register_error_handlers(app)
     app.include_router(sessions.router)
     app.include_router(planning.router)
+    app.include_router(plan_replacement.router)
     app.include_router(academic_records.router)
     app.include_router(gateway.router)
     app.include_router(reports.router)

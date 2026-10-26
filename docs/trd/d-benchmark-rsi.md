@@ -1,6 +1,6 @@
 # D 模块：验收、评测与策略改进（业务说明与 TRD）
 
-负责人：**amorfatiii**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前是设计与合同，尚未实现；排期见[本期任务](../19-delivery-plan.md)。
+负责人：**amorfatiii**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前只有案例与隔离评分的骨架：12 条 evolution 题面、39 个测试通过，评分器的语义匹配仍是关键词占位且 JavaVerifier 未接线。held-out、标注与评测 Runner 尚未落地（Runner 在未合入的 PR #36），`evo-harness/` 仍只有 README；排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 
@@ -50,6 +50,8 @@ A/B 提供独立事实依据；C 提供同一 Agent 和脱敏运行记录；E �
 ### 1. 需求、数据和隔离
 
 D-01 四组任务：学业核对、hard/soft、多目标规划/replan、澄清/拒编。每组目标 5 evolution+5 held-out，最低 3+3。fixture 标 REAL 培养事实 / SIMULATION 班次 / 无真实班次，不把 simulation 当真实排课能力。
+
+结果工作区的手动换班次验收属于确定性流程检查，不把学生选班次误计为模型能力。集成用例至少覆盖：候选班次与整份方案已选课冲突、候选班次与学生硬时间冲突、同课另一班次无已知冲突、候选时间未知，以及换班后旧结果不能沿用。D 独立确认预期并验证页面展示与 Java 判决一致；真实班次 unavailable 时，测试必须接受 UNKNOWN，而不是造出真实无冲突结论。
 
 D-02 固定 model/temperature/API/data/evaluator/budget；D-03 token/工具/时间；D-04 至少两个不同 case 的失败假设；D-05 白名单最小 patch；D-06 两轮候选判决、rejected 也保存。
 

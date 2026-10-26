@@ -85,4 +85,14 @@ python -m uvicorn agent_runtime.api.app:app --port 8000
 - `planning.openapi.json` 的 12 个端点全部有对应路由；走 Java 的端点未配置 `CP_JAVA_BASE_URL`
   时返回 `TOOL_UNAVAILABLE`(503)，不冒充无冲突。`listSessionRecords` 对应的 Java 列表工具
   （`listAcademicRecords`）尚待模块 B 在 `java.openapi.json` 补齐。
-- 预算默认值（8000/2000 tokens、6 tools、3 model calls、45 s）只写在 `Budget`，manifest 记录同一份，未做性能实测。页面看到答案级 `FAKE_MODEL` 时不得显示真实通过。
+- 会话内搜班次 `GET /api/v1/session-offerings` 和换一门课 `POST /api/v1/session-plans/replace`
+  已写进 `planning.openapi.json`（随 #28 合入），并有 `CourseOffering` 正反例。
+  它们调 `listOfferings` 与 `validatePlan`，但 **`POST /api/v1/plans/validate` 在 Java 侧
+  还没有实现**，所以真实环境下换班次一律失败（接口不存在）。方案没有班次快照时，
+  搜索返回 `200`、封套 `UNKNOWN`、`items` 为空，不会当成客户端把字段填错；替换仍不编造
+  `PlanValidation`。Java 不可用仍是 503，不会写成 `VALID`。
+- 预算默认值（8000/2000 tokens、6 tools、3 model calls、45 s）由环境变量组装成一份
+  `Budget`，manifest 记录同一份，未做性能实测。`harness/tool_policy.yaml` 的次数和
+  `context_policy.yaml` 的条数会实际限制**规划运行**（会话内换班次的搜索/替换不经过预算计数）。
+  超出 per-tool 上限是整次运行以 503 `BUDGET_EXCEEDED` 结束，不是跳过这一次调用；
+  事实裁剪目前是静默的，没有在 `unknowns` 里标记。页面看到答案级 `FAKE_MODEL` 时不得显示真实通过。

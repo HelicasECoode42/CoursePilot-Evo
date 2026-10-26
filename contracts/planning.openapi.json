@@ -1973,6 +1973,420 @@
           }
         }
       }
+    },
+    "/api/v1/session-offerings": {
+      "get": {
+        "operationId": "searchSessionOfferings",
+        "summary": "按课程查询本会话方案可替换的开课班次",
+        "description": "结果页搜索班次用。范围由会话 bearer 决定，previousPlanId 必须属于当前会话，否则 404。返回的是该课程在方案所用开课快照下的全部班次。封套 OK 且 items 为空数组，表示该快照里这门课没有可选班次，不是错误。方案没有班次快照时返回 HTTP 200、封套 UNKNOWN、items 为空，并在 issues 说明原因；这不是「确定没有班次」。\n\n这里返回的每个班次只是候选，**不构成核验结论**：候选自身无冲突不代表放进整份方案后无冲突，必须经 session-plans/replace 对整份方案重新核验。",
+        "parameters": [
+          {
+            "name": "previousPlanId",
+            "in": "query",
+            "required": true,
+            "description": "要替换的那份方案",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "courseCode",
+            "in": "query",
+            "required": true,
+            "description": "要替换掉的课程",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或业务 UNKNOWN。OK 且 items 为空表示该快照下这门课没有班次；UNKNOWN 且 items 为空表示没有班次快照，不能确认",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "previousPlanId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+                              "maxLength": 120
+                            },
+                            "courseCode": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+                              "maxLength": 120
+                            },
+                            "items": {
+                              "type": "array",
+                              "minItems": 0,
+                              "maxItems": 50,
+                              "items": {
+                                "$ref": "./schemas/domain.schema.json#/$defs/CourseOffering"
+                              }
+                            }
+                          },
+                          "required": [
+                            "previousPlanId",
+                            "courseCode",
+                            "items"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/session-plans/replace": {
+      "post": {
+        "operationId": "replaceSessionPlanItem",
+        "summary": "把方案里的一门课换成指定班次，并重新核验整份方案",
+        "description": "学生从搜索结果里明确选中一个班次。Python 校验方案归属、保留方案其余课程，只替换目标项，然后请求 Java 核验**整份**新方案与学生的硬时间条件。\n\n这是明确的用户输入，不是模型生成：不得由模型改写学生的选择，不得静默删除其他课程或硬条件。Java 的判决原样返回，INVALID 与 UNKNOWN 都不能被改写成有效。\n\n成功后产生新的 planId；旧方案保留以便学生返回对照。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "previousPlanId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+                    "maxLength": 120
+                  },
+                  "courseCode": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+                    "maxLength": 120
+                  },
+                  "selectedClassId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+                    "maxLength": 120
+                  }
+                },
+                "required": [
+                  "previousPlanId",
+                  "courseCode",
+                  "selectedClassId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "替换完成；verification 是对整份新方案的判决，可能是 VALID/INVALID/UNKNOWN",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "previousPlanId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+                              "maxLength": 120
+                            },
+                            "planId": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+                              "maxLength": 120
+                            },
+                            "items": {
+                              "type": "array",
+                              "minItems": 1,
+                              "maxItems": 30,
+                              "items": {
+                                "$ref": "./schemas/domain.schema.json#/$defs/PlanItem"
+                              }
+                            },
+                            "hardConstraints": {
+                              "type": "array",
+                              "minItems": 0,
+                              "maxItems": 30,
+                              "items": {
+                                "$ref": "./schemas/domain.schema.json#/$defs/Constraint"
+                              }
+                            },
+                            "verification": {
+                              "$ref": "./schemas/domain.schema.json#/$defs/PlanValidation"
+                            }
+                          },
+                          "required": [
+                            "previousPlanId",
+                            "planId",
+                            "items",
+                            "hardConstraints",
+                            "verification"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "对象不可见或不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等冲突/版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "限流",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "依赖不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "截止时间到达",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

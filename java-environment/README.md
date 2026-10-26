@@ -1,11 +1,14 @@
 # System 1：Java Environment / Truth / Verifier（部分实现）
 
-Java 21、Spring Boot、Apache POI、Spring Data JPA、MySQL/Flyway、JUnit 5。首版处理通过自动校验门槛的培养计划和 `SYNTHETIC` 班次 fixture，提供课程/要求/学分/冲突算法/计划核验/偏好指标和 typed Tool API；面向学生没有真实班次时返回 UNKNOWN。按 `../docs/trd/a-data.md`、`../docs/trd/b-verifier.md` 与[实施方案](../docs/10-java-import-and-rules.md)开发，未来浏览器采集边界见 `../docs/09-browser-adapter.md`。
+Java 21、Spring Boot（已引入 Web、Spring Data JPA、Validation；源码中尚无 `@Valid`/`@NotNull` 等校验注解在用）、H2 文件库（`./data`）、JUnit 5（经 spring-boot-starter-test）。尚未引入：Apache POI、MySQL 驱动、Flyway。首版**目标**是处理通过自动校验门槛的培养计划和 `SYNTHETIC` 班次 fixture，提供课程/要求/学分/冲突算法/计划核验/偏好指标和 typed Tool API；面向学生没有真实班次时返回 UNKNOWN。这是模块范围，不是当前能力——实际完成到哪一步见下一段。按 `../docs/trd/a-data.md`、`../docs/trd/b-verifier.md` 与[实施方案](../docs/10-java-import-and-rules.md)开发，未来浏览器采集边界见 `../docs/09-browser-adapter.md`。
 
-当前已实现：课程/班次查询、时间解析与冲突判断、学业核对
-（`POST /api/v1/requirements/audit`）、培养快照列表（`GET /api/v1/curriculum-snapshots`）、
-服务密钥与对象级授权。**尚未实现**：`POST /api/v1/plans/validate`、教师与课程评价实体、
-学业记录聚合实体（所以 `listAcademicRecords` 目前返回空 items 并以 UNKNOWN 说明缺口）、
+当前已实现：课程/班次查询（`GET /api/v1/courses`、`GET /api/v1/offerings`）、时间解析与冲突判断、学业核对
+（`POST /api/v1/requirements/audit`）、服务密钥与对象级授权。另有三个 `/api/v1/verification/*` 接口
+（`credit-gap`、`parse-time`、`conflicts`）已实现，但未在 `contracts/java.openapi.json` 中声明，属于契约外的既有接口。
+**尚未实现**：培养快照列表（`GET /api/v1/curriculum-snapshots`，实现在未合入的 PR #29 中）、
+`POST /api/v1/plans/validate`、教师与课程评价实体、
+学业记录聚合实体（`GET /api/v1/academic-records` 与 `…/{recordId}` 目前是桩，返回 UNKNOWN 说明缺口，
+空 items 不代表该主体没有学业记录；`POST /api/v1/academic-records` 写入也未实现）、
 各 `import` 端点、MySQL/Flyway（当前是 H2）。现有数据全是 `SYNTHETIC` 演示种子，
 没有真实教学计划或真实班次。
 
@@ -39,7 +42,7 @@ $env:COURSEPILOT_SERVICE_KEY = "local-dev-key"
 curl -H 'X-Service-Key: local-dev-key' \
      -H 'X-Subject-Id: S001' \
      -H 'X-Request-Id: req-1' \
-     http://127.0.0.1:8081/api/v1/curriculum-snapshots
+     http://127.0.0.1:8081/api/v1/courses
 ```
 
 ## 测试
@@ -54,6 +57,79 @@ curl -H 'X-Service-Key: local-dev-key' \
 
 ## 排查
 
+### `./mvnw` 起不来
+
+先跑这一条，它同时告出 Maven 和 JDK 两个版本（Windows 用 `.\mvnw.cmd -v`）：
+
+```bash
+./mvnw -v
+```
+
+JDK 24 以上会先刷几行 `WARNING:`，不影响构建，往下看 `Java version:` 那行就行。
+
+对照下面三种情况。这三种都跟 macOS / Windows 无关，别按操作系统找原因。
+
+**一、`release version 21 not supported`**
+
+`Java version:` 那行低于 21。pom 里是 `<java.version>21</java.version>`，JDK 17
+编不了。只看你默认的 JDK 是哪个：装一个 21 或更高的，再把 `JAVA_HOME` 指过去——
+`mvnw` 优先用 `JAVA_HOME`，没有才用 PATH 上的 `java`。
+
+```bash
+# macOS / Linux
+/usr/libexec/java_home -V                           # macOS：列出本机所有 JDK
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)    # 取 21 及以上里最新的那个
+./mvnw -v                                           # 确认 Java version 变了
+```
+
+```powershell
+# Windows PowerShell —— 路径换成你自己的安装位置
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-21"
+.\mvnw.cmd -v
+```
+
+上面两种写法都只在当前终端有效。长期生效：macOS / Linux 写进 `~/.zshrc`，
+Windows 在「系统属性 → 环境变量」里设。
+
+**二、卡在下载，或者报下载失败**
+
+本模块的 wrapper 是 `distributionType=only-script`（见
+`.mvn/wrapper/maven-wrapper.properties`），仓库里不放 Maven 本体，第一次运行要从
+`repo.maven.apache.org` 下 Maven 3.9.6。下成功后缓存在下面这个目录，之后不再联网：
+
+```bash
+ls ~/.m2/wrapper/dists/apache-maven-3.9.6
+```
+
+Windows 是 `%USERPROFILE%\.m2\wrapper\dists\apache-maven-3.9.6`。目录不存在就是
+还没下成功。到国外慢的话换个镜像源重跑一次：
+
+```bash
+MVNW_REPOURL=https://maven.aliyun.com/repository/public ./mvnw -v
+```
+
+这个变量只管 Maven 本体的下载。依赖包要换源得配 `~/.m2/settings.xml`，那是各人
+本机的事，不进仓库。
+
+**三、`Permission denied`**
+
+只会出现在 macOS / Linux，`mvnw` 丢了可执行位。main 上它是 100755，照常检出不会
+碰到；自己建的分支或在 Windows 上改过这个文件才可能出现：
+
+```bash
+git update-index --chmod=+x java-environment/mvnw
+```
+
+### 两条跟版本无关的
+
+测试报上下文启动失败，先看是不是有 `spring-boot:run` 没停——文件库被占住了，
+见上面「测试」一节。
+
+`/api/v1` 全部返回 503，是没设 `COURSEPILOT_SERVICE_KEY`，不是服务挂了，
+见上面「本地启动」一节。
+
+### H2 控制台
+
 H2 控制台默认关闭——它在同一端口上提供免认证的任意 SQL 执行，等于绕过对象级授权
 直接读整张成绩表。临时需要时用命令行参数打开，不要写回仓库：
 
@@ -62,5 +138,9 @@ COURSEPILOT_SERVICE_KEY=local-dev-key ./mvnw spring-boot:run \
   -Dspring-boot.run.jvmArguments="-Dspring.h2.console.enabled=true"
 ```
 
+### 日志
+
 日志只记录定位 ID、阶段、状态与耗时，不记密钥、成绩与请求体；用 `requestId` /
 `traceId` 对齐一次调用。
+
+A 模块的本地 `.xlsx` 培养计划导入器说明见 [`importer/README.md`](importer/README.md)。

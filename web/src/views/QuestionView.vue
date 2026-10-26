@@ -7,7 +7,7 @@ import {
   ref,
   watch,
 } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import { api } from "../api";
 import type { Motive, SnapshotSummary } from "../contracts";
 import { CLASS_PREFERENCE_OPTIONS } from "../domain/class-preferences";
@@ -477,13 +477,17 @@ async function openRecords() {
         你有希望保留的教师吗？
       </h1>
       <p class="lead">
-        教师必须和具体课程一起选择。当前页面没有课程教师选项，后续课程详情会提供可选资料。
+        教师必须和具体课程一起选择。你可以先继续，也可以现在去比较页按课程查看教师和历史评价。
       </p>
       <div class="handoff-note" role="note">
         <strong>这里不会替你指定教师</strong>
-        <span
-          >你可以先继续。之后有真实选项时，再分别标记“必须保留”或“优先考虑”。</span
-        >
+        <span>
+          比较页按课程列出教师、可用班次和历史评价，并标明每条证据的来源与可信程度。
+          在那里标记的“必须保留”和“优先考虑”会跟着这次规划一起提交。
+        </span>
+        <RouterLink class="handoff-link" to="/plan/teachers">
+          去比较课程与教师
+        </RouterLink>
       </div>
     </template>
 

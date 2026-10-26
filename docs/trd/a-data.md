@@ -1,6 +1,6 @@
 # A 模块：数据导入与资料整理（业务说明与 TRD）
 
-负责人：**JiangYiLin-Q121**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前是设计与合同，尚未实现；排期见[本期任务](../19-delivery-plan.md)。
+负责人：**JiangYiLin-Q121**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前仓库内尚无导入实现，XLSX 导入器在未合入的 PR #27（存在冲突，且需先撤下推进公开仓库的原始资料）；排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 
@@ -41,7 +41,7 @@ Java 保存数据并负责学分/时间判定；Agent 理解需求；网页收�
 | 责任 | JiangYiLin-Q121，模块 A |
 | 技术 | Java 21、Apache POI、JSON Schema、JUnit 5 |
 | 所有权 | java-environment/importer、输入模板、黄金样例、来源映射 |
-| 输入 | 本地 xls、受控已修/评价输入、插件静态字段研究 |
+| 输入 | 经核对的标准化 `.xlsx` 课程清单、受控已修/评价输入、插件静态字段研究 |
 | 输出 | Curriculum draft、ImportResult、ReviewImport、原始班次 fixture |
 | 当前状态 | 无导入服务；原始文件不进入公开仓库 |
 
@@ -73,7 +73,7 @@ flowchart LR
 
 ### 3. 接口与输入约束
 
-Java `POST /api/v1/curriculum-snapshots/import`，multipart fields= schemaVersion、trackId、file；Service Key+Admin Key。10 MiB 上限、仅 .xls、检查文件签名，不信任后缀。文件路径/输出目录由服务端生成，接口不能接受任意 sourcePath。
+Java `POST /api/v1/curriculum-snapshots/import`，multipart fields= schemaVersion、trackId、file；Service Key+Admin Key。10 MiB 上限、仅 `.xlsx`，同时校验 ZIP/OOXML 内容结构，不信任后缀。文件路径/输出目录由服务端生成，接口不能接受任意 sourcePath。A1 清单含 8 条并行专业路径；每次请求必须显式指定一个 ASCII 路径 ID，不把 8 张路径表当成前后阶段。路径与工作表映射见 [导入器说明](../../java-environment/importer/README.md)。
 
 `WorkbookReader.read(stream, trackId) -> CurriculumSnapshotDraft`；`RuleTemplateCompiler.compile(rawRule, templateVersion) -> CompiledRule|ImportIssue`；`ImportQualityGate.check(draft, baseline) -> publishable + issues`；`PublishPort.publish(draft, inputHash, importerVersion) -> ImportResult`。
 
@@ -123,6 +123,8 @@ sequenceDiagram
 ReviewImport Schema 为唯一格式：notes≤200、excerpt≤1500 字；sourceUrl 仅 http/https，teacherKey/termId 未知为 null。course/teacher/term 不能可靠对齐则 UNVERIFIED，不用文本相似度自动确认为教师事实。原文定位或有限摘要按授权范围保留。
 
 浏览器原始导出格式见旧 snapshot Schema，转换到 OfferingImport：termId、calendar、sourceKind、capturedAt、offerings。sourceKind 由输入说明来源，sourceValidation 由 B 的后台验证流程控制；上传者不能声明 VERIFIED。meetings/parseStatus 客户端值仅供对照，B 重新解析 raw。
+
+为结果工作区的班次搜索提供同一课程下可区分的开课项：至少保留 `courseCode/classId/teacherKey/meetingTextRaw/sourceRefId`，并带学期、来源类型、采集时间与解析状态。当前学期没有可核验资料时明确报告缺失，不得用历史班次伪装当前可选班次；历史与合成样例只用于标注对应类型的测试和演示。A 提供来源/字段匹配和异常样例，B 决定快照能否用于真实核验。
 
 ```mermaid
 sequenceDiagram

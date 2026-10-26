@@ -8,10 +8,11 @@ from typing import Annotated
 from fastapi import Depends, Header, Request
 
 from agent_runtime.adapters.tool_client import ToolClient
-from agent_runtime.api.errors import ForbiddenError, NotFoundError, UnauthorizedError
+from agent_runtime.api.errors import ForbiddenError, UnauthorizedError
 from agent_runtime.api.idempotency import IdempotencyStore
 from agent_runtime.api.session_store import SessionNotFound, SessionStore
 from agent_runtime.application.context import ExecutionContext
+from agent_runtime.application.plan_store import SessionPlanStore
 from agent_runtime.application.runner import PlanningRunner
 
 
@@ -21,6 +22,10 @@ def get_session_store(request: Request) -> SessionStore:
 
 def get_idempotency(request: Request) -> IdempotencyStore:
     return request.app.state.idempotency
+
+
+def get_plan_store(request: Request) -> SessionPlanStore:
+    return request.app.state.plan_store
 
 
 def get_tool_client(request: Request) -> ToolClient:
@@ -41,7 +46,9 @@ def require_subject(
     try:
         return store.resolve(token)
     except SessionNotFound as exc:
-        raise NotFoundError("会话不存在或已过期") from exc
+        # docs/04 section 1: an expired/unknown session is 401 (the client re-starts),
+        # not 404; 404 stays reserved for objects that do not belong to this session.
+        raise UnauthorizedError("会话不存在或已过期") from exc
 
 
 def require_admin(

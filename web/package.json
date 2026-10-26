@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:fixture": "vite --mode fixture --host 127.0.0.1",
     "build": "vite build",
     "lint": "eslint . && prettier --check src index.html *.json *.js *.ts",
     "typecheck": "vue-tsc --noEmit",

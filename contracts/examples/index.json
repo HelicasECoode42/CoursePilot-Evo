@@ -118,5 +118,25 @@
     "file": "a3-offering-unknown-time.json",
     "definition": "OfferingImport",
     "valid": true
+  },
+  {
+    "file": "course-offering.json",
+    "definition": "CourseOffering",
+    "valid": true
+  },
+  {
+    "file": "course-offering-unparsed.json",
+    "definition": "CourseOffering",
+    "valid": true
+  },
+  {
+    "file": "invalid-course-offering-unparsed-with-meetings.json",
+    "definition": "CourseOffering",
+    "valid": false
+  },
+  {
+    "file": "invalid-course-offering-unknown-parse-status.json",
+    "definition": "CourseOffering",
+    "valid": false
   }
 ]

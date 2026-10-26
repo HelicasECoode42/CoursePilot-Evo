@@ -34,8 +34,23 @@ class BudgetTracker:
     tool_calls: int = 0
     model_calls: int = 0
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    _per_tool: dict[str, int] = field(default_factory=dict)
 
-    def record_tool_call(self) -> None:
+    def record_tool_call(
+        self,
+        name: str | None = None,
+        tool_caps: dict[str, int] | None = None,
+    ) -> None:
+        """Count one tool call against the run budget and, when present, the harness cap.
+
+        ``tool_caps is None`` means the caller did not load a tool policy (unit
+        tests build a bare snapshot). An empty map means the policy file allows
+        no tools. A call past either cap is refused before the HTTP request.
+        """
+        if tool_caps is not None:
+            if not name or name not in tool_caps or self._per_tool.get(name, 0) >= tool_caps[name]:
+                raise BudgetExceeded(f"tool_policy 不允许再调用 {name or '未命名工具'}")
+            self._per_tool[name] = self._per_tool.get(name, 0) + 1
         self.tool_calls += 1
         if self.tool_calls > self.budget.max_tool_calls:
             raise BudgetExceeded("maxToolCalls exceeded")

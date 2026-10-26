@@ -23,6 +23,9 @@ const validateRequest = ajv.getSchema(
 /** Shared per-array cap in the contract; soft class items count against it too. */
 export const MAX_INTENT_ITEMS = 30;
 
+/** 契约对 pinnedTeacherCoursePairs 的上限，和上面那条是不同的数。 */
+export const MAX_TEACHER_PAIRS = 20;
+
 export interface PlanningContext {
   curriculumSnapshotId: string | null;
   curriculumSourceKind: SnapshotSummary["sourceKind"] | null;
@@ -162,7 +165,20 @@ export function buildPlanningRequest(
     ...scheduleSoft,
     ...collectClassSoftPreferences(draft.classPreferences),
   ];
+  // 课程+教师的选择来自 E3 的比较页。契约字段就是为这个留的，不要把它
+  // 塞进 softPreferences 或自造 dimension 名。
+  const teacherPairs = draft.teacherPicks.map((pick) => ({
+    courseCode: pick.courseCode,
+    teacherKey: pick.teacherKey,
+    mode: pick.mode,
+  }));
+
   const hints: string[] = [];
+  if (teacherPairs.length > MAX_TEACHER_PAIRS) {
+    hints.push(
+      `选定的课程与教师太多（${teacherPairs.length} 条，上限 ${MAX_TEACHER_PAIRS}）。请减少「必须保留」或「优先考虑」的教师。`,
+    );
+  }
   if (hardConstraints.length > MAX_INTENT_ITEMS) {
     hints.push(
       `必须避开的时段太零散（归一后 ${hardConstraints.length} 条，上限 ${MAX_INTENT_ITEMS}）。请改用整行或整列选择，或减少格子。`,
@@ -195,7 +211,7 @@ export function buildPlanningRequest(
       priorityOrder: [...draft.priorityOrder],
       hardConstraints,
       softPreferences,
-      pinnedTeacherCoursePairs: [],
+      pinnedTeacherCoursePairs: teacherPairs,
       interestTags: cleanTags(draft),
       careerDirectionIds: [],
     },

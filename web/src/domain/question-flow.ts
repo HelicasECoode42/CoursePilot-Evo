@@ -12,6 +12,19 @@ export type QuestionId =
   | "priorities"
   | "ready";
 
+/**
+ * 一个具体的「课程 + 教师」选择。
+ *
+ * 和契约的 TeacherPreference 同形（domain.schema.json）。E1 只收了
+ * teacherHandoffAccepted —— 那时还没有课程与教师资料，学生无法选到具体的人，
+ * 所以只是「知道了，之后再挑」。真正的选择在 E3 的比较页产生，落到这里。
+ */
+export interface TeacherPick {
+  courseCode: string;
+  teacherKey: string;
+  mode: "MUST" | "PREFER";
+}
+
 export interface PlanningDraft {
   motives: Motive[];
   classPreferences: ClassPreferenceId[];
@@ -21,6 +34,7 @@ export interface PlanningDraft {
   careerText: string;
   careerReviewed: boolean;
   teacherHandoffAccepted: boolean;
+  teacherPicks: TeacherPick[];
   mustSlots: string[];
   mustReviewed: boolean;
   preferSlots: string[];
@@ -38,6 +52,7 @@ export const emptyPlanningDraft = (): PlanningDraft => ({
   careerText: "",
   careerReviewed: false,
   teacherHandoffAccepted: false,
+  teacherPicks: [],
   mustSlots: [],
   mustReviewed: false,
   preferSlots: [],

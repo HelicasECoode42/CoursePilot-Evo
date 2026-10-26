@@ -13,7 +13,6 @@ from agent_runtime.adapters.model_client import (
     ModelAdapter,
     ModelInvalidOutput,
     ModelReply,
-    ModelTimeout,
 )
 from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient
@@ -33,6 +32,8 @@ from agent_runtime.api.schemas import (
 from agent_runtime.application.budget import Budget, BudgetTracker
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.ids import digest, new_id
+from agent_runtime.application.plan_replacement import ReusedVerification
+from agent_runtime.application.plan_store import PlanNotInSession, SavedPlan, SessionPlanStore
 from agent_runtime.application.run_manifest import RunIdentity, build_run_manifest
 from agent_runtime.domain.policies.answer_compiler import AnswerCompiler
 from agent_runtime.domain.policies.candidate_guard import CandidateGuard, KnownFacts
@@ -61,6 +62,7 @@ class PlanningRunner:
         result_repository: FileResultRepository | None = None,
         run_identity: RunIdentity | None = None,
         budget: Budget | None = None,
+        plan_store: SessionPlanStore | None = None,
     ) -> None:
         self._tools = tool_client
         self._harness = harness
@@ -72,6 +74,7 @@ class PlanningRunner:
         self._guard = candidate_guard or CandidateGuard()
         self._results = result_repository
         self._run_identity = run_identity or RunIdentity()
+        self._plans = plan_store
 
     def run(self, request: PlanningRequest, context: ExecutionContext) -> PlanningAnswer:
         task_id = new_id("task")
@@ -87,6 +90,7 @@ class PlanningRunner:
         started = datetime.now(UTC)
 
         trace.emit("USER_INPUT", input_digest=digest(request.promptText))
+        previous = self._previous_plan(request.previousPlanId, context.subject_id)
 
         resolved = self._intent_resolver.resolve(request)
         trace.emit("GOAL_EXTRACTED", input_digest=digest(request.promptText))
@@ -116,7 +120,7 @@ class PlanningRunner:
             return self._deliver(answer, trace, context)
 
         facts = self._collect_facts(request, audit, context, budget, trace)
-        reply = self._propose(request, context, facts, budget, trace)
+        reply = self._propose(request, context, facts, audit, budget, trace)
         usage = self._usage(budget, started)
 
         if reply.clarify is not None:
@@ -171,6 +175,8 @@ class PlanningRunner:
             ),
         )
         trace.emit("VERIFIER_RETURNED", output_ref=verdict.verifierResultId)
+        if previous is not None and verdict.verifierResultId == previous.verifier_result_id:
+            raise ReusedVerification
 
         recommendation = self._answer.recommend(
             plan_id=new_id("plan"),
@@ -182,6 +188,18 @@ class PlanningRunner:
             review_note_ids=[],
             verdict=verdict,
         )
+        if self._plans is not None:
+            self._plans.remember(
+                session_id=context.subject_id,
+                plan_id=recommendation.planId,
+                curriculum_snapshot_id=request.curriculumSnapshotId,
+                offering_snapshot_id=request.offeringSnapshotId,
+                academic_record_id=request.academicRecordId,
+                mode=request.mode,
+                items=recommendation.items,
+                hard_constraints=request.intent.hardConstraints,
+                verifier_result_id=verdict.verifierResultId,
+            )
         unknowns = self._with_fake_model_issue(list(verdict.unknownChecks) + list(audit.unknowns))
         answer = self._answer.recommendations(
             task_id=task_id,
@@ -192,6 +210,17 @@ class PlanningRunner:
             unknowns=unknowns,
         )
         return self._deliver(answer, trace, context)
+
+    def _previous_plan(self, plan_id: str | None, session_id: str) -> SavedPlan | None:
+        """docs/04: previousPlanId must belong to this session. Absent means a new plan."""
+        if plan_id is None:
+            return None
+        if self._plans is None:
+            raise PlanNotInSession
+        saved = self._plans.get(session_id, plan_id)
+        if saved is None:
+            raise PlanNotInSession
+        return saved
 
     def _collect_facts(
         self,
@@ -237,49 +266,51 @@ class PlanningRunner:
         request: PlanningRequest,
         context: ExecutionContext,
         facts: KnownFacts,
+        audit: AuditResult,
         budget: BudgetTracker,
         trace: TracePort,
     ) -> ModelReply | None:
+        limits = self._harness.context
+        payload: dict[str, object] = {
+            "courseCodes": sorted(facts.course_codes)[: limits.max_course_facts],
+            "teacherKeys": sorted(facts.teacher_keys)[: limits.max_course_facts],
+            "classIds": sorted(facts.class_ids)[: limits.max_offerings],
+        }
+        if limits.include_unknowns:
+            payload["unknowns"] = [
+                issue.code for issue in audit.unknowns[: limits.max_review_notes]
+            ]
+        instructions = "只从 AVAILABLE_FACTS 里的 id 提候选，最多 3 条，禁止编造。"
+        strategy = self._harness.strategy_text.strip()
+        if strategy:
+            instructions = f"{strategy}\n\n{instructions}"
         messages = [
-            {
-                "role": "system",
-                "content": "只从 AVAILABLE_FACTS 里的 id 提候选，最多 3 条，禁止编造。",
-            },
+            {"role": "system", "content": instructions},
             {"role": "user", "content": request.promptText},
             {
                 "role": "user",
-                "content": FACTS_MESSAGE_PREFIX
-                + json.dumps(
-                    {
-                        "courseCodes": sorted(facts.course_codes),
-                        "teacherKeys": sorted(facts.teacher_keys),
-                        "classIds": sorted(facts.class_ids),
-                    },
-                    ensure_ascii=False,
-                ),
+                "content": FACTS_MESSAGE_PREFIX + json.dumps(payload, ensure_ascii=False),
             },
         ]
-        last_error: ModelInvalidOutput | None = None
-        for _attempt in range(2):
-            budget.record_model_call()
-            budget.check_deadline()
-            try:
-                reply = self._model.generate(context=context, messages=messages, tool_schemas=[])
-            except ModelTimeout:
-                raise
-            except ModelInvalidOutput as exc:
-                last_error = exc
-                continue
-            budget.record_tokens(reply.input_tokens, reply.output_tokens)
-            if reply.clarify is not None:
-                return reply
-            # An empty candidate list is missing data, not a broken model payload.
-            return ModelReply(
-                items=list(reply.items or []),
-                input_tokens=reply.input_tokens,
-                output_tokens=reply.output_tokens,
-            )
-        raise last_error or ModelInvalidOutput("模型输出无法解析为候选，已停止修复")
+        # docs/04 section 3: no hidden automatic retry or repair. A malformed reply is a
+        # terminal failure; re-running is an explicit user action with a new Idempotency-Key.
+        budget.record_model_call()
+        budget.check_deadline()
+        try:
+            reply = self._model.generate(context=context, messages=messages, tool_schemas=[])
+        except ModelInvalidOutput as exc:
+            # The failed call still consumed provider tokens; charge them before failing.
+            budget.record_tokens(exc.input_tokens, exc.output_tokens)
+            raise
+        budget.record_tokens(reply.input_tokens, reply.output_tokens)
+        if reply.clarify is not None:
+            return reply
+        # An empty candidate list is missing data, not a broken model payload.
+        return ModelReply(
+            items=list(reply.items or []),
+            input_tokens=reply.input_tokens,
+            output_tokens=reply.output_tokens,
+        )
 
     def _call_tool(
         self,
@@ -291,7 +322,7 @@ class PlanningRunner:
         *,
         params: dict[str, object] | None = None,
     ) -> Any:
-        budget.record_tool_call()
+        budget.record_tool_call(name, self._harness.tool_caps)
         budget.check_deadline()
         trace.emit("TOOL_CALLED", tool_name=name)
         started = datetime.now(UTC)

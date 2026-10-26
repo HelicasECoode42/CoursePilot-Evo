@@ -1,6 +1,6 @@
 # CoursePilot-Evo：开发 Agent 规范
 
-当前是文档/接口契约、仓库检查工具和独立 HTML 示例；业务服务尚未实现。先读 README、docs/15-team-baseline-and-batches.md、docs/16-engineering-and-debugging.md、contracts/README.md、docs/04-infrastructure-workflow.md，再读负责模块 TRD。代码与现状如实报告，不把计划/fixture 写成真实能力。
+当前除文档/接口契约、仓库检查工具和独立 HTML 示例外，Java 核验服务、Python 网关与 Vue 页面都已有可运行实现，但只有学业核对一条链路实测打通；各模块完成度见各自 TRD。先读 README、docs/15-team-baseline-and-batches.md、docs/16-engineering-and-debugging.md、contracts/README.md、docs/04-infrastructure-workflow.md，再读负责模块 TRD。代码与现状如实报告，不把计划/fixture 写成真实能力。
 
 ## 所有权和调用
 

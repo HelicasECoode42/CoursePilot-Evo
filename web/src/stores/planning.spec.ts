@@ -63,6 +63,22 @@ function fakeClient(
     submitPlanning: vi.fn(async () => {
       throw new ApiFailure("stub 未实现规划", "invalid_response");
     }),
+    // E4 方法在这份 store 测试里用不到，统一给出明确的未实现错误。
+    searchSessionOfferings: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现班次搜索", "invalid_response");
+    }),
+    replaceSessionPlanItem: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现换班次", "invalid_response");
+    }),
+    listTeacherCourseOptions: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现教师查询", "invalid_response");
+    }),
+    searchReviews: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现评价检索", "invalid_response");
+    }),
+    getRunReport: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现运行报告", "invalid_response");
+    }),
     ...overrides,
   };
 }
@@ -898,6 +914,163 @@ describe("planning session store", () => {
       expect(store.records).toEqual([]);
       expect(store.selectedRecordId).toBeNull();
       expect(store.audit).toBeNull();
+    });
+
+    describe("record save, selection and stale results", () => {
+      const retryCourses: CompletedCourse[] = [
+        {
+          courseCode: "CS101",
+          earnedCredits: 4,
+          outcome: "PASSED",
+          completedTerm: "2024-2025-1",
+        },
+      ];
+      const otherRecord: AcademicRecord = {
+        academicRecordId: "record-2",
+        revision: 1,
+        curriculumSnapshotId: curriculum.snapshotId,
+        completedCourses: [],
+        transcriptComplete: false,
+        sourceKind: "USER_IMPORT",
+        createdAt: "2026-10-02T00:00:00Z",
+      };
+      const auditResult: AuditResult = {
+        curriculumSnapshotId: curriculum.snapshotId,
+        academicRecordId: "record-1",
+        recordRevision: 1,
+        transcriptComplete: false,
+        requirements: [],
+        suggestedCourseCodes: [],
+        unknowns: [],
+      };
+
+      it("does not leave the record list stuck on loading when a reload is cancelled", async () => {
+        // selectRecord 只作废在途请求、自己不发请求。被中止的 loadRecords 在 catch 里
+        // 直接 return，不会再动 recordsStatus，所以作废时必须把它落回安定值。
+        const second = deferred<{ items: AcademicRecord[] }>();
+        const listSessionRecords = vi
+          .fn()
+          .mockResolvedValueOnce({ items: [savedRecord] })
+          .mockReturnValueOnce(second.promise);
+        const { store } = readyStore({ listSessionRecords });
+
+        await store.loadRecords();
+        expect(store.recordsStatus).toBe("ready");
+
+        const reload = store.loadRecords();
+        expect(store.recordsStatus).toBe("loading");
+
+        store.selectRecord(savedRecord.academicRecordId);
+        expect(store.recordsStatus).not.toBe("loading");
+
+        second.resolve({ items: [savedRecord] });
+        await reload;
+        expect(store.recordsStatus).not.toBe("loading");
+      });
+
+      it("ignores a second save while the first one is still in flight", async () => {
+        const pending = deferred<AcademicRecord>();
+        const saveSessionRecord = vi.fn(() => pending.promise);
+        const { store } = readyStore({ saveSessionRecord });
+
+        const first = store.saveRecord(retryCourses, false);
+        await expect(store.saveRecord(retryCourses, false)).resolves.toBe(
+          false,
+        );
+        expect(saveSessionRecord).toHaveBeenCalledTimes(1);
+
+        pending.resolve(savedRecord);
+        await expect(first).resolves.toBe(true);
+        expect(store.records).toHaveLength(1);
+      });
+
+      it("reuses the save key when retrying the same courses and rotates it after an edit", async () => {
+        const saveSessionRecord = vi
+          .fn<
+            (input: AcademicRecordInput, key: string) => Promise<AcademicRecord>
+          >()
+          .mockRejectedValueOnce(
+            new ApiFailure("请求超时，请重试。", "timeout"),
+          )
+          .mockResolvedValue(savedRecord);
+        const { store } = readyStore({ saveSessionRecord });
+
+        await expect(store.saveRecord(retryCourses, false)).resolves.toBe(
+          false,
+        );
+        await expect(store.saveRecord(retryCourses, false)).resolves.toBe(true);
+        const edited = [
+          ...retryCourses,
+          {
+            courseCode: "MATH101",
+            earnedCredits: 3,
+            outcome: "PASSED" as const,
+            completedTerm: "2024-2025-1",
+          },
+        ];
+        await expect(store.saveRecord(edited, false)).resolves.toBe(true);
+
+        const keys = saveSessionRecord.mock.calls.map(([, key]) => key);
+        expect(keys).toHaveLength(3);
+        expect(keys[1]).toBe(keys[0]);
+        expect(keys[2]).not.toBe(keys[0]);
+      });
+
+      it("drops an audit that was in flight when the student switches records", async () => {
+        const pending = deferred<AuditResult>();
+        const { store } = readyStore({
+          listSessionRecords: vi.fn(async () => ({
+            items: [savedRecord, otherRecord],
+          })),
+          auditRequirements: vi.fn(() => pending.promise),
+        });
+        await store.loadRecords();
+
+        const inFlight = store.runAudit();
+        store.selectRecord("record-2");
+        pending.resolve(auditResult);
+        await inFlight;
+
+        expect(store.selectedRecordId).toBe("record-2");
+        expect(store.audit).toBeNull();
+        expect(store.auditStatus).toBe("idle");
+      });
+
+      it("clears the previous audit when a saved record becomes the selected one", async () => {
+        const { store } = readyStore({
+          listSessionRecords: vi.fn(async () => ({ items: [savedRecord] })),
+          auditRequirements: vi.fn(async () => auditResult),
+          saveSessionRecord: vi.fn(async () => otherRecord),
+        });
+        await store.loadRecords();
+        await store.runAudit();
+        expect(store.auditStatus).toBe("ready");
+
+        await expect(store.saveRecord(retryCourses, false)).resolves.toBe(true);
+
+        expect(store.selectedRecordId).toBe("record-2");
+        expect(store.audit).toBeNull();
+        expect(store.auditStatus).toBe("idle");
+      });
+
+      it("clears a stale audit when reloading selects a different first record", async () => {
+        const { store } = readyStore({
+          listSessionRecords: vi
+            .fn()
+            .mockResolvedValueOnce({ items: [savedRecord] })
+            .mockResolvedValueOnce({ items: [otherRecord] }),
+          auditRequirements: vi.fn(async () => auditResult),
+        });
+        await store.loadRecords();
+        await store.runAudit();
+        expect(store.audit).not.toBeNull();
+
+        await store.loadRecords();
+
+        expect(store.selectedRecordId).toBe("record-2");
+        expect(store.audit).toBeNull();
+        expect(store.auditStatus).toBe("idle");
+      });
     });
   });
 });

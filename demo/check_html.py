@@ -11,7 +11,9 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEMO = ROOT / "demo" / "coursepilot-guided-demo.html"
+# 每一份独立 HTML 原型都要检查。只钉住一个文件名的话，后加的原型不会
+# 被任何检查覆盖，坏了也没人知道。
+DEMOS = sorted((ROOT / "demo").glob("*.html"))
 VOID_ELEMENTS = {
     "area",
     "base",
@@ -84,14 +86,25 @@ class StructureChecker(HTMLParser):
 
 
 def main() -> int:
+    if not DEMOS:
+        print("FAIL: demo/ 下没有找到任何 .html")
+        return 1
+    return max(check(demo) for demo in DEMOS)
+
+
+def check(demo: Path) -> int:
     parser = StructureChecker()
-    parser.feed(DEMO.read_text(encoding="utf-8"))
+    parser.feed(demo.read_text(encoding="utf-8"))
     parser.close()
     if parser.stack:
         parser.errors.append("unclosed elements: " + ", ".join(parser.stack))
     if parser.inline_scripts != 1:
         parser.errors.append(f"expected one inline script, found {parser.inline_scripts}")
-    if "main" not in parser.ids or "screen" not in parser.ids:
+    # 这两个 ID 是引导式原型的骨架，别的原型有自己的结构，所以只对它要求。
+    # 通用检查（标签闭合、ID 唯一、内联脚本语法）对 demo/ 下每份都生效。
+    if demo.name == "coursepilot-guided-demo.html" and (
+        "main" not in parser.ids or "screen" not in parser.ids
+    ):
         parser.errors.append("main content and question screen IDs are required")
     node = shutil.which("node")
     if not node:
@@ -107,10 +120,10 @@ def main() -> int:
             parser.errors.append("inline script syntax check failed: " + result.stderr.strip())
     if parser.errors:
         for error in parser.errors:
-            print(f"FAIL: {error}")
+            print(f"FAIL: {demo.relative_to(ROOT)}: {error}")
         return 1
     print(
-        f"PASS: {DEMO.relative_to(ROOT)} has balanced HTML, unique IDs, and valid inline script syntax"
+        f"PASS: {demo.relative_to(ROOT)} has balanced HTML, unique IDs, and valid inline script syntax"
     )
     return 0
 

@@ -3,11 +3,12 @@
 每一步断言三样东西：HTTP 状态码、Envelope 结构（errors.py 约定每个响应都是同一个信封）、
 该步的业务字段。任一步 FAIL 或没就绪一律非零退出，缺服务不允许 SKIP 算过。
 
-现在能真跑到哪一步（2026-10-15 实测的依赖）
+现在能真跑到哪一步（以代码为准）
   Python（agent-runtime）与 Web 已有实现，可以真发请求。
-  Java 与 MySQL 未落地（java-environment 只有 README），所以走 Java 的两步
-  （record 的 createAcademicRecord、audit）只会拿到 503 TOOL_UNAVAILABLE —— 这一档判 DEGRADED，
-  整轮不算通过，并在输出里点名缺谁。
+  Java 已有实现（java-environment 有 33 个 .java 文件、5 个测试类，本机记录 54 个测试全过），
+  其中 POST /api/v1/requirements/audit 已实现；但 POST /api/v1/academic-records 在 Java 侧没有，
+  所以 record 的 createAcademicRecord 这一步仍会失败。MySQL 未落地（当前是 H2）。
+  受控缺口（如 Java 接线缺失）判 DEGRADED，整轮不算通过，并在输出里点名缺谁。
 
 用法
   python integration/check_stack.py --plan     # 只判定与打印计划，不连服务；退出码与真跑一致

@@ -1,11 +1,14 @@
 package com.coursepilot.verifier.application;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.coursepilot.verifier.domain.ConflictResult;
 import com.coursepilot.verifier.persistence.entity.CourseOffering;
 import com.coursepilot.verifier.persistence.repo.CourseOfferingRepository;
+import com.coursepilot.verifier.web.CatalogAssembler;
+import com.coursepilot.verifier.web.dto.CatalogDtos;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,6 +33,7 @@ class ConflictCheckerServiceTest {
 
   @Autowired private ConflictChecker checker;
   @Autowired private CourseOfferingRepository offeringRepo;
+  @Autowired private CatalogAssembler catalog;
 
   private void save(String id, String courseCode, String time) {
     offeringRepo.save(new CourseOffering(id, courseCode, "某老师", time, "SYNTHETIC"));
@@ -99,5 +103,23 @@ class ConflictCheckerServiceTest {
 
     assertFalse(result.hasKnownConflict());
     assertTrue(result.hasUnknownParticipant(), "必须标记存在未知参与者");
+  }
+
+  @Test
+  @DisplayName("超出契约上限的时间：目录与冲突判定结论一致，都是未知，不拿它判冲突")
+  void outOfContractTimeIsUnknownInBothViews() {
+    // 回归：目录说 INVALID，冲突判定却原先把节次 70 当有效时间，和 O_A 判成已知冲突。
+    save("O_BIG", "BIG", "周一第1-70节{第1-16周}");
+    save("O_A", "A", "周一第1-2节{第1-16周}");   // 与 O_BIG 在第 1-2 节时间上相交
+
+    CatalogDtos.CourseOffering catalogView =
+        catalog.toOffering(offeringRepo.findById("O_BIG").orElseThrow());
+    assertEquals(CatalogDtos.ParseStatus.INVALID, catalogView.parseStatus());
+    assertTrue(catalogView.meetings().isEmpty());
+
+    ConflictResult result = checker.check(List.of("O_BIG", "O_A"));
+    assertFalse(result.hasKnownConflict(),
+        "超限班次不能当有效时间判冲突，实际：" + result.getReason());
+    assertTrue(result.hasUnknownParticipant(), result.getReason());
   }
 }
