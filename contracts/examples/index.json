@@ -80,6 +80,21 @@
     "valid": true
   },
   {
+    "file": "offering-import-synthetic-conflict.json",
+    "definition": "OfferingImport",
+    "valid": true
+  },
+  {
+    "file": "offering-import-synthetic-no-conflict.json",
+    "definition": "OfferingImport",
+    "valid": true
+  },
+  {
+    "file": "offering-import-synthetic-unknown-time.json",
+    "definition": "OfferingImport",
+    "valid": true
+  },
+  {
     "file": "invalid-course-offering-unparsed-with-meetings.json",
     "definition": "CourseOffering",
     "valid": false
