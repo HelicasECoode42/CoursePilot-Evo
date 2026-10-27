@@ -95,11 +95,6 @@
     "valid": false
   },
   {
-    "file": "a3-review-import-synthetic.json",
-    "definition": "ReviewImport",
-    "valid": true
-  },
-  {
     "file": "a3-offering-same-course-multiple-class-ids.json",
     "definition": "OfferingImport",
     "valid": true
