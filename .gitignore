@@ -30,3 +30,8 @@ docs/team/*filled*
 
 # Local editor/session scratch
 .claude/
+
+# 课程报告与演讲材料：交给学校的东西，不是代码，不进公开仓库。
+# 不加这条，一个 git add . 就会把报告、讲稿和截图推上去。
+report-E/
+*.docx

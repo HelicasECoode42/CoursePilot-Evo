@@ -103,12 +103,19 @@ jobs:
           python integration/start_stack.py --stop || true
           exit $code
 
+      # 本仓库是公开仓库：Actions 工件对任何人可下载。所以这里只留排查必需的内容，
+      # 并排除会外泄本机信息的文件；保留期也收短。真实学生数据不得在 CI 里跑，
+      # CI 只用 SYNTHETIC 种子（AGENTS.md：REAL 不能用 synthetic，反之同样不许混）。
       - name: 证据留存（五段式失败块、服务日志与截图）
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: stack-evidence
-          path: runs/stack/
+          # pids.json 里是 runner 上的绝对路径与 argv，排查用不到，却会暴露目录结构。
+          path: |
+            runs/stack/
+            !runs/stack/pids.json
+          retention-days: 7
           if-no-files-found: warn
 
       - name: 门禁：任一检查未通过即失败

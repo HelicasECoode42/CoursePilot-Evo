@@ -1,0 +1,29 @@
+{
+  "caseId": "SYN-002",
+  "provenance": "SYNTHETIC_FICTION",
+  "kind": "planning-request",
+  "description": "虚构输入缺少目标时，检查 PlanningRunner 返回澄清问题。",
+  "request": {
+    "schemaVersion": "1.0",
+    "curriculumSnapshotId": "PLAN_CS_2025",
+    "offeringSnapshotId": null,
+    "academicRecordId": "SYN-STUDENT-001",
+    "previousPlanId": null,
+    "mode": "SIMULATION",
+    "promptText": "请帮我规划课程。",
+    "intent": {
+      "motives": [],
+      "priorityOrder": [],
+      "hardConstraints": [],
+      "softPreferences": [],
+      "pinnedTeacherCoursePairs": [],
+      "interestTags": [],
+      "careerDirectionIds": []
+    }
+  },
+  "syntheticExpectations": {
+    "decision": "CLARIFY",
+    "verifierVerdict": null,
+    "requiredUnknownCodes": []
+  }
+}

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_stack import Chain, classify_planning, readiness, step_sessions
+from check_stack import Chain, classify_planning, readiness, step_record, step_sessions
 from stack_checks import (
     BLOCKED,
     FAIL,
@@ -53,8 +53,8 @@ def case_java_unwired(chain: Chain) -> StepResult:
     example = load_contract_example("academic-record.json")
     body = {
         "schemaVersion": "1.0",
-        "curriculumSnapshotId": example["curriculumSnapshotId"],
-        "academicRecordId": example["academicRecordId"],
+        "curriculumSnapshotId": chain.curriculum_id,
+        "academicRecordId": chain.record_id or example["academicRecordId"],
     }
     if chain.java_ready:
         expect = "200 + Envelope(OK, AuditResult)（Java 已就绪，走正常分支）"
@@ -74,6 +74,9 @@ def case_no_time_claim(chain: Chain) -> StepResult:
     url = chain.api + "/api/v1/planning"
     headers = chain.headers(request_id, auth=True, idempotency=request_id)
     body = load_contract_example("planning-request.json")
+    body["curriculumSnapshotId"] = chain.curriculum_id
+    if chain.record_id:
+        body["academicRecordId"] = chain.record_id
     body["offeringSnapshotId"] = None
     expect = "无班次快照：不得断言时间无冲突（给推荐时 verification.scope 不得是 REAL_TIMETABLE / SIMULATION）"
     response = chain.transport.request("POST", url, headers, body)
@@ -115,14 +118,16 @@ def case_bad_input(chain: Chain) -> StepResult:
     url = chain.api + "/api/v1/planning"
     headers = chain.headers(request_id, auth=True, idempotency=request_id)
     body = load_contract_example("invalid-block-day-with-section.json")
-    expect = "422 + Envelope(ERROR, issues 非空)：违反契约的请求必须被拒绝，不得 200"
+    expect = "422 + Envelope(INVALID_INPUT 或 ERROR, issues 非空)：违反契约的请求必须被拒绝，不得 200"
     response = chain.transport.request("POST", url, headers, body)
     result = evaluate(
         step,
         request_id,
         expect,
         response,
-        [Attempt("422 契约校验拒绝", 422, "ERROR")],
+        # domain.schema.json 的 Envelope.status 枚举里 INVALID_INPUT 是合法值，
+        # 422 用它比用笼统的 ERROR 更准；两者都接受，不把合规实现判成失败。
+        [Attempt("422 契约校验拒绝", 422, "INVALID_INPUT"), Attempt("422 契约校验拒绝", 422, "ERROR")],
         repro_curl("POST", url, headers, body),
     )
     if result.verdict == PASS and not response.issue_codes:
@@ -226,6 +231,11 @@ def run_smoke(plan_only: bool, transport: Any = None) -> tuple[list[StepResult],
             states,
             None,
         )
+    # 两条用例要带 academicRecordId。契约样例里的 record:demo 不属于本会话，
+    # Java 的对象级授权会正确地返回 404 NOT_VISIBLE —— 那是授权在干活，不是被测行为。
+    # 所以先按主链路的方式补一条本会话自己的记录；补不上就退回样例 id，不让冒烟整轮崩掉。
+    if chain.java_ready:
+        step_record(chain)
     results = [CASES[case](chain) for case in CASE_ORDER]
     return results, states, None
 

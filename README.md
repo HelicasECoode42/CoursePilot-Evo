@@ -2,7 +2,7 @@
 
 一个帮助学生核对学业进度、了解课程与教师、表达选课偏好并比较方案的学业规划项目。页面一次问一个问题，支持高绩点、工作量、签到、兴趣、指定教师、职业与时间等组合目标。课程事实和时间由 Java 核验，Agent 负责理解、规划与解释。
 
-**当前状态：三端都有可运行实现，但只有「学业核对」这一条链路实测打通。** Java 核验服务提供课程/班次查询、学业核对、时间解析与冲突判断，带服务密钥与对象级授权；Python 网关提供会话、学业记录、培养方案与规划端点，并通过 typed HTTP 调用 Java；Vue 页面完成目标引导（E1）与学业资料核对、规划结果展示（E2）。已实测：Python 的 typed client 打真实 Java，`auditRequirements` 端到端返回真实核对结果。**尚未打通**：方案核验 `plans/validate` 未实现；`listCourses`/`listOfferings` 出参尚不合契约；培养计划导入（A）仍在 PR 未合入；没有任何真实班次数据；模型默认走受控假实现，未配置密钥时不调真实模型；RSI 指标未实现。显著标识的 fixture 模式仅演示流程，fixture 不算真实接入。五人协作，一个计算机培养路径先行；第八周提交。
+**当前状态：虚构资料下的学生主流程已完成三端联调。** 可以在网页填写目标和学业记录，由 Python 调用 Java 核对并展示规划结果；指定教师与时间条件的澄清回填也已验证。培养计划可通过本地受限接口导入虚构 XLSX。当前模型默认使用受控假实现，真实培养计划的独立基线、真实班次和模型质量评测仍待完成。运行方法见 [Web 说明](web/README.md)。
 
 ## 先看懂项目，再开始开发
 
@@ -37,17 +37,17 @@ flowchart LR
   W[Vue Web 一次一问] --> P[Python API / Planning Runner]
   H[可版本化 Harness] --> P
   P --> J[Java typed Tools / Verifier]
-  J --> DB[(MySQL / 不可变快照 / 来源)]
+  J --> DB[(H2 / 快照 / 来源)]
   B[隔离 Benchmark] --> P
   B --> E[失败归因 / 最小 patch / held-out]
   E --> H
 ```
 
 - `contracts/`：字段真源、OpenAPI、JSON Schema、正反例。
-- `java-environment/`：A 导入 + B 数据和唯一规则核验，当前骨架。
-- `agent-runtime/`：C 唯一生产/评测 Runner 与运行 Harness，当前骨架。
-- `benchmark/`、`evo-harness/`：D 任务、隔离评分、失败归因与晋级，当前骨架。
-- `web/`：E1 学生目标引导 Vue 页面，按相关目标分支收集课程考核偏好，在同一时间页分别填写必须避开与尽量避开的时段，并显式确认目标优先级、核对学业资料缺口；尚未实现学业记录录入、真实规划提交、推荐结果页和教师详情。`demo/` 是需要用户明确选择虚构资料后才能查看候选的独立交互示例。
+- `java-environment/`：培养计划导入、学业核对、课程和班次查询及方案核验。
+- `agent-runtime/`：唯一 Planning Runner、Python 网关和运行 Harness。
+- `benchmark/`、`evo-harness/`：案例、合成运行检查及待完成的评测和策略改进。
+- `web/`：Vue 学生页面，包含目标引导、学业资料、教师比较和规划结果；`demo/` 为独立 HTML 示例。
 - `docs/`：PRD/TRD、开发规范、学习资料与设计图。
 - `scripts/`、`.github/`：契约、自查、模块检查和 PR/CI 规范。
 
@@ -75,7 +75,7 @@ python scripts/check_modules.py
 
 `requirements-dev.txt` 由 `uv export --only-group dev --no-hashes --no-emit-project -o requirements-dev.txt` 从锁文件生成，供 CI 和不用 uv 的人使用；改依赖请改 `pyproject.toml` 后重跑 `uv lock` 和该导出命令，不要手工编辑这两个文件。
 
-可执行服务还没建立，当前没有“一键启动完整系统”的承诺。各模块首次加代码时须同时加 manifest、固定依赖、测试入口与启动说明；模块检查明确输出尚未实现模块的 SKIP。CI 通过不代表功能全部实现或安全已经保证。
+各模块有独立测试入口；整套服务的启动和模拟模式见 [Web README](web/README.md)。
 
 运行前端 E1：
 
@@ -85,11 +85,11 @@ npm ci
 npm run dev
 ```
 
-真实模式默认连接 `http://127.0.0.1:8000`；服务地址可用 `VITE_API_BASE_URL` 配置。显式演示模式用 `VITE_COURSEPILOT_MODE=fixture npm run dev`，所有示例数据均为虚构。版本、脚本和详细限制见 [Web README](web/README.md)。
+真实模式默认连接 `http://127.0.0.1:8000`；服务地址可用 `VITE_API_BASE_URL` 配置。`VITE_COURSEPILOT_MODE=simulation` 使用虚构资料连接本地服务，`fixture` 使用固定页面示例。版本、脚本和限制见 [Web README](web/README.md)。
 
 ## 数据与信任边界
 
-培养计划由本地 `.xls` 输入导入，原文件不公开提交。班次已有 [SHUOSC 公开历史数据](docs/09-browser-adapter.md)，以及插件静态研究和模拟 fixture；历史数据尚未接入，当前学期教务快照仍未验证。真实时间缺失、解析未知或来源未核验时，必须显示 UNKNOWN；历史/模拟核验不能称当前课表已有效。评价注明教师/修读学期/来源，不能保证给分、签到或当期开课。
+培养计划导入器接收标准化 `.xlsx`；当前发布入口用于本地虚构工作簿，原始文件不公开提交。班次已有 [SHUOSC 公开历史数据](docs/09-browser-adapter.md)，当前学期教务快照仍未验证。真实时间缺失、解析未知或来源未核验时显示 UNKNOWN；评价注明教师、修读学期和来源。
 
 学生在官方系统自行选课；项目不持有教务凭据、不执行选课提交。公开仓库排除原始资料、个人成绩、密钥、私有 Trace 和独立验收答案。具体代码与日志要求见工程规范。
 
