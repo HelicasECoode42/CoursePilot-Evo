@@ -6,7 +6,9 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 @Configuration
 public class SeedData {
@@ -16,7 +18,8 @@ public class SeedData {
                            RequirementRepository reqRepo,
                            AcademicRecordRepository recordRepo,
                            CourseOfferingRepository offeringRepo,
-                           CurriculumSnapshotRepository snapshotRepo) {
+                           CurriculumSnapshotRepository snapshotRepo,
+                           TranscriptRepository transcriptRepo) {
         return args -> {
             // 快照种子用自己的「表为空才写」判断，不能放在课程种子的早退之后：
             // 文件库（ddl-auto=update）里课程表已非空时，快照表若仍为空，
@@ -49,6 +52,23 @@ public class SeedData {
                     CurriculumSnapshot.SourceKind.SYNTHETIC,
                     CurriculumSnapshot.SourceValidation.SYNTHETIC, "2025-FALL",
                     Instant.parse("2025-08-15T00:00:00Z")));
+            }
+
+            // 学业记录聚合的演示种子：主体 S001，合成数据，记录未声明完整。
+            // 只在该主体没有记录时写入，文件库重启时不会重复。
+            if (transcriptRepo.findByStudentId("S001").isEmpty()) {
+                Transcript t = new Transcript("S001");
+                t.revise("PLAN_CS_2025", false, Transcript.SourceKind.SYNTHETIC,
+                    Instant.parse("2025-09-01T00:00:00Z"), List.of(
+                        new TranscriptCourse("CS101", 1, new BigDecimal("3.00"),
+                            TranscriptCourse.Outcome.PASSED, "2024-2025-1"),
+                        new TranscriptCourse("CS101", 2, new BigDecimal("3.00"),
+                            TranscriptCourse.Outcome.PASSED, "2024-2025-2"), // 重修
+                        new TranscriptCourse("CS102", 1, new BigDecimal("4.00"),
+                            TranscriptCourse.Outcome.PASSED, "2024-2025-1"),
+                        new TranscriptCourse("GE101", 1, new BigDecimal("2.00"),
+                            TranscriptCourse.Outcome.PASSED, "2024-2025-2")));
+                transcriptRepo.save(t);
             }
 
             if (courseRepo.count() > 0) return;

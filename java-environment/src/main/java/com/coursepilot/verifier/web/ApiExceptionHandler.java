@@ -66,6 +66,28 @@ public class ApiExceptionHandler {
             .body(Envelope.error(null, "INVALID_SUBJECT", ex.getMessage(), "X-Subject-Id", false));
     }
 
+    /** 学业记录写入的输入不合法 */
+    @ExceptionHandler(InvalidRecordInput.class)
+    public ResponseEntity<Envelope<Void>> invalidRecord(InvalidRecordInput ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(Envelope.error(null, "INVALID_INPUT", ex.getMessage(), ex.getField(), false));
+    }
+
+    /** 幂等键与内容不符，或并发写入冲突（契约 409） */
+    @ExceptionHandler(RecordConflict.class)
+    public ResponseEntity<Envelope<Void>> recordConflict(RecordConflict ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(Envelope.error(null, "CONFLICT", ex.getMessage(), null, false));
+    }
+
+    /** 培养快照不存在（契约 422） */
+    @ExceptionHandler(UnknownSnapshot.class)
+    public ResponseEntity<Envelope<Void>> unknownSnapshot(UnknownSnapshot ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+            .body(Envelope.error(null, "SNAPSHOT_NOT_FOUND", ex.getMessage(),
+                "curriculumSnapshotId", false));
+    }
+
     /** 缺少必填请求头 */
     @ExceptionHandler(MissingRequestHeaderException.class)
     public ResponseEntity<Envelope<Void>> missingHeader(MissingRequestHeaderException ex) {
