@@ -28,6 +28,7 @@ router.beforeEach((to) => {
       draft: store.draft,
       curricula: store.curricula,
       selectedCurriculumId: store.selectedCurriculumId,
+      mode: store.planningMode,
     });
     const safePath = `/plan/questions/${safeQuestion}`;
     if (

@@ -130,6 +130,32 @@ function isPriorityOrderConfirmed(draft: PlanningDraft): boolean {
   );
 }
 
+/** 这个培养方案能不能用于当前模式的规划。
+ *
+ * buildPlanningRequest 的「真实培养方案 / 已核验培养方案」判断用的就是这条规则。
+ * 列表过滤和自动选择必须共用它：两处规则一旦分开写就会漂移——之前列表只查了
+ * 「不是 SYNTHETIC」，于是一个 UNVERIFIED、既无课程也无类别要求的快照被当成唯一
+ * 可选项自动选中，用户走完 8 步才在最后一步看到「还缺少：已核验培养方案」。
+ */
+export function isCurriculumUsableForMode(
+  curriculum: Pick<SnapshotSummary, "sourceKind" | "sourceValidation">,
+  mode: PlanningMode,
+): boolean {
+  if (mode !== "REAL") {
+    return (
+      curriculum.sourceKind === "SYNTHETIC" ||
+      curriculum.sourceValidation === "SYNTHETIC"
+    );
+  }
+  if (
+    curriculum.sourceKind === "SYNTHETIC" ||
+    curriculum.sourceValidation === "SYNTHETIC"
+  ) {
+    return false;
+  }
+  return curriculum.sourceValidation === "VERIFIED";
+}
+
 export function buildPlanningRequest(
   draft: PlanningDraft,
   context: PlanningContext,

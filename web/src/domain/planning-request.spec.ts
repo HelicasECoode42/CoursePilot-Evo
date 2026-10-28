@@ -3,7 +3,10 @@ import addFormats from "ajv-formats";
 import { describe, expect, it } from "vitest";
 import domainSchema from "../../../contracts/schemas/domain.schema.json";
 import { emptyPlanningDraft, type PlanningDraft } from "./question-flow";
-import { buildPlanningRequest } from "./planning-request";
+import {
+  buildPlanningRequest,
+  isCurriculumUsableForMode,
+} from "./planning-request";
 import { dayKeys, sectionKeys } from "./schedule-grid";
 
 const validator = new Ajv2020({ allErrors: true, strict: false });
@@ -537,5 +540,68 @@ describe("课程与教师的选择", () => {
     expect(built.ok).toBe(false);
     if (built.ok) return;
     expect(built.hints?.join("")).toContain("课程与教师太多");
+  });
+});
+
+describe("isCurriculumUsableForMode", () => {
+  // 这条 bug 的本质是规则漂移：列表过滤只查了「不是 SYNTHETIC」，而提交前的
+  // buildPlanningRequest 还要求 VERIFIED。于是一个 UNVERIFIED、既无课程也无类别
+  // 要求的快照成了唯一可选项并被自动选中，用户走完 8 步才看到它不能用。
+  // 下面两组断言必须一起成立，否则两处规则又分家了。
+  const cases = [
+    { sourceKind: "CURRICULUM_FILE", sourceValidation: "VERIFIED", real: true },
+    {
+      sourceKind: "CURRICULUM_FILE",
+      sourceValidation: "UNVERIFIED",
+      real: false,
+    },
+    {
+      sourceKind: "BROWSER_SNAPSHOT",
+      sourceValidation: "UNVERIFIED",
+      real: false,
+    },
+    { sourceKind: "SYNTHETIC", sourceValidation: "SYNTHETIC", real: false },
+  ] as const;
+
+  it.each(cases)(
+    "REAL 模式下 $sourceKind/$sourceValidation 可用性为 $real",
+    ({ sourceKind, sourceValidation, real }) => {
+      expect(
+        isCurriculumUsableForMode({ sourceKind, sourceValidation }, "REAL"),
+      ).toBe(real);
+    },
+  );
+
+  it("REAL 模式的判断必须和提交前的缺项判断一致", () => {
+    for (const { sourceKind, sourceValidation } of cases) {
+      const build = buildPlanningRequest(readyDraft(), {
+        ...verifiedContext,
+        curriculumSourceKind: sourceKind,
+        curriculumSourceValidation: sourceValidation,
+      });
+      const blockedByCurriculum =
+        !build.ok &&
+        build.missing.some((item) =>
+          ["培养方案", "真实培养方案", "已核验培养方案"].includes(item),
+        );
+      expect(
+        isCurriculumUsableForMode({ sourceKind, sourceValidation }, "REAL"),
+      ).toBe(!blockedByCurriculum);
+    }
+  });
+
+  it("演示模式只接受虚构资料", () => {
+    expect(
+      isCurriculumUsableForMode(
+        { sourceKind: "SYNTHETIC", sourceValidation: "SYNTHETIC" },
+        "SIMULATION",
+      ),
+    ).toBe(true);
+    expect(
+      isCurriculumUsableForMode(
+        { sourceKind: "CURRICULUM_FILE", sourceValidation: "VERIFIED" },
+        "SIMULATION",
+      ),
+    ).toBe(false);
   });
 });

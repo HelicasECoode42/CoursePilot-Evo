@@ -9,6 +9,7 @@ import type {
   CompletedCourse,
   Motive,
   PlanningAnswer,
+  PlanningMode,
   PlanningRequest,
   SnapshotSummary,
 } from "../contracts";
@@ -23,7 +24,10 @@ import {
   type PlanningDraft,
   type QuestionId,
 } from "../domain/question-flow";
-import { buildPlanningRequest } from "../domain/planning-request";
+import {
+  buildPlanningRequest,
+  isCurriculumUsableForMode,
+} from "../domain/planning-request";
 import {
   applyScheduleAction,
   type ScheduleAction,
@@ -217,15 +221,25 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       expireSessionWhenDue();
     }
 
+    // 契约里的规划模式只有 REAL / SIMULATION，而客户端有三种（http / fixture /
+    // simulation）。这里是唯一的映射点：分散着写会漂移——fixture 模式下
+    // 「=== "simulation" ? ... 」和「=== "http" ? ...」给出的结论正好相反。
+    const planningMode = computed<PlanningMode>(() =>
+      client.mode === "http" ? "REAL" : "SIMULATION",
+    );
     const currentQuestion = computed<QuestionId>(() =>
       firstIncompleteQuestion({
         draft: draft.value,
         curricula: curricula.value,
         selectedCurriculumId: selectedCurriculumId.value,
+        mode: planningMode.value,
       }),
     );
     const questions = computed(() =>
-      questionSequence({ curricula: curricula.value }),
+      questionSequence({
+        curricula: curricula.value,
+        mode: planningMode.value,
+      }),
     );
     const selectedCurriculum = computed(
       () =>
@@ -288,12 +302,25 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         clearPlanningHandoff();
         curricula.value = result.items;
         unknownMessages.value = result.unknownMessages;
+        // 只自动选能用于当前模式的方案。不加这个判断，一个 UNVERIFIED、既无课程也无
+        // 类别要求的快照会因为「只有一个」被直接选中，用户走完 8 步才知道它不能用。
+        const usable = result.items.filter((item) =>
+          isCurriculumUsableForMode(item, planningMode.value),
+        );
         selectedCurriculumId.value =
-          result.items.length === 1 ? result.items[0].snapshotId : null;
+          usable.length === 1 ? usable[0].snapshotId : null;
         sessionStatus.value = "ready";
         if (result.items.length === 0) {
           errorMessage.value =
             "目前没有可用的培养方案，请稍后重试或联系课程资料维护者。";
+        } else if (usable.length === 0) {
+          // 走 unknownMessages 这个会渲染的通道：errorMessage 只在 sessionStatus 为
+          // error 时显示，而且会给出「重试」，但这不是重试能解决的。
+          unknownMessages.value = [
+            ...unknownMessages.value,
+            "现有培养方案都还没有通过来源核验，暂时不能用于真实规划；" +
+              "可以在下一步查看它们的来源状态，或改用演示模式了解流程。",
+          ];
         }
       } catch (error) {
         if (
@@ -411,7 +438,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
           selectedRecord.value?.academicRecordId ??
           client.fixtureAcademicRecordId(),
         offeringSnapshotId: null,
-        mode: client.mode === "http" ? "REAL" : "SIMULATION",
+        mode: planningMode.value,
       });
       if (built.ok && clarificationPriorityOrder.value !== null) {
         built.request.intent.priorityOrder = [
@@ -742,6 +769,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
           draft: draft.value,
           curricula: curricula.value,
           selectedCurriculumId: selectedCurriculumId.value,
+          mode: planningMode.value,
         },
         -1,
       );
@@ -778,6 +806,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       startSession,
       invalidateSession,
       chooseCurriculum,
+      planningMode,
       setMotives,
       updateDraft,
       paintScheduleSlots,
