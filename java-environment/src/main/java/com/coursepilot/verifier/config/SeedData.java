@@ -16,7 +16,6 @@ public class SeedData {
     @Bean
     CommandLineRunner init(CourseRepository courseRepo,
                            RequirementRepository reqRepo,
-                           AcademicRecordRepository recordRepo,
                            CourseOfferingRepository offeringRepo,
                            CurriculumSnapshotRepository snapshotRepo,
                            TranscriptRepository transcriptRepo) {
@@ -80,11 +79,6 @@ public class SeedData {
 
             reqRepo.save(new Requirement("PLAN_CS_2025", "必修", 10.0));
             reqRepo.save(new Requirement("PLAN_CS_2025", "通识", 4.0));
-
-            recordRepo.save(new AcademicRecord("S001", "CS101", true, 3.0, 1));
-            recordRepo.save(new AcademicRecord("S001", "CS101", true, 3.0, 2)); // 重修，应去重
-            recordRepo.save(new AcademicRecord("S001", "CS102", true, 4.0, 1));
-            recordRepo.save(new AcademicRecord("S001", "GE101", true, 2.0, 1));
 
             offeringRepo.save(new CourseOffering("O_CS101_01", "CS101", "张老师",
                 "周一第1-2节{第1-16周}", "SYNTHETIC"));

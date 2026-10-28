@@ -2,13 +2,16 @@ package com.coursepilot.verifier.application;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import com.coursepilot.verifier.persistence.entity.AcademicRecord;
 import com.coursepilot.verifier.persistence.entity.Course;
 import com.coursepilot.verifier.persistence.entity.Requirement;
-import com.coursepilot.verifier.persistence.repo.AcademicRecordRepository;
+import com.coursepilot.verifier.persistence.entity.Transcript;
+import com.coursepilot.verifier.persistence.entity.TranscriptCourse;
 import com.coursepilot.verifier.persistence.repo.CourseRepository;
 import com.coursepilot.verifier.persistence.repo.RequirementRepository;
+import com.coursepilot.verifier.persistence.repo.TranscriptRepository;
 import com.coursepilot.verifier.web.dto.AuditDtos;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,10 +20,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 契约形状的学业核对。重点是三条红线：
+ * 契约形状的学业核对。重点是几条红线：
  *   - 学分未知的类别必须是 UNKNOWN，不能当 0 也不能算满足（AGENTS.md：unknown 不能通过）
  *   - 重修只计一次
  *   - 缺口为负时归零，不出现负数学分
+ *   - 在修 / 结果未知的课程不能让缺口说成确定
  */
 @SpringBootTest
 @Transactional
@@ -29,7 +33,7 @@ class AuditResultAssemblerTest {
   @Autowired AuditResultAssembler assembler;
   @Autowired RequirementRepository requirementRepo;
   @Autowired CourseRepository courseRepo;
-  @Autowired AcademicRecordRepository recordRepo;
+  @Autowired TranscriptRepository transcriptRepo;
 
   private static final String PLAN = "plan-test";
   private static final String STUDENT = "stu-test";
@@ -45,7 +49,7 @@ class AuditResultAssemblerTest {
   void satisfied() {
     requirementRepo.save(new Requirement(PLAN, "通识", 4.0));
     courseRepo.save(new Course("C1", "通识课", 4.0, "通识"));
-    recordRepo.save(record("C1", true, 4.0, 1));
+    transcript(true, row("C1", 4.0, TranscriptCourse.Outcome.PASSED, 1));
 
     AuditDtos.AuditResult result = assembler.assemble(PLAN, STUDENT);
     AuditDtos.AuditItem item = onlyItem(result);
@@ -59,7 +63,7 @@ class AuditResultAssemblerTest {
   void unsatisfied() {
     requirementRepo.save(new Requirement(PLAN, "专选", 24.0));
     courseRepo.save(new Course("C2", "专选课", 3.0, "专选"));
-    recordRepo.save(record("C2", true, 3.0, 1));
+    transcript(true, row("C2", 3.0, TranscriptCourse.Outcome.PASSED, 1));
 
     AuditDtos.AuditItem item = onlyItem(assembler.assemble(PLAN, STUDENT));
     assertEquals(AuditDtos.State.UNSATISFIED, item.state());
@@ -71,7 +75,7 @@ class AuditResultAssemblerTest {
   void unknownCreditsBlockTheCategory() {
     requirementRepo.save(new Requirement(PLAN, "实践", 2.0));
     courseRepo.save(new Course("C3", "实践课", null, "实践"));
-    recordRepo.save(record("C3", true, null, 1));
+    transcript(true, row("C3", null, TranscriptCourse.Outcome.PASSED, 1));
 
     AuditDtos.AuditResult result = assembler.assemble(PLAN, STUDENT);
     assertEquals(AuditDtos.State.UNKNOWN, onlyItem(result).state());
@@ -83,8 +87,9 @@ class AuditResultAssemblerTest {
   void retakeCountsOnce() {
     requirementRepo.save(new Requirement(PLAN, "数学", 4.0));
     courseRepo.save(new Course("C4", "高数", 4.0, "数学"));
-    recordRepo.save(record("C4", true, 4.0, 1));
-    recordRepo.save(record("C4", true, 4.0, 2));
+    transcript(true,
+        row("C4", 4.0, TranscriptCourse.Outcome.PASSED, 1),
+        row("C4", 4.0, TranscriptCourse.Outcome.PASSED, 2));
 
     AuditDtos.AuditItem item = onlyItem(assembler.assemble(PLAN, STUDENT));
     assertEquals(4.0, item.earnedCredits(), "重修被重复累加了");
@@ -96,11 +101,54 @@ class AuditResultAssemblerTest {
   void failedCourseDoesNotCount() {
     requirementRepo.save(new Requirement(PLAN, "物理", 4.0));
     courseRepo.save(new Course("C5", "大物", 4.0, "物理"));
-    recordRepo.save(record("C5", false, 4.0, 1));
+    transcript(true, row("C5", 4.0, TranscriptCourse.Outcome.FAILED, 1));
 
     AuditDtos.AuditItem item = onlyItem(assembler.assemble(PLAN, STUDENT));
     assertEquals(0.0, item.earnedCredits());
     assertEquals(AuditDtos.State.UNSATISFIED, item.state());
+  }
+
+  @Test
+  @DisplayName("在修的课程不计学分，相应类别的缺口不能确定，判 UNKNOWN 而不是 UNSATISFIED")
+  void inProgressCourseMakesGapUnknown() {
+    requirementRepo.save(new Requirement(PLAN, "实践", 10.0));
+    courseRepo.save(new Course("C6", "实践课", 2.0, "实践"));
+    transcript(true, row("C6", null, TranscriptCourse.Outcome.IN_PROGRESS, 1));
+
+    AuditDtos.AuditResult result = assembler.assemble(PLAN, STUDENT);
+    AuditDtos.AuditItem item = onlyItem(result);
+    assertEquals(0.0, item.earnedCredits(), "在修课程不能计入已修学分");
+    assertEquals(AuditDtos.State.UNKNOWN, item.state());
+    assertTrue(result.unknowns().stream().anyMatch(i -> i.code().equals("PENDING_COURSE")));
+  }
+
+  @Test
+  @DisplayName("结果未知的课程同样不计学分；待定类别若已满足，仍判满足")
+  void unknownOutcomeDoesNotLowerASatisfiedCategory() {
+    requirementRepo.save(new Requirement(PLAN, "通识", 4.0));
+    courseRepo.save(new Course("C7", "通识甲", 4.0, "通识"));
+    courseRepo.save(new Course("C8", "通识乙", 2.0, "通识"));
+    transcript(true,
+        row("C7", 4.0, TranscriptCourse.Outcome.PASSED, 1),
+        row("C8", null, TranscriptCourse.Outcome.UNKNOWN, 1));
+
+    AuditDtos.AuditItem item = onlyItem(assembler.assemble(PLAN, STUDENT));
+    assertEquals(4.0, item.earnedCredits());
+    assertEquals(AuditDtos.State.SATISFIED, item.state(), "学分只增不减，已满足就是满足");
+  }
+
+  @Test
+  @DisplayName("同一课程先未通过、后在修：没有通过记录，仍按待定处理")
+  void failedThenInProgressIsStillPending() {
+    requirementRepo.save(new Requirement(PLAN, "工程", 4.0));
+    courseRepo.save(new Course("C9", "工程课", 4.0, "工程"));
+    transcript(true,
+        row("C9", 4.0, TranscriptCourse.Outcome.FAILED, 1),
+        row("C9", null, TranscriptCourse.Outcome.IN_PROGRESS, 2));
+
+    AuditDtos.AuditItem item = onlyItem(assembler.assemble(PLAN, STUDENT));
+    assertEquals(0.0, item.earnedCredits());
+    assertEquals(AuditDtos.State.UNKNOWN, item.state());
   }
 
   @Test
@@ -129,22 +177,52 @@ class AuditResultAssemblerTest {
   }
 
   @Test
-  @DisplayName("完整性与修订号未建模时如实返回未确认，不填假值")
-  void completenessIsReportedAsUnknown() {
+  @DisplayName("未声明完整：transcriptComplete 如实为 false，并记入 unknowns")
+  void incompleteTranscriptIsReported() {
     requirementRepo.save(new Requirement(PLAN, "通识", 1.0));
+    transcript(false);
     AuditDtos.AuditResult result = assembler.assemble(PLAN, STUDENT);
     assertFalse(result.transcriptComplete());
     assertTrue(result.unknowns().stream()
         .anyMatch(i -> i.code().equals("TRANSCRIPT_COMPLETENESS_UNKNOWN")));
   }
 
-  private AcademicRecord record(String courseCode, boolean passed, Double credits, int attempt) {
-    AcademicRecord r = new AcademicRecord();
-    r.setStudentId(STUDENT);
-    r.setCourseCode(courseCode);
-    r.setPassed(passed);
-    r.setCreditsEarned(credits);
-    r.setAttemptNo(attempt);
-    return r;
+  @Test
+  @DisplayName("声明完整：transcriptComplete 读聚合里的真实值 true，不再记完整性未知")
+  void completeTranscriptIsReported() {
+    requirementRepo.save(new Requirement(PLAN, "通识", 1.0));
+    transcript(true);
+    AuditDtos.AuditResult result = assembler.assemble(PLAN, STUDENT);
+    assertTrue(result.transcriptComplete());
+    assertTrue(result.unknowns().stream()
+        .noneMatch(i -> i.code().equals("TRANSCRIPT_COMPLETENESS_UNKNOWN")));
+  }
+
+  @Test
+  @DisplayName("recordRevision 返回聚合里的真实修订号，每次写入递增")
+  void recordRevisionIsReal() {
+    requirementRepo.save(new Requirement(PLAN, "通识", 1.0));
+    Transcript t = transcript(true);
+    assertEquals(1, assembler.assemble(PLAN, STUDENT).recordRevision());
+
+    t.revise(PLAN, true, Transcript.SourceKind.SYNTHETIC,
+        Instant.parse("2025-10-01T00:00:00Z"), List.of());
+    transcriptRepo.save(t);
+    assertEquals(2, assembler.assemble(PLAN, STUDENT).recordRevision());
+  }
+
+  /** 按给定课程行写入一份学业记录（同一主体只有一份）。 */
+  private Transcript transcript(boolean complete, TranscriptCourse... rows) {
+    Transcript t = new Transcript(STUDENT);
+    t.revise(PLAN, complete, Transcript.SourceKind.SYNTHETIC,
+        Instant.parse("2025-09-01T00:00:00Z"), List.of(rows));
+    return transcriptRepo.save(t);
+  }
+
+  private static TranscriptCourse row(String courseCode, Double credits,
+                                      TranscriptCourse.Outcome outcome, int attempt) {
+    return new TranscriptCourse(courseCode, attempt,
+        credits == null ? null : BigDecimal.valueOf(credits).setScale(2),
+        outcome, null);
   }
 }

@@ -7,7 +7,7 @@ import java.util.List;
  * contracts/schemas/domain.schema.json 的 AuditRequest / AuditResult / AuditItem，
  * 不在这里另造一套命名。
  *
- * 这是外层壳：核对算法仍在 AuditEvaluator，本文件只负责把算出来的数按契约摆好。
+ * 这是外层壳：核对算法在 AcademicLedger（与 AuditEvaluator 共用），本文件只负责把算出来的数按契约摆好。
  */
 public final class AuditDtos {
 
