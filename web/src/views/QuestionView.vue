@@ -265,6 +265,13 @@ async function openRecords() {
     <p v-if="api.mode === 'fixture'" class="notice notice--demo" role="note">
       当前是演示模式：页面使用虚构的示例资料，不会连接真实服务或生成真实课程推荐。
     </p>
+    <p
+      v-else-if="api.mode === 'simulation'"
+      class="notice notice--demo"
+      role="note"
+    >
+      当前连接本地测试服务：请只填写虚构资料，结果不代表真实培养计划或本学期课表。
+    </p>
     <p v-else class="notice" role="note">
       当前是服务连接模式。会话只保存在本次页面内存中；刷新页面后需要重新开始。
     </p>
@@ -621,15 +628,22 @@ async function openRecords() {
         class="notice notice--success"
         role="status"
       >
-        <strong>演示请求已整理完成。</strong>
-        <span
-          >其中包含虚构学业记录，只用于展示流程；本页没有调用课程推荐服务。</span
+        <strong>规划资料已整理完成。</strong>
+        <span v-if="api.mode === 'fixture'"
+          >当前使用虚构资料，结果为页面演示。</span
         >
+        <span v-else-if="api.mode === 'simulation'"
+          >当前使用虚构资料，可以继续生成服务联调结果。</span
+        >
+        <span v-else>可以继续生成规划结果。</span>
       </div>
       <div v-else class="handoff-note">
         <strong>你的目标已整理好</strong>
         <span v-if="api.mode === 'fixture'">
           你正在使用虚构示例资料。本页只核对并整理演示请求，不会生成课程推荐。
+        </span>
+        <span v-else-if="api.mode === 'simulation'">
+          请先补充虚构学业资料，再使用本地服务生成演示结果。
         </span>
         <span v-else>
           还不能开始真实规划：目前没有读取到你的学业记录。我们不会猜测记录编号或把空记录当作完整资料。
@@ -702,7 +716,20 @@ async function openRecords() {
         </div>
         <div>
           <dt>教师偏好</dt>
-          <dd>尚未选择具体课程与教师</dd>
+          <dd v-if="store.draft.teacherPicks.length === 0">
+            尚未选择具体课程与教师
+          </dd>
+          <dd v-else>
+            <ul class="summary-list">
+              <li
+                v-for="pick in store.draft.teacherPicks"
+                :key="`${pick.courseCode}:${pick.teacherKey}`"
+              >
+                {{ pick.courseCode }} · {{ pick.teacherKey }} ·
+                {{ pick.mode === "MUST" ? "必须保留" : "优先考虑" }}
+              </li>
+            </ul>
+          </dd>
         </div>
         <div>
           <dt>培养方案</dt>
@@ -729,9 +756,15 @@ async function openRecords() {
           <dt>学业记录</dt>
           <dd>
             {{
-              api.mode === "fixture"
-                ? "虚构演示记录，不含真实修读情况"
-                : "尚未读取，真实规划暂不能继续"
+              store.selectedRecord
+                ? api.mode === "simulation"
+                  ? "已选择虚构学业记录"
+                  : "已选择学业记录"
+                : api.mode === "fixture"
+                  ? "虚构演示记录，不含真实修读情况"
+                  : api.mode === "simulation"
+                    ? "尚未读取，请补充虚构记录"
+                    : "尚未读取，真实规划暂不能继续"
             }}
           </dd>
         </div>
@@ -739,14 +772,12 @@ async function openRecords() {
       <details v-if="api.mode === 'http'" class="record-help">
         <summary>为什么还缺学业记录？</summary>
         <p>
-          当前接口只能在已有记录编号时读取记录，没有“查找本次会话记录”的入口；本页也没有安全的导入与核对流程。需由学业资料功能补齐课程、成绩和培养方案核对后，才能继续真实规划。
+          可以在学业资料页面查看本次会话的记录，并在缺少记录时补充课程信息。
         </p>
       </details>
       <details v-else class="record-help">
         <summary>演示记录包含什么？</summary>
-        <p>
-          这份记录和培养方案均为虚构样例，只用于检查页面能否整理请求，不表示你的已修课程、成绩或学分缺口。
-        </p>
+        <p>演示资料为虚构内容，不代表你的已修课程或学分缺口。</p>
       </details>
       <button
         class="button button--secondary"

@@ -1,7 +1,7 @@
 import { FixtureApiClient } from "./fixture-client";
 import { HttpApiClient, type CoursePilotApiClient } from "./client";
 
-export type ApiMode = "http" | "fixture";
+export type ApiMode = "http" | "fixture" | "simulation";
 
 export function createApiClient(
   mode: ApiMode,
@@ -13,12 +13,16 @@ export function createApiClient(
 ): CoursePilotApiClient {
   if (mode === "fixture") return new FixtureApiClient();
   const baseUrl = options.baseUrl?.trim() || "http://127.0.0.1:8000";
-  return new HttpApiClient(baseUrl, options.fetcher, options.timeoutMs);
+  return new HttpApiClient(baseUrl, options.fetcher, options.timeoutMs, mode);
 }
 
 const configuredMode = import.meta.env.VITE_COURSEPILOT_MODE ?? "http";
-if (configuredMode !== "http" && configuredMode !== "fixture") {
-  throw new Error("VITE_COURSEPILOT_MODE must be http or fixture");
+if (
+  configuredMode !== "http" &&
+  configuredMode !== "fixture" &&
+  configuredMode !== "simulation"
+) {
+  throw new Error("VITE_COURSEPILOT_MODE must be http, fixture or simulation");
 }
 
 export const api = createApiClient(configuredMode, {

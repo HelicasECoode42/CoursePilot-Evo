@@ -618,6 +618,178 @@ describe("planning session store", () => {
       return { mock, calls };
     }
 
+    it("retries a supported tradeoff with a new key and preserves hard requirements", async () => {
+      const clarify: PlanningAnswer = {
+        ...answer,
+        decision: "CLARIFY",
+        clarification: {
+          questionId: "tradeoff:teacher-vs-schedule",
+          text: "请确认教师与硬时间的优先顺序。",
+          choices: [
+            { value: "KEEP_TEACHER", label: "先保留指定教师" },
+            { value: "KEEP_SCHEDULE", label: "先保证硬时间" },
+          ],
+          allowFreeText: false,
+          requiredFor: ["teacher_vs_schedule"],
+        },
+      };
+      const calls: Array<{ request: PlanningRequest; key: string }> = [];
+      const submitPlanning = vi.fn(
+        async (request: PlanningRequest, key: string) => {
+          calls.push({ request, key });
+          return calls.length === 1 ? clarify : answer;
+        },
+      );
+      const store = submittableStore({ submitPlanning });
+      store.$patch({
+        draft: {
+          ...store.draft,
+          teacherPicks: [
+            { courseCode: "CS101", teacherKey: "teacher:demo", mode: "MUST" },
+          ],
+          mustSlots: ["5-1"],
+        },
+      });
+
+      await store.submitPlan();
+      expect(store.planningResult?.decision).toBe("CLARIFY");
+      expect(
+        store.answerTradeoffClarification(
+          "tradeoff:teacher-vs-schedule",
+          "KEEP_SCHEDULE",
+        ),
+      ).toBe(true);
+      expect(
+        store.answerTradeoffClarification(
+          "tradeoff:teacher-vs-schedule",
+          "KEEP_SCHEDULE",
+        ),
+      ).toBe(false);
+      await store.submitPlan();
+
+      expect(calls).toHaveLength(2);
+      expect(calls[1].key).not.toBe(calls[0].key);
+      expect(calls[1].request.intent.priorityOrder).toEqual([
+        "GPA",
+        "SCHEDULE",
+        "SPECIFIC_TEACHER",
+      ]);
+      expect(calls[1].request.intent.pinnedTeacherCoursePairs).toEqual([
+        { courseCode: "CS101", teacherKey: "teacher:demo", mode: "MUST" },
+      ]);
+      expect(calls[1].request.intent.hardConstraints).toHaveLength(1);
+      expect(calls[1].request.intent.hardConstraints[0].kind).toBe(
+        "BLOCK_SLOT",
+      );
+      expect(store.planningResult).toEqual(answer);
+    });
+
+    it("rejects repeated or unknown clarification IDs and refuses overflowing priorities", async () => {
+      const clarify: PlanningAnswer = {
+        ...answer,
+        decision: "CLARIFY",
+        clarification: {
+          questionId: "tradeoff:teacher-vs-schedule",
+          text: "请确认教师与硬时间的优先顺序。",
+          choices: [
+            { value: "KEEP_TEACHER", label: "先保留指定教师" },
+            { value: "KEEP_SCHEDULE", label: "先保证硬时间" },
+          ],
+          allowFreeText: false,
+          requiredFor: ["teacher_vs_schedule"],
+        },
+      };
+      const store = submittableStore({
+        submitPlanning: vi.fn(async () => clarify),
+      });
+      const tenGoals: string[] = [
+        "GPA",
+        "LOW_WORKLOAD",
+        "LOW_ATTENDANCE",
+        "GOOD_REVIEWS",
+        "INTEREST",
+        "CAREER",
+        "POSTGRAD",
+        "CREDIT_PROGRESS",
+        "CUSTOM-1",
+        "CUSTOM-2",
+      ];
+      store.$patch({
+        planningResult: clarify,
+        draft: {
+          ...store.draft,
+          motives: ["GPA"],
+          priorityOrder: tenGoals as typeof store.draft.priorityOrder,
+        },
+      });
+
+      expect(
+        store.answerTradeoffClarification("other-question", "KEEP_SCHEDULE"),
+      ).toBe(false);
+      expect(
+        store.answerTradeoffClarification(
+          "tradeoff:teacher-vs-schedule",
+          "KEEP_SCHEDULE",
+        ),
+      ).toBe(false);
+      expect(store.clarificationError).toContain("达到上限");
+      expect(store.planningResult?.decision).toBe("CLARIFY");
+      expect(store.draft.priorityOrder).toEqual(tenGoals);
+    });
+
+    it("fits a missing tradeoff label at the ten-priority contract limit", () => {
+      const clarify: PlanningAnswer = {
+        ...answer,
+        decision: "CLARIFY",
+        clarification: {
+          questionId: "tradeoff:teacher-vs-schedule",
+          text: "请确认教师与硬时间的优先顺序。",
+          choices: [
+            { value: "KEEP_TEACHER", label: "先保留指定教师" },
+            { value: "KEEP_SCHEDULE", label: "先保证硬时间" },
+          ],
+          allowFreeText: false,
+          requiredFor: ["teacher_vs_schedule"],
+        },
+      };
+      const priorities = [
+        "GPA",
+        "LOW_WORKLOAD",
+        "LOW_ATTENDANCE",
+        "GOOD_REVIEWS",
+        "SPECIFIC_TEACHER",
+        "INTEREST",
+        "CAREER",
+        "POSTGRAD",
+        "CREDIT_PROGRESS",
+      ];
+      const store = submittableStore();
+      store.$patch({
+        planningResult: clarify,
+        draft: {
+          ...store.draft,
+          motives: priorities as PlanningRequest["intent"]["motives"],
+          priorityOrder: priorities as typeof store.draft.priorityOrder,
+        },
+      });
+
+      expect(
+        store.answerTradeoffClarification(
+          "tradeoff:teacher-vs-schedule",
+          "KEEP_TEACHER",
+        ),
+      ).toBe(true);
+      expect(store.preparePlanningHandoff()).toMatchObject({ ok: true });
+      expect(store.planningHandoff?.intent.priorityOrder).toHaveLength(10);
+      expect(store.planningHandoff?.intent.priorityOrder).toContain("SCHEDULE");
+      expect(store.planningHandoff?.intent.priorityOrder).toContain(
+        "SPECIFIC_TEACHER",
+      );
+      expect(store.planningHandoff?.intent.priorityOrder).toContain(
+        "CREDIT_PROGRESS",
+      );
+    });
+
     it("submits the built request once and keeps the answer", async () => {
       const { mock, calls } = recordingSubmitter();
       const store = submittableStore({ submitPlanning: mock });
@@ -851,6 +1023,17 @@ describe("planning session store", () => {
       expect(key).toMatch(/^web-[A-Za-z0-9]+$/);
       expect(store.selectedRecordId).toBe("record-1");
       expect(store.recordsStatus).toBe("ready");
+    });
+
+    it("marks backend simulation records as synthetic and submits simulation mode", async () => {
+      const { client, store } = readyStore({ mode: "simulation" });
+      await expect(store.saveRecord([], false)).resolves.toBe(true);
+      expect(
+        vi.mocked(client.saveSessionRecord).mock.calls[0][0].sourceKind,
+      ).toBe("SYNTHETIC");
+      answerEveryQuestion(store);
+      expect(store.preparePlanningHandoff()).toMatchObject({ ok: true });
+      expect(store.planningHandoff?.mode).toBe("SIMULATION");
     });
 
     it("ignores selecting a record that is not in this session", () => {

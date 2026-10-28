@@ -3,7 +3,11 @@ import { computed } from "vue";
 import { api } from "./api";
 
 const modeLabel = computed(() =>
-  api.mode === "fixture" ? "演示模式 · 虚构内容" : "真实服务模式",
+  api.mode === "fixture"
+    ? "页面演示 · 虚构内容"
+    : api.mode === "simulation"
+      ? "服务联调 · 虚构内容"
+      : "真实服务模式",
 );
 </script>
 
@@ -20,7 +24,7 @@ const modeLabel = computed(() =>
       </RouterLink>
       <span
         class="mode-badge"
-        :class="api.mode === 'fixture' ? 'mode-badge--demo' : ''"
+        :class="api.mode !== 'http' ? 'mode-badge--demo' : ''"
       >
         {{ modeLabel }}
       </span>

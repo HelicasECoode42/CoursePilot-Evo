@@ -21,6 +21,30 @@ curl --fail --silent --show-error http://127.0.0.1:5173/
 
 ## 运行模式
 
+### 使用本地服务运行虚构数据
+
+下面的三个终端分别启动 Java、Python 和网页。需要 Java 21、Python 3.11+、Node.js 22+；Python 已安装 `agent-runtime` 的依赖，网页已执行 `npm ci`。
+
+```bash
+# 终端 1，仓库根目录：使用临时内存数据库和虚构种子
+cd java-environment
+COURSEPILOT_SERVICE_KEY=local-demo-key SPRING_DATASOURCE_URL='jdbc:h2:mem:coursepilot-demo;DB_CLOSE_DELAY=-1' ./mvnw spring-boot:run
+```
+
+```bash
+# 终端 2，仓库根目录：首次使用先安装 pip install -e './agent-runtime[test]'
+cd agent-runtime
+CP_JAVA_BASE_URL=http://127.0.0.1:8081 CP_SERVICE_KEY=local-demo-key python -m uvicorn agent_runtime.api.app:app --host 127.0.0.1 --port 8000
+```
+
+```bash
+# 终端 3，仓库根目录
+cd web
+VITE_COURSEPILOT_MODE=simulation npm run dev
+```
+
+打开 `http://127.0.0.1:5173`，选择目标，在资料页填写虚构课程（例如 `CS101`、3 学分），返回问答页提交规划。此模式连接本地 Java 和 Python，使用虚构培养方案；未配置真实模型时结果会标明假模型。临时数据库在 Java 停止后清空。
+
 - **真实服务模式**是默认模式。可用 `VITE_API_BASE_URL` 指定 Python 服务地址，未设置时为 `http://127.0.0.1:8000`。启动示例：
 
   ```bash
@@ -35,19 +59,19 @@ curl --fail --silent --show-error http://127.0.0.1:5173/
   VITE_COURSEPILOT_MODE=fixture npm run dev
   ```
 
-  它展示一份固定的 synthetic 培养方案和虚构学业记录，PlanningRequest 使用 `SIMULATION`。演示不会调用真实规划接口，也不会生成课程推荐。
+  它使用固定的虚构培养方案、学业记录和规划结果，不调用后端服务。
 
 匿名 bearer 只存于当前页面内存，不进入 URL、`localStorage`、`sessionStorage` 或应用日志。页面按 `expiresAt` 安排过期清理；真实服务端返回 401 或会话过期时，会中止在途请求、清除会话凭据和培养方案上下文并提示重新开始。已填写的选课目标暂留在当前页面内存，新会话建立后可继续；刷新页面会清空会话与答案。
 
 ## 当前交付边界
 
-页面按合同实现了匿名会话创建、`GET /api/v1/curriculum-snapshots` 已发布培养方案读取、`GET`/`POST /api/v1/academic-records` 本会话学业记录的读取与补录、`POST /api/v1/requirements/audit` 学业核对，以及 `POST /api/v1/planning` 的提交与结果展示。真实模式会过滤合成培养方案；即使提供了快照 ID，`PlanningRequest` builder 也只接受来源已核验的真实培养方案。学业记录编号由服务端生成并随列表返回，页面不要求学生填写内部编号，也不伪造 `academicRecordId`；缺少真实、已核验的培养方案或学业记录时，不会生成 REAL 请求。Python 与 Java 三端都有实现，但只有学业核对一条链路实测打通。Python 已挂载会话、规划、学业记录、学业核对、培养快照、课程、教师课程选项、评价搜索、职业方向和报告路由，其中 `GET /api/v1/reports/runs/{runId}` 是无条件返回 NotFound 的桩；Java 已实现 8 个路由（其中 `/api/v1/verification/*` 三个未在契约中声明，学业记录两个 GET 目前是返回 UNKNOWN 的桩），契约声明的 15 个路径+方法中仍有 10 个未实现；`listCourses`/`listOfferings` 的出参也不合契约（契约要求 `data = {items: […]}`，Java 返回裸数组，且每条缺必填字段）。培养快照的 Java 端点在未合入的 PR #29 中，`session-offerings` 与 `session-plans/replace` 的实现在未合入的 PR #28 中。
+页面支持创建会话、选择培养方案、读取和补录学业记录、学业核对以及规划结果展示。真实模式要求来源已核验的培养方案；`simulation` 模式使用合成数据和本地 Java/Python 服务。浏览器已使用合成数据完成学业补录、核对、规划及教师与时间条件的澄清回填。当前没有经核验的真实当期班次；默认模型为受控假模型，结果会标明该状态。老师报告接口尚未接入真实报告。
 
 `buildPlanningRequest` 根据已确认的目标、分别填写的必须/偏好时间条件、可选课程考核偏好和会话上下文构造请求，并用仓库中的 `contracts/schemas/domain.schema.json` 验证。只有在相关偏好页、同一时间页的两组条件和目标顺序都明确检查后才能交接；页面允许不选任何偏好或时段，留空表示没有这类要求。确认页列出目标排序、各项偏好、培养方案来源和学业记录状态，并说明真实模式缺少哪些资料。E1 只负责把答案整理成请求；提交与结果展示属于 E2，见下一节。
 
 时间页用课表网格收集条件：横轴星期、纵轴节次，点选或拖动涂选具体时段，同一页分「必须避开」和「尽量避开」两组。整列归一为 `BLOCK_DAY`，剩余格子中整行归一为 `BLOCK_SECTION`，其余散格为 `BLOCK_SLOT`；软偏好对应 `schedule.blocked_day`/`blocked_section`/`blocked_slot`。两组答案同时存在。归一后超过合同上限 30 条时给出「改用整行或整列」的可操作提示，不静默截断。
 
-上课与考核偏好向全部学生展示，可以全部不选，不按动机隐藏题目。六项选择通过 `softPreferences` 交接。公共 Schema 只规定 dimension/value 为字符串；Python/Agent 消费端尚未实现或确认这些语义，页面和本地构建器不能据此承诺推荐系统已经支持高分、少签到或特定考核方式。
+上课与考核偏好向全部学生展示，可以全部不选，不按动机隐藏题目。六项选择通过 `softPreferences` 交接，并传入模型请求；偏好对实际推荐的效果还需要真实模型和评价资料验证。
 
 选择“指定教师”时会说明教师必须和课程绑定，并交接到 E3 的课程教师选项；没有实际选项时页面不创建教师、教师键或班次。教师“必须保留”与“优先考虑”由拿到真实选项的后续步骤写入合同字段。
 
@@ -59,7 +83,7 @@ curl --fail --silent --show-error http://127.0.0.1:5173/
 - **提交与结果**：`/plan/result` 展示 `decision`（`CLARIFY` / `RECOMMENDATIONS` / `UNABLE_TO_VERIFY`）、候选与依据，以及答复级与候选级的未知项（按 `code`+`message` 去重）。
 - **展示门禁**：只有 `scope=REAL_TIMETABLE` 且 `verdict=VALID` 才允许显示为通过，`domain/answer-display.ts` 是全站唯一判定处。`COURSE_ONLY + VALID` 仍是「时间待确认」；`SIMULATION + VALID` 必须标注「不代表本学期课表」。页面不从 `violations` 为空推断通过，也不计算学分、不解析时间。
 - **幂等与竞态**：同一份请求重试复用同一个 `Idempotency-Key`，条件变化后换新键（`domain/idempotency.ts`）。改任何条件都会中止在途提交并按版本号丢弃迟到响应；重复点击在提交期间被忽略。
-- **未完成**：澄清题只展示、暂不回填——`Question.questionId` 与 `PlanningRequest` 的对应关系尚未在契约中定义。教师比较（E-F3，`/plan/teachers`）与老师报告（E-F6，`/report/runs/:runId`）页面已实现，但尚未用真实后端验证（报告接口在 Python 侧仍是桩）；页面与真实 Python/Java 的联调仍未完成。
+- **澄清回填范围**：结果页支持固定问题 `tradeoff:teacher-vs-schedule` 的两个选项，并把选择写入请求优先顺序后重新提交。此选择不会删除 MUST 教师或必须避开的时段；冲突仍由核验服务返回。其他模型生成的澄清题暂不支持结构化回填。教师比较页面已用合成数据连接后端；老师报告接口仍是桩。
 
 ## 依赖与检查
 

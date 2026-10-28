@@ -32,6 +32,33 @@ const store = usePlanningStore();
 const router = useRouter();
 
 const result = computed<PlanningAnswer | null>(() => store.planningResult);
+const answeringTradeoff = ref(false);
+const tradeoffChoices = computed(() => {
+  const question = result.value?.clarification;
+  if (
+    result.value?.decision !== "CLARIFY" ||
+    question?.questionId !== "tradeoff:teacher-vs-schedule"
+  ) {
+    return [];
+  }
+  const choicesByValue = new Map(
+    question.choices.map((choice) => [choice.value, choice]),
+  );
+  const teacher = choicesByValue.get("KEEP_TEACHER");
+  const schedule = choicesByValue.get("KEEP_SCHEDULE");
+  return teacher && schedule ? [teacher, schedule] : [];
+});
+
+async function answerTradeoff(questionId: string, choiceValue: string) {
+  if (answeringTradeoff.value) return;
+  if (!store.answerTradeoffClarification(questionId, choiceValue)) return;
+  answeringTradeoff.value = true;
+  try {
+    await store.submitPlan();
+  } finally {
+    answeringTradeoff.value = false;
+  }
+}
 
 const headline = computed(() => {
   if (store.submitStatus === "submitting") return "正在生成建议";
@@ -487,6 +514,13 @@ async function goBackToQuestions() {
     <p v-if="api.mode === 'fixture'" class="notice notice--demo" role="note">
       演示模式 · 虚构内容，不代表任何真实课程或核验结果。
     </p>
+    <p
+      v-else-if="api.mode === 'simulation'"
+      class="notice notice--demo"
+      role="note"
+    >
+      服务联调模式 · 虚构数据，结果不代表真实课程或本学期课表。
+    </p>
 
     <p
       v-if="store.submitStatus === 'submitting'"
@@ -524,9 +558,33 @@ async function goBackToQuestions() {
           </li>
         </ul>
         <p v-else class="microcopy">可以补充文字说明。</p>
-        <p class="microcopy">
-          回答方式与回填字段还在与模块 C 确认（契约里没有 questionId 与 intent
-          字段的对应关系），本轮先只展示问题。
+        <p v-if="tradeoffChoices.length === 2" class="microcopy">
+          这个选择只记录教师与时间的优先顺序，不会取消任何 MUST
+          教师或必须避开的时段；若两者冲突，仍由核验结果如实说明。
+        </p>
+        <div v-if="tradeoffChoices.length === 2" class="question-nav">
+          <button
+            v-for="choice in tradeoffChoices"
+            :key="choice.value"
+            class="button button--primary"
+            type="button"
+            :disabled="answeringTradeoff"
+            @click="
+              answerTradeoff(result.clarification!.questionId, choice.value)
+            "
+          >
+            {{ choice.label }}并继续规划
+          </button>
+        </div>
+        <p v-else class="microcopy">
+          这类澄清暂不支持本页回填，请回到问卷修改条件后再提交。
+        </p>
+        <p
+          v-if="store.clarificationError"
+          class="notice notice--error"
+          role="alert"
+        >
+          {{ store.clarificationError }}
         </p>
       </div>
 
@@ -764,7 +822,10 @@ async function goBackToQuestions() {
         回去修改条件
       </button>
       <button
-        v-if="result || store.submitStatus === 'error'"
+        v-if="
+          (result && result.decision !== 'CLARIFY') ||
+          store.submitStatus === 'error'
+        "
         class="button button--primary"
         type="button"
         :disabled="store.submitStatus === 'submitting'"

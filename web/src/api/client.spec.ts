@@ -40,6 +40,37 @@ function response(status: number, body: unknown): Response {
 }
 
 describe("HTTP API client", () => {
+  it("simulation connects to the service but only exposes explicitly synthetic curricula", async () => {
+    const synthetic = {
+      ...curriculum,
+      snapshotId: "demo",
+      sourceKind: "SYNTHETIC",
+      sourceValidation: "SYNTHETIC",
+    };
+    const mismatched = {
+      ...synthetic,
+      snapshotId: "mismatch",
+      sourceValidation: "VERIFIED",
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          200,
+          envelope("OK", { items: [curriculum, synthetic, mismatched] }),
+        ),
+      );
+    const client = createApiClient("simulation", {
+      baseUrl: "http://127.0.0.1:8000",
+      fetcher,
+    });
+    await client.createSession();
+    expect(
+      (await client.listCurricula()).items.map((item) => item.snapshotId),
+    ).toEqual(["demo"]);
+    expect(client.mode).toBe("simulation");
+  });
   it("creates an anonymous session from the documented envelope and keeps bearer out of URLs", async () => {
     const fetcher = vi
       .fn()

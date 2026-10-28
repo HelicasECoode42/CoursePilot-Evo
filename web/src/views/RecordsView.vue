@@ -112,6 +112,13 @@ async function goToQuestions() {
     <p v-if="api.mode === 'fixture'" class="notice notice--demo" role="note">
       演示模式 · 虚构内容。这里显示的记录与核对结果都不是你的真实情况。
     </p>
+    <p
+      v-else-if="api.mode === 'simulation'"
+      class="notice notice--demo"
+      role="note"
+    >
+      服务联调模式 · 请只输入虚构课程和学分；记录将标记为虚构数据。
+    </p>
 
     <p v-if="!canLoad" class="notice notice--warning" role="note">
       还没有可用会话。请先回到引导页开始，再回来核对资料。

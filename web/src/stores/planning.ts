@@ -65,6 +65,8 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     const handoffMissing = ref<MissingContextLabel[]>([]);
     const handoffHints = ref<string[]>([]);
     const planningResult = ref<PlanningAnswer | null>(null);
+    const clarificationError = ref("");
+    const clarificationPriorityOrder = ref<string[] | null>(null);
     const submitStatus = ref<SubmitStatus>("idle");
     const submitError = ref("");
     const records = ref<AcademicRecord[]>([]);
@@ -161,6 +163,8 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       planningHandoff.value = null;
       handoffMissing.value = [];
       handoffHints.value = [];
+      clarificationPriorityOrder.value = null;
+      clarificationError.value = "";
       discardSubmission();
     }
 
@@ -399,12 +403,71 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
           selectedRecord.value?.academicRecordId ??
           client.fixtureAcademicRecordId(),
         offeringSnapshotId: null,
-        mode: client.mode === "fixture" ? "SIMULATION" : "REAL",
+        mode: client.mode === "http" ? "REAL" : "SIMULATION",
       });
+      if (built.ok && clarificationPriorityOrder.value !== null) {
+        built.request.intent.priorityOrder = [
+          ...clarificationPriorityOrder.value,
+        ];
+      }
       planningHandoff.value = built.ok ? built.request : null;
       handoffMissing.value = built.ok ? [] : built.missing;
       handoffHints.value = built.ok ? [] : (built.hints ?? []);
       return built;
+    }
+
+    /**
+     * Supports only the deterministic teacher-vs-hard-time clarification.
+     * The answer changes ranking metadata; it never removes a MUST teacher or
+     * a hard time constraint. Java remains responsible for checking feasibility.
+     */
+    function answerTradeoffClarification(
+      questionId: string,
+      choiceValue: string,
+    ): boolean {
+      const question = planningResult.value?.clarification;
+      if (
+        planningResult.value?.decision !== "CLARIFY" ||
+        question?.questionId !== "tradeoff:teacher-vs-schedule" ||
+        questionId !== question.questionId ||
+        !question.choices.some((choice) => choice.value === choiceValue) ||
+        !["KEEP_TEACHER", "KEEP_SCHEDULE"].includes(choiceValue)
+      ) {
+        return false;
+      }
+
+      const priorities: string[] = [...draft.value.priorityOrder];
+      const teacher = "SPECIFIC_TEACHER";
+      const schedule = "SCHEDULE";
+      const teacherIndex = priorities.indexOf(teacher);
+      const scheduleIndex = priorities.indexOf(schedule);
+      const insertionIndex =
+        teacherIndex < 0
+          ? scheduleIndex < 0
+            ? priorities.length
+            : scheduleIndex
+          : scheduleIndex < 0
+            ? teacherIndex
+            : Math.min(teacherIndex, scheduleIndex);
+      const withoutTradeoff = priorities.filter(
+        (priority) => priority !== teacher && priority !== schedule,
+      );
+      if (withoutTradeoff.length + 2 > 10) {
+        clarificationError.value =
+          "现有目标优先级已达到上限，无法在保留原顺序的同时记录这次取舍。请回到目标排序页调整后再试。";
+        return false;
+      }
+
+      const selected =
+        choiceValue === "KEEP_TEACHER"
+          ? [teacher, schedule]
+          : [schedule, teacher];
+      const next = [...withoutTradeoff];
+      next.splice(Math.min(insertionIndex, next.length), 0, ...selected);
+      clearPlanningHandoff();
+      clarificationPriorityOrder.value = next;
+      clarificationError.value = "";
+      return true;
     }
 
     /**
@@ -506,6 +569,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         courses,
         transcriptComplete,
       );
+      if (client.mode === "simulation") input.sourceKind = "SYNTHETIC";
       const token = {};
       pendingSave = token;
       const { version, signal } = beginRecordRequest();
@@ -617,6 +681,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       handoffMissing,
       handoffHints,
       planningResult,
+      clarificationError,
       submitStatus,
       submitError,
       records,
@@ -639,6 +704,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       movePriority,
       confirmPriorities,
       preparePlanningHandoff,
+      answerTradeoffClarification,
       submitPlan,
       loadRecords,
       selectRecord,

@@ -73,7 +73,7 @@ export type ReviewNoteSearch = {
 };
 
 export interface CoursePilotApiClient {
-  readonly mode: "http" | "fixture";
+  readonly mode: "http" | "fixture" | "simulation";
   createSession(signal?: AbortSignal): Promise<SessionView>;
   listCurricula(signal?: AbortSignal): Promise<CurriculumResult>;
   /** E2 / E-F1：列出本会话已有的学业记录。items 为空数组是正常业务状态。 */
@@ -284,7 +284,7 @@ function businessStatus(envelope: Envelope<unknown>): BusinessStatus {
 const PLANNING_TIMEOUT_MS = 50_000;
 
 export class HttpApiClient implements CoursePilotApiClient {
-  readonly mode = "http" as const;
+  readonly mode: "http" | "simulation";
   private readonly baseUrl: string;
   private readonly fetcher: typeof fetch;
   private sessionToken: string | null = null;
@@ -293,7 +293,9 @@ export class HttpApiClient implements CoursePilotApiClient {
     baseUrl: string,
     fetcher: typeof fetch = globalThis.fetch,
     private readonly timeoutMs = 8_000,
+    mode: "http" | "simulation" = "http",
   ) {
+    this.mode = mode;
     // 浏览器的 window.fetch 是原生方法，调用时会校验 this 必须是 window。
     // 存成实例字段后用 this.fetcher(...) 调用，this 变成本实例，浏览器直接抛
     // TypeError: Illegal invocation，请求根本发不出去。Node 与 mock 都不做这个
@@ -381,10 +383,12 @@ export class HttpApiClient implements CoursePilotApiClient {
         item.sourceKind === "SYNTHETIC" ||
         item.sourceValidation === "SYNTHETIC",
     );
-    const items = publishedCurricula.filter(
-      (item) =>
-        item.sourceKind !== "SYNTHETIC" &&
-        item.sourceValidation !== "SYNTHETIC",
+    const items = publishedCurricula.filter((item) =>
+      this.mode === "simulation"
+        ? item.sourceKind === "SYNTHETIC" &&
+          item.sourceValidation === "SYNTHETIC"
+        : item.sourceKind !== "SYNTHETIC" &&
+          item.sourceValidation !== "SYNTHETIC",
     );
     return {
       items,
@@ -392,7 +396,9 @@ export class HttpApiClient implements CoursePilotApiClient {
         ...(envelope.status === "UNKNOWN"
           ? ["部分培养方案资料暂不可用，当前只列出可用资料。"]
           : []),
-        ...(containsSynthetic ? ["演示培养方案不会用于真实服务模式。"] : []),
+        ...(containsSynthetic && this.mode === "http"
+          ? ["演示培养方案不会用于真实服务模式。"]
+          : []),
       ],
     };
   }

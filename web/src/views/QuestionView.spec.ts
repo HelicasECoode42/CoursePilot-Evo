@@ -358,6 +358,21 @@ describe("student question page", () => {
     expect(router.currentRoute.value.path).toBe("/plan/questions/ready");
   });
 
+  it("shows selected course and teacher on the confirmation page", async () => {
+    store.$patch({
+      draft: {
+        ...emptyPlanningDraft(),
+        teacherPicks: [
+          { courseCode: "CS101", teacherKey: "T_ZHANG", mode: "MUST" },
+        ],
+      },
+    });
+    await router.replace("/plan/questions/ready");
+    const wrapper = mountPage();
+    expect(wrapper.text()).toContain("CS101 · T_ZHANG · 必须保留");
+    expect(wrapper.text()).not.toContain("尚未选择具体课程与教师");
+  });
+
   it("uses fill-or-blank wording on the confirmation page for every unanswered item", async () => {
     store.$patch({
       draft: {

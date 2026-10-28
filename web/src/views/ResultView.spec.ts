@@ -5,12 +5,14 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import { api } from "../api";
 import { ApiFailure } from "../api/client";
 import type {
+  AcademicRecord,
   CourseOffering,
   Meeting,
   PlanItem,
   PlanningAnswer,
   PlanValidation,
   Recommendation,
+  SnapshotSummary,
   SessionOfferingList,
   SessionPlanReplacement,
 } from "../contracts";
@@ -18,6 +20,35 @@ import { usePlanningStore } from "../stores/planning";
 import ResultView from "./ResultView.vue";
 
 const PLAN_ID = "plan-test-1";
+const CLARIFY_ANSWER: PlanningAnswer = {
+  ...{
+    taskId: "task-clarify",
+    traceId: "trace-clarify",
+    decision: "CLARIFY",
+    academicAudit: {
+      curriculumSnapshotId: "curriculum-clarify",
+      academicRecordId: "record-clarify",
+      recordRevision: 1,
+      transcriptComplete: true,
+      requirements: [],
+      suggestedCourseCodes: [],
+      unknowns: [],
+    },
+    recommendations: [],
+    clarification: {
+      questionId: "tradeoff:teacher-vs-schedule",
+      text: "请确认指定教师和硬时间的优先顺序。",
+      choices: [
+        { value: "KEEP_TEACHER", label: "先保留指定教师" },
+        { value: "KEEP_SCHEDULE", label: "先保证硬时间" },
+      ],
+      allowFreeText: false,
+      requiredFor: ["teacher_vs_schedule"],
+    },
+    unknowns: [],
+    usage: { inputTokens: 1, outputTokens: 1, toolCalls: 1, elapsedMs: 1 },
+  },
+};
 const WEEKS = Array.from({ length: 16 }, (_, index) => index + 1);
 const MON_1_2: Meeting = {
   dayOfWeek: 1,
@@ -210,6 +241,79 @@ describe("result page course search and replacement", () => {
     await buttonByText(wrapper, "重新核验这份方案")?.trigger("click");
     await flushPromises();
   };
+
+  it("shows the supported tradeoff and resubmits the answered request", async () => {
+    const curriculum: SnapshotSummary = {
+      snapshotId: "curriculum-clarify",
+      kind: "CURRICULUM",
+      state: "PUBLISHED",
+      sourceKind: "CURRICULUM_FILE",
+      termId: null,
+      createdAt: "2026-10-01T00:00:00Z",
+      sourceValidation: "VERIFIED",
+    };
+    const record: AcademicRecord = {
+      academicRecordId: "record-clarify",
+      revision: 1,
+      curriculumSnapshotId: curriculum.snapshotId,
+      completedCourses: [],
+      transcriptComplete: true,
+      sourceKind: "USER_IMPORT",
+      createdAt: "2026-10-01T00:00:00Z",
+    };
+    const calls: Array<{
+      request: import("../contracts").PlanningRequest;
+      key: string;
+    }> = [];
+    const submit = vi
+      .spyOn(api, "submitPlanning")
+      .mockImplementation(async (request, key) => {
+        calls.push({ request, key });
+        return calls.length === 1 ? CLARIFY_ANSWER : answer();
+      });
+    store.$patch({
+      sessionStatus: "ready",
+      sessionId: "session-clarify",
+      expiresAt: "2099-01-01T00:00:00Z",
+      curricula: [curriculum],
+      selectedCurriculumId: curriculum.snapshotId,
+      records: [record],
+      selectedRecordId: record.academicRecordId,
+      draft: {
+        ...store.draft,
+        motives: ["GPA"],
+        priorityOrder: ["GPA"],
+        teacherPicks: [
+          { courseCode: "CS101", teacherKey: "teacher:demo", mode: "MUST" },
+        ],
+        mustSlots: ["5-1"],
+        mustReviewed: true,
+        preferReviewed: true,
+        classPreferencesReviewed: true,
+        prioritiesConfirmed: true,
+      },
+    });
+    await store.submitPlan();
+    const wrapper = mountPage();
+
+    expect(wrapper.text()).toContain("不会取消任何 MUST 教师");
+    expect(wrapper.text()).toContain("若两者冲突");
+    await buttonByText(wrapper, "先保证硬时间并继续规划")?.trigger("click");
+    await flushPromises();
+
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(calls[1].key).not.toBe(calls[0].key);
+    expect(calls[1].request.intent.priorityOrder).toEqual([
+      "GPA",
+      "SCHEDULE",
+      "SPECIFIC_TEACHER",
+    ]);
+    expect(calls[1].request.intent.hardConstraints).toHaveLength(1);
+    expect(calls[1].request.intent.pinnedTeacherCoursePairs).toEqual([
+      { courseCode: "CS101", teacherKey: "teacher:demo", mode: "MUST" },
+    ]);
+    expect(store.planningResult?.decision).toBe("RECOMMENDATIONS");
+  });
 
   it("shows conflicting, selectable, and unparsed offerings as three distinct states", async () => {
     stubOfferings();
