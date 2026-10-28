@@ -94,7 +94,11 @@ class Transport(Protocol):
 class UrllibTransport:
     """真实 HTTP 传输（标准库，无第三方依赖）。"""
 
-    def __init__(self, timeout: float = 10.0) -> None:
+    # 必须大于服务自己的运行预算（docs/04 第 3 节：总 45 秒）。客户端先超时的话，
+    # 一次合规的慢响应会被折算成 status=0「服务未响应」判 FAIL——实测真模型规划
+    # 约 4-5 秒，但偶发更久时 10 秒会被掐断。让服务的截止时间先触发、返回 504，
+    # 判定才能看到真实行为。
+    def __init__(self, timeout: float = 60.0) -> None:
         self.timeout = timeout
 
     def request(self, method: str, url: str, headers: dict[str, str], body: Any = None) -> Response:

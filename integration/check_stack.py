@@ -217,6 +217,37 @@ def step_planning(chain: Chain) -> StepResult:
     return result
 
 
+def _replan_without_a_previous_plan(chain: Chain, step: str, request_id: str, url: str) -> StepResult:
+    """没有可改的方案时，验证「别人的 planId 必须被拒」并判 DEGRADED。"""
+    body = load_contract_example("planning-request.json")
+    body["curriculumSnapshotId"] = chain.curriculum_id
+    body["academicRecordId"] = chain.record_id or body["academicRecordId"]
+    body["previousPlanId"] = "plan:not-in-this-session"
+    headers = chain.headers(request_id, auth=True, idempotency=request_id)
+    expect = "上一步没有产出方案：不属于本会话的 previousPlanId 必须被 404 拒绝"
+    response = chain.transport.request("POST", url, headers, body)
+    repro = repro_curl("POST", url, headers, body)
+    result = evaluate(
+        step,
+        request_id,
+        expect,
+        response,
+        [Attempt("404 方案不属于本会话", 404, "NOT_FOUND", "NOT_FOUND", degraded=True)],
+        repro,
+    )
+    if result.verdict == FAIL:
+        return result
+    return StepResult(
+        step,
+        DEGRADED,
+        request_id,
+        expect,
+        response.describe(),
+        detail="上一步先澄清或拒答，没有方案可改；已验证他人方案 id 被 404 拒绝",
+        repro=repro,
+    )
+
+
 def step_replan(chain: Chain) -> StepResult:
     """改条件重算一次，并验证同一次请求重复提交不会被跑第二遍（幂等）。"""
     step = "replan"
@@ -226,10 +257,16 @@ def step_replan(chain: Chain) -> StepResult:
     body["curriculumSnapshotId"] = chain.curriculum_id
     body["academicRecordId"] = chain.record_id or body["academicRecordId"]
     recommendations = chain.answer.get("recommendations") or []
+    previous_plan_id = None
     if recommendations and isinstance(recommendations[0], dict):
-        body["previousPlanId"] = recommendations[0].get("planId")
-    else:
-        body["previousPlanId"] = "plan:previous"
+        previous_plan_id = recommendations[0].get("planId")
+    if not previous_plan_id:
+        # 上一步先澄清或拒答时没有方案可改，重规划的正常分支本轮验证不了。
+        # 这时不拿写死的假 id 去打——那个方案不属于本会话，被 404 拒掉是
+        # docs/04「previousPlanId 必须属当前会话」要求的正确行为，判 FAIL 等于
+        # 把正确行为报成缺陷。改为就地验证这条拒绝规则，并判 DEGRADED 说明原因。
+        return _replan_without_a_previous_plan(chain, step, request_id, url)
+    body["previousPlanId"] = previous_plan_id
     idempotency = request_id
     headers = chain.headers(request_id, auth=True, idempotency=idempotency)
     expect = "200 + Envelope(OK)；同 Idempotency-Key 重复提交必须返回同一份结果（不双跑）"

@@ -351,3 +351,63 @@ def test_api_child_process_gets_the_model_config():
     env = child_env(api, values)
     for key, expected in values.items():
         assert env[key] == expected, f"{key} 没传给 api 子进程"
+
+
+def test_replan_without_a_previous_plan_checks_the_ownership_rule_instead_of_failing():
+    """上一步先澄清时，重规划不该拿写死的假 planId 去打。
+
+    那个方案不属于本会话，被 404 拒掉是 docs/04「previousPlanId 必须属当前会话」
+    要求的正确行为。判 FAIL 等于把正确行为报成产品缺陷。本轮改为就地验证这条
+    拒绝规则，判 DEGRADED 说明正常分支没验到。
+    """
+    from check_stack import step_replan
+
+    transport = FakeTransport(
+        {"planning": Response(404, envelope("NOT_FOUND", issues=[{"code": "NOT_FOUND", "message": "不在会话"}]))}
+    )
+    chain = make_chain(transport, java_ready=True)
+    chain.answer = planning_answer("CLARIFY")  # 没有 recommendations
+    result = step_replan(chain)
+    assert result.verdict == DEGRADED
+    sent = transport.calls[0][3]
+    assert sent["previousPlanId"] == "plan:not-in-this-session"
+
+    # 若服务反而放行了别人的方案，必须判失败——这条检查不能失去牙齿。
+    lax = FakeTransport({"planning": Response(200, envelope(data=planning_answer("RECOMMENDATIONS")))})
+    lax_chain = make_chain(lax, java_ready=True)
+    lax_chain.answer = planning_answer("CLARIFY")
+    assert step_replan(lax_chain).verdict == FAIL
+
+
+def test_replan_uses_the_plan_id_from_the_previous_step():
+    from check_stack import step_replan
+
+    rec = {
+        "planId": "plan:real-one",
+        "items": [{"courseCode": "CS101"}],
+        "explanation": "x",
+        "verification": {"verdict": "VALID"},
+    }
+    transport = FakeTransport(
+        {
+            "planning": [
+                Response(200, envelope(data=planning_answer("RECOMMENDATIONS", [rec]))),
+                Response(200, envelope(data=planning_answer("RECOMMENDATIONS", [rec]))),
+            ]
+        }
+    )
+    chain = make_chain(transport, java_ready=True)
+    chain.answer = planning_answer("RECOMMENDATIONS", [rec])
+    step_replan(chain)
+    assert transport.calls[0][3]["previousPlanId"] == "plan:real-one"
+
+
+def test_http_timeout_outlives_the_service_run_budget():
+    """客户端超时必须大于服务的运行预算（docs/04：总 45 秒）。
+
+    客户端先超时，一次合规的慢响应就会折算成 status=0「服务未响应」判 FAIL。
+    真模型规划实测 4-5 秒，但偶发更久；原来的 10 秒会把它掐断成假失败。
+    """
+    from stack_checks import UrllibTransport
+
+    assert UrllibTransport().timeout > 45.0
