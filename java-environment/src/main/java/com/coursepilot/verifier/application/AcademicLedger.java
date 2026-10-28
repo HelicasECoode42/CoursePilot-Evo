@@ -25,9 +25,12 @@ import java.util.function.Function;
  *
  * 规则：
  *   - 重修去重：同一课程取第一次 PASSED 的那次，之后的修读不再计。
- *   - 只有 PASSED 计入已修学分；FAILED 不计，也不算未知。
+ *   - 只有 PASSED 计入已修学分；FAILED 不计，也不算未知（确定没通过，是事实）。
+ *   - 没有学业记录（transcript 为 null）：所有要求判 UNKNOWN，缺口不给确定值。
+ *   - 学业记录未声明完整（transcriptComplete = false）：已修学分只是下界。
+ *     已满足的要求仍为满足（学分只增不减）；未满足的要求判 UNKNOWN，缺口不给确定值。
  *   - IN_PROGRESS / UNKNOWN 不计学分，但它们可能带来学分：相应类别记为「待定」。
- *     待定类别若已满足则仍为满足（学分只增不减）；未满足则判 UNKNOWN，不判确定缺口。
+ *     待定类别若已满足则仍为满足；未满足则判 UNKNOWN，不判确定缺口。
  *   - PASSED 但学分未知（课程库与记录都没有学分）、或课程不在库中 / 类别为空：
  *     相应类别判 UNKNOWN。课程不在库或类别为空时无法归类，所有类别都判 UNKNOWN。
  */
@@ -41,15 +44,25 @@ final class AcademicLedger {
     private boolean pendingAll;
     private boolean hasPassed;
     private final List<AuditDtos.Issue> issues = new ArrayList<>();
+    /** 没有学业记录：所有要求都无法确定。 */
+    private final boolean noRecord;
+    /** 学业记录是否声明完整；没有记录时视为不完整。 */
+    private final boolean transcriptComplete;
 
-    private AcademicLedger() {}
+    private AcademicLedger(boolean noRecord, boolean transcriptComplete) {
+        this.noRecord = noRecord;
+        this.transcriptComplete = transcriptComplete;
+    }
 
-    /** transcript 为 null 表示该主体还没有学业记录：没有任何课程，也没有问题项。 */
+    /**
+     * transcript 为 null 表示该主体还没有学业记录：没有任何课程，也没有问题项，
+     * 所有要求都判 UNKNOWN（不把「没有记录」当成「已修 0 学分」）。
+     */
     static AcademicLedger of(Transcript transcript, Function<String, Optional<Course>> catalog) {
-        AcademicLedger ledger = new AcademicLedger();
         if (transcript == null) {
-            return ledger;
+            return new AcademicLedger(true, false);
         }
+        AcademicLedger ledger = new AcademicLedger(false, transcript.isTranscriptComplete());
         Map<String, List<TranscriptCourse>> byCode = new LinkedHashMap<>();
         for (TranscriptCourse c : transcript.getCompletedCourses()) {
             byCode.computeIfAbsent(c.getCourseCode(), k -> new ArrayList<>()).add(c);
@@ -124,13 +137,15 @@ final class AcademicLedger {
     /** 相应要求的状态。 */
     AuditDtos.State stateFor(Requirement req) {
         String category = req.getCategory();
-        if (hardUnknownAll || hardUnknownCategories.contains(category)) {
+        if (noRecord || hardUnknownAll || hardUnknownCategories.contains(category)) {
             return AuditDtos.State.UNKNOWN;
         }
+        // 已修学分只增不减：未声明完整时，已满足的要求依然满足。
         if (earned(category) >= req.getRequiredCredits()) {
             return AuditDtos.State.SATISFIED;
         }
-        if (pendingAll || pendingCategories.contains(category)) {
+        // 未声明完整：漏录的课可能正好补足缺口，未满足的要求不能判确定缺口。
+        if (!transcriptComplete || pendingAll || pendingCategories.contains(category)) {
             return AuditDtos.State.UNKNOWN;
         }
         return AuditDtos.State.UNSATISFIED;

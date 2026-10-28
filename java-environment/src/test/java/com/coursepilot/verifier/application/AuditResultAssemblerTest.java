@@ -211,6 +211,67 @@ class AuditResultAssemblerTest {
     assertEquals(2, assembler.assemble(PLAN, STUDENT).recordRevision());
   }
 
+  @Test
+  @DisplayName("完全没有学业记录：所有要求 UNKNOWN，缺口不给确定值，不把未知当 0 判 UNSATISFIED")
+  void noRecordMakesEveryRequirementUnknown() {
+    requirementRepo.save(new Requirement(PLAN, "通识", 4.0));
+    requirementRepo.save(new Requirement(PLAN, "必修", 10.0));
+
+    AuditDtos.AuditResult result = assembler.assemble(PLAN, STUDENT);
+    assertEquals(2, result.requirements().size());
+    for (AuditDtos.AuditItem item : result.requirements()) {
+      assertEquals(AuditDtos.State.UNKNOWN, item.state());
+      assertNull(item.gapCredits(), "无记录时缺口不能是确定数字");
+    }
+    assertTrue(result.unknowns().stream().anyMatch(i -> i.code().equals("ACADEMIC_RECORD_EMPTY")));
+  }
+
+  @Test
+  @DisplayName("未声明完整：未满足的要求判 UNKNOWN 且缺口不给值，已满足的仍 SATISFIED")
+  void incompleteTranscriptMakesUnmetGapUnknown() {
+    requirementRepo.save(new Requirement(PLAN, "通识", 4.0));
+    requirementRepo.save(new Requirement(PLAN, "专选", 24.0));
+    courseRepo.save(new Course("C10", "通识甲", 4.0, "通识"));
+    courseRepo.save(new Course("C11", "专选甲", 3.0, "专选"));
+    transcript(false,
+        row("C10", 4.0, TranscriptCourse.Outcome.PASSED, 1),
+        row("C11", 3.0, TranscriptCourse.Outcome.PASSED, 1));
+
+    AuditDtos.AuditResult result = assembler.assemble(PLAN, STUDENT);
+    AuditDtos.AuditItem general = byRequired(result, 4.0);
+    AuditDtos.AuditItem elective = byRequired(result, 24.0);
+
+    assertEquals(AuditDtos.State.SATISFIED, general.state(), "已满足不会因未声明完整而变不满足");
+    assertEquals(0.0, general.gapCredits());
+    assertEquals(AuditDtos.State.UNKNOWN, elective.state(), "未满足的要求不能判确定缺口");
+    assertNull(elective.gapCredits(), "未声明完整时缺口不能是确定数字");
+    assertEquals(3.0, elective.earnedCredits());
+    assertTrue(result.unknowns().stream()
+        .anyMatch(i -> i.code().equals("TRANSCRIPT_COMPLETENESS_UNKNOWN")));
+  }
+
+  @Test
+  @DisplayName("FAILED 是确定事实：记录完整时仍判 UNSATISFIED，缺口是确定数字，不因此变 UNKNOWN")
+  void failedCourseGivesDefiniteGap() {
+    requirementRepo.save(new Requirement(PLAN, "物理", 4.0));
+    courseRepo.save(new Course("C12", "大物甲", 4.0, "物理"));
+    transcript(true, row("C12", 4.0, TranscriptCourse.Outcome.FAILED, 1));
+
+    AuditDtos.AuditResult result = assembler.assemble(PLAN, STUDENT);
+    AuditDtos.AuditItem item = onlyItem(result);
+    assertEquals(AuditDtos.State.UNSATISFIED, item.state());
+    assertEquals(4.0, item.gapCredits());
+    assertTrue(result.unknowns().stream().noneMatch(i -> i.code().startsWith("PENDING")),
+        "FAILED 不应产生待定项");
+  }
+
+  private static AuditDtos.AuditItem byRequired(AuditDtos.AuditResult result, double required) {
+    return result.requirements().stream()
+        .filter(i -> i.requiredCredits() == required)
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("没有 requiredCredits=" + required + " 的要求项"));
+  }
+
   /** 按给定课程行写入一份学业记录（同一主体只有一份）。 */
   private Transcript transcript(boolean complete, TranscriptCourse... rows) {
     Transcript t = new Transcript(STUDENT);

@@ -22,13 +22,13 @@ public final class AuditDtos {
     /** contracts: AuditItem.state */
     public enum State { SATISFIED, UNSATISFIED, UNKNOWN }
 
-    /** contracts: AuditItem */
+    /** contracts: AuditItem。gapCredits 在 state=UNKNOWN 时为 null，表示缺口无法确定。 */
     public record AuditItem(
         String requirementId,
         List<String> courseCodes,
         double requiredCredits,
         double earnedCredits,
-        double gapCredits,
+        Double gapCredits,
         State state,
         List<String> sourceRefIds) {}
 

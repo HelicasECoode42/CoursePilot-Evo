@@ -50,11 +50,12 @@ class AcademicRecordAuditEndToEndTest {
             courses.save(new Course("GE102", "通识阅读", 2.0, "通识"));
         }
 
-        // 补录前：没有学业记录，通识 4 学分未满足。
+        // 补录前：没有学业记录，通识 4 学分无法确定，缺口为 null，不能当成确定的 0 或确定的缺口。
         JsonNode before = audit();
         JsonNode general = itemRequiring(before, 4.0);
-        assertEquals("UNSATISFIED", general.get("state").asText());
+        assertEquals("UNKNOWN", general.get("state").asText());
         assertEquals(0.0, general.get("earnedCredits").asDouble());
+        assertTrue(general.get("gapCredits").isNull(), "无记录时缺口不能是确定数字");
 
         // 补录：通识 GE101 + GE102 共 4 学分，必修 CS101 + CS102 共 7 学分。
         submit(sampleBody(true)).andExpect(status().isCreated());
