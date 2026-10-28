@@ -88,6 +88,13 @@ public class ApiExceptionHandler {
                 "curriculumSnapshotId", false));
     }
 
+    /** 查询参数存在但格式或范围不合法，例如 limit 超出 1..10 */
+    @ExceptionHandler(InvalidQuery.class)
+    public ResponseEntity<Envelope<Void>> invalidQuery(InvalidQuery ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(Envelope.error(null, "INVALID_QUERY", ex.getMessage(), ex.getField(), false));
+    }
+
     /** 缺少必填请求头 */
     @ExceptionHandler(MissingRequestHeaderException.class)
     public ResponseEntity<Envelope<Void>> missingHeader(MissingRequestHeaderException ex) {

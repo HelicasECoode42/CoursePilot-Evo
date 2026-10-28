@@ -18,7 +18,9 @@ public class SeedData {
                            RequirementRepository reqRepo,
                            CourseOfferingRepository offeringRepo,
                            CurriculumSnapshotRepository snapshotRepo,
-                           TranscriptRepository transcriptRepo) {
+                           TranscriptRepository transcriptRepo,
+                           TeacherCourseRepository teacherCourseRepo,
+                           ReviewNoteRepository reviewNoteRepo) {
         return args -> {
             // 快照种子用自己的「表为空才写」判断，不能放在课程种子的早退之后：
             // 文件库（ddl-auto=update）里课程表已非空时，快照表若仍为空，
@@ -68,6 +70,48 @@ public class SeedData {
                         new TranscriptCourse("GE101", 1, new BigDecimal("2.00"),
                             TranscriptCourse.Outcome.PASSED, "2024-2025-2")));
                 transcriptRepo.save(t);
+            }
+
+            // 教师与评价的演示种子。全部是 SYNTHETIC 的虚构内容，sourceUrl 一律为空，
+            // 不编造指向真实教务或网站的来源。放在课程早退之前，独立判断自己的表是否为空。
+            //
+            // 覆盖：matchStatus 的 COURSE_TEACHER_MATCHED / COURSE_ONLY / UNVERIFIED；
+            // availability 的 HISTORICAL_ONLY / UNKNOWN。CURRENT_VERIFIED 故意不种：
+            // 没有任何已核验来源说明当期开课，见 TeacherReviewAssembler.availability。
+            if (teacherCourseRepo.count() == 0) {
+                // CS102 声明了一个当期学期，但来源是 SYNTHETIC，所以仍不能是 CURRENT_VERIFIED。
+                teacherCourseRepo.save(new TeacherCourse("PLAN_CS_2025", "CS101", "T_ZHANG", "张老师",
+                    null, TeacherCourse.SourceValidation.SYNTHETIC));
+                teacherCourseRepo.save(new TeacherCourse("PLAN_CS_2025", "CS102", "T_LI", "李老师",
+                    "2025-FALL", TeacherCourse.SourceValidation.SYNTHETIC));
+                // 王老师只有绑定，没有任何历史评价，应判为 UNKNOWN。
+                teacherCourseRepo.save(new TeacherCourse("PLAN_CS_2025", "CS103", "T_WANG", "王老师",
+                    null, TeacherCourse.SourceValidation.SYNTHETIC));
+            }
+            if (reviewNoteRepo.count() == 0) {
+                reviewNoteRepo.save(new ReviewNote("R_CS101_T_ZHANG_01", "CS101", "T_ZHANG", "2024-2025-1",
+                    ReviewNote.SourceKind.SYNTHETIC, Instant.parse("2025-01-10T00:00:00Z"), null,
+                    "【演示数据】平时作业较多，期末以上机为主。",
+                    List.of(ReviewNote.Dimension.GRADING, ReviewNote.Dimension.WORKLOAD)));
+                // 课程级评价：没有教师信息，teacherKey 为空，只能说明课程，不能说明某位教师。
+                reviewNoteRepo.save(new ReviewNote("R_CS101_COURSE_01", "CS101", null, "2023-2024-2",
+                    ReviewNote.SourceKind.SYNTHETIC, null, null,
+                    "【演示数据】课程内容稳定，无法确定授课教师。",
+                    List.of(ReviewNote.Dimension.OVERALL)));
+                reviewNoteRepo.save(new ReviewNote("R_CS102_T_LI_01", "CS102", "T_LI", "2024-2025-2",
+                    ReviewNote.SourceKind.SYNTHETIC, Instant.parse("2025-06-20T00:00:00Z"), null,
+                    "【演示数据】点名比较频繁，授课节奏偏快。",
+                    List.of(ReviewNote.Dimension.ATTENDANCE, ReviewNote.Dimension.TEACHING)));
+                // 这条评价提到的教师 T_ZHANG 没有绑定到 CS102，所以是 UNVERIFIED，不能挂到张老师名下。
+                reviewNoteRepo.save(new ReviewNote("R_CS102_UNBOUND_01", "CS102", "T_ZHANG", "2024-2025-1",
+                    ReviewNote.SourceKind.SYNTHETIC, null, null,
+                    "【演示数据】实验较多，教师身份未在本课程绑定中确认。",
+                    List.of(ReviewNote.Dimension.WORKLOAD)));
+                // CS103 的评价无法匹配到教师：teacherKey 为空，matchStatus 为 COURSE_ONLY。
+                reviewNoteRepo.save(new ReviewNote("R_CS103_COURSE_01", "CS103", null, "2023-2024-1",
+                    ReviewNote.SourceKind.SYNTHETIC, null, null,
+                    "【演示数据】期末展示占比较高，具体授课教师无法从本条评价确认。",
+                    List.of(ReviewNote.Dimension.PRESENTATION, ReviewNote.Dimension.EXAM)));
             }
 
             if (courseRepo.count() > 0) return;
