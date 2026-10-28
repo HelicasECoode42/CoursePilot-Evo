@@ -67,6 +67,14 @@ class ToolSpec:
     listed: bool = False
 
 
+@dataclass(frozen=True)
+class ToolPage:
+    """A Java list response including its pagination cursor."""
+
+    items: list[BaseModel]
+    next_cursor: str | None
+
+
 # Registered Java typed tools (contracts/java.openapi.json). The Runner and the
 # ModelAdapter may only call these; any other name is rejected before HTTP.
 TOOLS: dict[str, ToolSpec] = {
@@ -117,6 +125,7 @@ class ToolClient:
         context: ExecutionContext,
         *,
         params: dict[str, object] | None = None,
+        _include_page: bool = False,
     ) -> Any:
         spec = TOOLS.get(tool)
         if spec is None:
@@ -188,7 +197,15 @@ class ToolClient:
                     raise ToolContractViolation(
                         f"{tool}: list endpoints answer with data.items (java.openapi.json)"
                     )
-                return [spec.response_model.model_validate(item) for item in items]
+                parsed_items = [spec.response_model.model_validate(item) for item in items]
+                if _include_page:
+                    if "nextCursor" not in data:
+                        raise ToolContractViolation(f"{tool}: list response is missing nextCursor")
+                    next_cursor = data.get("nextCursor")
+                    if next_cursor is not None and not isinstance(next_cursor, str):
+                        raise ToolContractViolation(f"{tool}: nextCursor must be a string or null")
+                    return ToolPage(parsed_items, next_cursor)
+                return parsed_items
             if data is None:
                 raise ToolContractViolation(
                     f"{tool}: data is null on a {payload.get('status')} response"
@@ -198,6 +215,20 @@ class ToolClient:
             raise ToolContractViolation(f"{tool}: off contract: {exc}") from exc
         except (TypeError, AttributeError) as exc:
             raise ToolContractViolation(f"{tool}: unexpected data shape: {data!r}"[:300]) from exc
+
+    def call_page(
+        self,
+        tool: str,
+        dto: BaseModel | None,
+        context: ExecutionContext,
+        *,
+        params: dict[str, object] | None = None,
+    ) -> ToolPage:
+        """Call a listed tool while preserving the provider's nextCursor."""
+        result = self.call(tool, dto, context, params=params, _include_page=True)
+        if not isinstance(result, ToolPage):
+            raise ToolContractViolation(f"{tool}: pagination requested for a non-list tool")
+        return result
 
     def _send(
         self,

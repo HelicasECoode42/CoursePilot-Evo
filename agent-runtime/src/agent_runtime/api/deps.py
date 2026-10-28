@@ -11,6 +11,7 @@ from agent_runtime.adapters.tool_client import ToolClient
 from agent_runtime.api.errors import ForbiddenError, UnauthorizedError
 from agent_runtime.api.idempotency import IdempotencyStore
 from agent_runtime.api.session_store import SessionNotFound, SessionStore
+from agent_runtime.application.budget import SessionSpendLedger
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.plan_store import SessionPlanStore
 from agent_runtime.application.runner import PlanningRunner
@@ -34,6 +35,10 @@ def get_tool_client(request: Request) -> ToolClient:
 
 def get_runner(request: Request) -> PlanningRunner:
     return request.app.state.runner
+
+
+def get_spend_ledger(request: Request) -> SessionSpendLedger:
+    return request.app.state.spend_ledger
 
 
 def require_subject(

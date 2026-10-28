@@ -132,6 +132,7 @@ class HttpModelAdapter:
         api_key: str,
         model_id: str,
         temperature: float,
+        max_output_tokens: int,
         *,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
@@ -139,6 +140,7 @@ class HttpModelAdapter:
         self._api_key = api_key
         self._model_id = model_id
         self._temperature = temperature
+        self._max_output_tokens = max_output_tokens
         self._transport = transport
 
     def generate(
@@ -154,6 +156,9 @@ class HttpModelAdapter:
         payload = {
             "model": self._model_id,
             "temperature": self._temperature,
+            # 输出上限必须在请求里，由供应商侧截断。BudgetTracker.record_tokens 是
+            # 调用返回之后才检查的，那时 token 已经产生并计费，拦不住超额输出。
+            "max_tokens": self._max_output_tokens,
             "response_format": {"type": "json_object"},
             "messages": [
                 {
@@ -161,8 +166,14 @@ class HttpModelAdapter:
                     "content": (
                         "只输出一个 JSON 对象，不要解释。"
                         '格式为 {"items":[{"courseCode":"...","teacherKey":null,"classId":null}]} '
-                        '或 {"clarify":{"questionId":"...","text":"...","choices":[],'
+                        '或 {"clarify":{"questionId":"...","text":"...",'
+                        '"choices":[{"value":"...","label":"..."}],'
                         '"allowFreeText":true,"requiredFor":[]}}。'
+                        # choices 的元素形状必须写出来。只给空数组示例时，模型想给选项
+                        # 就会编成字符串数组，Question 校验失败 → MODEL_INVALID_OUTPUT，
+                        # 而 docs/04 第 3 节规定不自动重试，于是整个请求终止。
+                        "choices 的每一项都是 {value, label} 对象，不能是字符串；"
+                        "没有选项时用 []。"
                         "courseCode 必须来自 AVAILABLE_FACTS。"
                     ),
                 },
@@ -262,9 +273,12 @@ def build_model_adapter(
     model_api_key: str,
     model_id: str,
     temperature: float,
+    max_output_tokens: int,
 ) -> FakeModelAdapter | HttpModelAdapter:
     if model_base_url and model_api_key:
         if model_id.strip() == "" or model_id == PLACEHOLDER_MODEL_ID:
             raise ModelConfigError("已配置模型地址和密钥，但 CP_MODEL_ID 仍是占位符")
-        return HttpModelAdapter(model_base_url, model_api_key, model_id, temperature)
+        return HttpModelAdapter(
+            model_base_url, model_api_key, model_id, temperature, max_output_tokens
+        )
     return FakeModelAdapter()

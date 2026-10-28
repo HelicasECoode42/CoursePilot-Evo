@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     max_model_calls: int = Field(default=3, ge=1)
     deadline_ms: int = Field(default=45000, ge=1)
 
+    # 每会话累计上限（SessionSpendCap）。上面那组是「一次运行」的预算，运行结束即归零；
+    # 这组限制一个会话总共能花多少，防止换 Idempotency-Key 反复提交把账单跑上去。
+    session_max_input_tokens: int = Field(default=40000, ge=1)
+    session_max_output_tokens: int = Field(default=10000, ge=1)
+    max_tracked_sessions: int = Field(default=10000, ge=1)
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

@@ -7,16 +7,23 @@ configured, ``ToolClient.call`` raises ToolUnavailable -> 503.
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 
 from agent_runtime.adapters.tool_client import ToolClient
 from agent_runtime.api.deps import get_tool_client, make_context, require_subject
-from agent_runtime.api.errors import envelope
+from agent_runtime.api.errors import InvalidQueryError, envelope
 from agent_runtime.api.schemas import AuditRequest, AuditResult
 
 router = APIRouter()
+_OFFSET_CURSOR = re.compile(r"^[0-9]{1,9}$")
+
+
+def _validate_cursor(cursor: str | None) -> None:
+    if cursor is not None and _OFFSET_CURSOR.fullmatch(cursor) is None:
+        raise InvalidQueryError("cursor 格式不合法", field="cursor")
 
 
 @router.post("/api/v1/requirements/audit")
@@ -55,8 +62,9 @@ def list_courses(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     cursor: Annotated[str | None, Query()] = None,
 ) -> dict:
+    _validate_cursor(cursor)
     context = make_context(request, subject_id, x_request_id, curriculum_snapshot_id)
-    result = tool_client.call(
+    page = tool_client.call_page(
         "listCourses",
         None,
         context,
@@ -67,9 +75,9 @@ def list_courses(
             "cursor": cursor,
         },
     )
-    return envelope(x_request_id, "OK", {"items": result, "nextCursor": None}).model_dump(
-        mode="json"
-    )
+    return envelope(
+        x_request_id, "OK", {"items": page.items, "nextCursor": page.next_cursor}
+    ).model_dump(mode="json")
 
 
 @router.get("/api/v1/teacher-course-options")
@@ -84,8 +92,9 @@ def list_teacher_course_options(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     cursor: Annotated[str | None, Query()] = None,
 ) -> dict:
+    _validate_cursor(cursor)
     context = make_context(request, subject_id, x_request_id, curriculum_snapshot_id)
-    result = tool_client.call(
+    page = tool_client.call_page(
         "listTeacherCourseOptions",
         None,
         context,
@@ -97,9 +106,9 @@ def list_teacher_course_options(
             "cursor": cursor,
         },
     )
-    return envelope(x_request_id, "OK", {"items": result, "nextCursor": None}).model_dump(
-        mode="json"
-    )
+    return envelope(
+        x_request_id, "OK", {"items": page.items, "nextCursor": page.next_cursor}
+    ).model_dump(mode="json")
 
 
 @router.get("/api/v1/reviews/search")

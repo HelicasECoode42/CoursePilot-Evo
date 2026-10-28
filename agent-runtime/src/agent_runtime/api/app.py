@@ -24,7 +24,7 @@ from agent_runtime.api.routes import (
 )
 from agent_runtime.api.session_store import SessionStore
 from agent_runtime.api.settings import Settings, load_settings
-from agent_runtime.application.budget import Budget
+from agent_runtime.application.budget import Budget, SessionSpendCap, SessionSpendLedger
 from agent_runtime.application.plan_store import SessionPlanStore
 from agent_runtime.application.run_manifest import RunIdentity
 from agent_runtime.application.runner import PlanningRunner
@@ -66,6 +66,14 @@ def create_app(
         max_model_calls=settings.max_model_calls,
         deadline_ms=settings.deadline_ms,
     )
+    # 跨请求的那一层上限：Budget 只管一次运行，换 Idempotency-Key 重提就归零。
+    app.state.spend_ledger = SessionSpendLedger(
+        SessionSpendCap(
+            max_input_tokens=settings.session_max_input_tokens,
+            max_output_tokens=settings.session_max_output_tokens,
+            max_tracked_sessions=settings.max_tracked_sessions,
+        )
+    )
     app.state.runner = runner or PlanningRunner(
         tool_client=tool_client,
         harness=harness,
@@ -74,6 +82,8 @@ def create_app(
             model_api_key=settings.model_api_key,
             model_id=settings.model_id,
             temperature=settings.temperature,
+            # 预算是部署设置，不是 harness 文件：演化器改不到这里（settings.py 的注释）
+            max_output_tokens=settings.max_output_tokens,
         ),
         result_repository=result_repository,
         run_identity=RunIdentity(verifier_version=verifier_version),

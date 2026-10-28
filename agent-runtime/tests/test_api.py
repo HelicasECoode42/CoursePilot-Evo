@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -14,9 +15,9 @@ from agent_runtime.adapters.model_client import (
     ModelTimeout,
     ModelUpstreamError,
 )
-from agent_runtime.adapters.tool_client import ToolUnavailable
+from agent_runtime.adapters.tool_client import ToolPage, ToolUnavailable
 from agent_runtime.api.app import create_app
-from agent_runtime.api.schemas import AcademicRecord, AuditResult, PlanningRequest
+from agent_runtime.api.schemas import AcademicRecord, AuditItem, AuditResult, PlanningRequest
 from agent_runtime.api.settings import Settings, load_settings
 from agent_runtime.application.ids import digest
 from agent_runtime.application.runner import PlanningRunner
@@ -34,7 +35,17 @@ class FakeToolClient:
                 academicRecordId=dto.academicRecordId,
                 recordRevision=1,
                 transcriptComplete=False,
-                requirements=[],
+                requirements=[
+                    AuditItem(
+                        requirementId="req:credits",
+                        courseCodes=["CS101"],
+                        requiredCredits=Decimal("4.00"),
+                        earnedCredits=Decimal("3.00"),
+                        gapCredits=Decimal("1.00"),
+                        state="UNSATISFIED",
+                        sourceRefIds=["curr:demo"],
+                    )
+                ],
                 suggestedCourseCodes=[],
                 unknowns=[],
             )
@@ -68,6 +79,9 @@ class FakeToolClient:
         }:
             return []
         raise ToolUnavailable(tool)
+
+    def call_page(self, tool: str, dto, context, *, params=None):
+        return ToolPage(self.call(tool, dto, context, params=params), None)
 
 
 def _request_body() -> dict:
@@ -138,6 +152,53 @@ def test_gateway_list_courses_ok_with_fake_java() -> None:
     assert response.json()["data"] == {"items": [], "nextCursor": None}
 
 
+def test_gateway_teacher_options_preserves_java_next_cursor() -> None:
+    class PagedFake(FakeToolClient):
+        def call_page(self, tool, dto, context, *, params=None):
+            assert tool == "listTeacherCourseOptions"
+            assert params["curriculumSnapshotId"] == "curr:demo"
+            return ToolPage([], "20")
+
+    client = TestClient(create_app(tool_client=PagedFake()))
+    response = client.get(
+        "/api/v1/teacher-course-options",
+        params={"curriculumSnapshotId": "curr:demo"},
+        headers={"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:x1"},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"] == {"items": [], "nextCursor": "20"}
+
+
+def test_gateway_list_routes_work_with_configured_typed_fake_tools() -> None:
+    client = TestClient(create_app(Settings(use_fake_tools=True)))
+    headers = {"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:fake-page"}
+    courses = client.get(
+        "/api/v1/courses", params={"curriculumSnapshotId": "curr:demo"}, headers=headers
+    )
+    options = client.get(
+        "/api/v1/teacher-course-options",
+        params={"curriculumSnapshotId": "curr:demo"},
+        headers=headers,
+    )
+    assert courses.status_code == options.status_code == 200
+    assert len(courses.json()["data"]["items"]) == 2
+    assert len(options.json()["data"]["items"]) == 1
+    assert courses.json()["data"]["nextCursor"] is None
+    assert options.json()["data"]["nextCursor"] is None
+
+
+@pytest.mark.parametrize("cursor", ["-1", "1x", "1234567890"])
+def test_gateway_fake_tools_reject_invalid_course_cursor_like_java(cursor: str) -> None:
+    client = TestClient(create_app(Settings(use_fake_tools=True)))
+    response = client.get(
+        "/api/v1/courses",
+        params={"curriculumSnapshotId": "curr:demo", "cursor": cursor},
+        headers={"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:bad-cursor"},
+    )
+    assert response.status_code == 400
+    assert response.json()["issues"][0]["code"] == "INVALID_QUERY"
+
+
 def test_academic_records_requires_auth() -> None:
     client = TestClient(create_app())
     response = client.post(
@@ -160,6 +221,85 @@ def test_academic_records_save_is_idempotent() -> None:
     assert first.status_code == 201
     assert first.json()["data"]["academicRecordId"] == "record:demo"
     assert second.json() == first.json()
+
+
+def test_academic_record_response_uses_json_number_for_credits() -> None:
+    client = TestClient(create_app(tool_client=FakeToolClient()))
+    body = _record_body()
+    body["completedCourses"] = [
+        {
+            "courseCode": "CS101",
+            "earnedCredits": 3.0,
+            "outcome": "PASSED",
+            "completedTerm": "2024-2025-1",
+        }
+    ]
+    response = client.post(
+        "/api/v1/academic-records",
+        json=body,
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "Idempotency-Key": "k-credits-number",
+            "X-Request-Id": "req:credits-number",
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()["data"]
+    credits = data["completedCourses"][0]["earnedCredits"]
+    assert isinstance(credits, (int, float)) and not isinstance(credits, bool)
+    assert credits == 3.0
+    parsed = AcademicRecord.model_validate(data)
+    assert parsed.completedCourses[0].earnedCredits == Decimal("3.0")
+
+
+def test_academic_record_rejects_credit_string_as_off_contract_json() -> None:
+    client = TestClient(create_app(tool_client=FakeToolClient()))
+    body = _record_body()
+    body["completedCourses"] = [
+        {
+            "courseCode": "CS101",
+            "earnedCredits": "3.00",
+            "outcome": "PASSED",
+            "completedTerm": "2024-2025-1",
+        }
+    ]
+    response = client.post(
+        "/api/v1/academic-records",
+        json=body,
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "Idempotency-Key": "k-credits-string",
+            "X-Request-Id": "req:credits-string",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_audit_credit_fields_are_json_numbers() -> None:
+    client = TestClient(create_app(tool_client=FakeToolClient()))
+    response = client.post(
+        "/api/v1/requirements/audit",
+        json={
+            "schemaVersion": "1.0",
+            "curriculumSnapshotId": "curr:demo",
+            "academicRecordId": "record:demo",
+        },
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "X-Request-Id": "req:audit-decimals",
+        },
+    )
+    assert response.status_code == 200
+    item = response.json()["data"]["requirements"][0]
+    assert [item[field] for field in ("requiredCredits", "earnedCredits", "gapCredits")] == [
+        4.0,
+        3.0,
+        1.0,
+    ]
+    assert all(
+        isinstance(item[field], (int, float))
+        for field in ("requiredCredits", "earnedCredits", "gapCredits")
+    )
 
 
 def test_academic_records_list_requires_auth() -> None:

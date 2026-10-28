@@ -76,3 +76,61 @@ class BudgetTracker:
         elapsed_ms = int((datetime.now(UTC) - self.started_at).total_seconds() * 1000)
         if elapsed_ms > self.budget.deadline_ms:
             raise BudgetExceeded("deadline exceeded")
+
+
+@dataclass(frozen=True)
+class SessionSpendCap:
+    """每个会话的累计 token 上限。
+
+    ``Budget`` 管的是「一次运行」：BudgetTracker 在 PlanningRunner.run 里新建，
+    运行结束即丢弃。所以换一个会话、或在同一会话里换一个 Idempotency-Key 再提交，
+    预算就从零开始。本类补的是跨请求的那一层：一个会话总共能花多少。
+
+    默认值是单次运行预算（docs/04 第 3 节：input 8000 / output 2000）的 5 倍，
+    即一个会话大约可以完整跑 5 次规划。和 Budget 一样属于部署设置，不是 harness
+    文件，演化器改不到。
+    """
+
+    max_input_tokens: int = 40000
+    max_output_tokens: int = 10000
+    max_tracked_sessions: int = 10000
+
+
+class SessionSpendLedger:
+    """按会话累计 token 并在超限时拒绝新的运行。
+
+    进程内存实现，和 SessionStore 一样是本地演示用：重启即清空。真实部署需要
+    共享存储，否则多实例下每个实例各记一份，上限会被放大到实例数倍。
+
+    ``max_tracked_sessions`` 是内存上限：匿名建会话没有限流，不设上限的话这个
+    字典会跟着会话数无限增长。满了之后拒绝新会话的运行，而不是静默丢弃已有记账
+    （丢弃等于把花过的钱忘掉，上限就失效了）。
+    """
+
+    def __init__(self, cap: SessionSpendCap) -> None:
+        self._cap = cap
+        self._spent: dict[str, tuple[int, int]] = {}
+
+    def check(self, session_id: str) -> None:
+        """在发起运行前调用。已超限、或内存已满且是新会话，都直接拒绝。"""
+        spent_in, spent_out = self._spent.get(session_id, (0, 0))
+        if spent_in >= self._cap.max_input_tokens:
+            raise BudgetExceeded("本会话累计 input token 已达上限，请新建会话")
+        if spent_out >= self._cap.max_output_tokens:
+            raise BudgetExceeded("本会话累计 output token 已达上限，请新建会话")
+        if session_id not in self._spent and len(self._spent) >= self._cap.max_tracked_sessions:
+            raise BudgetExceeded("在跟踪的会话数已达上限，暂不接受新会话的规划请求")
+
+    def record(self, session_id: str, input_tokens: int | None, output_tokens: int | None) -> None:
+        """运行结束后记账。只在真正跑过模型时调用，幂等回放不重复计费。"""
+        if input_tokens is None and output_tokens is None:
+            return
+        spent_in, spent_out = self._spent.get(session_id, (0, 0))
+        self._spent[session_id] = (
+            spent_in + (input_tokens or 0),
+            spent_out + (output_tokens or 0),
+        )
+
+    def spent(self, session_id: str) -> tuple[int, int]:
+        """已花的 (input, output)，给测试和排查用。"""
+        return self._spent.get(session_id, (0, 0))

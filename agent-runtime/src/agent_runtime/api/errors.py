@@ -72,6 +72,24 @@ def _transient(status_code: int) -> bool:
     return status_code in (429, 503, 504)
 
 
+# Java 的业务拒绝：请求本身合规，是被指到的对象或状态不满足规则。这些不是契约不一致，
+# 原样透给调用方才有用——学生选了不存在的培养方案，该看到「没这个培养方案」，
+# 不是「网关坏了」。对照 java-environment/.../web/ApiExceptionHandler.java 的分支：
+#   422 SNAPSHOT_NOT_FOUND                （:88-89）
+#   409 CONFLICT                          （:81-82）
+#   409 SNAPSHOT_COURSE_FACTS_UNKNOWN     （:102-103）
+#   409 SNAPSHOT_MISMATCH                 （:109-110）
+# 这两个状态码在 planning.openapi.json 的每个相关端点都已声明。
+# Java 的 400（INVALID_INPUT / INVALID_QUERY / MISSING_PARAMETER / MALFORMED_JSON 等）
+# 不在此列：那表示本服务把请求拼错了，确实是违约，仍然判 502。
+_JAVA_BUSINESS_REJECTIONS: dict[tuple[int, str], tuple[int, str]] = {
+    (422, "SNAPSHOT_NOT_FOUND"): (422, "INVALID_INPUT"),
+    (409, "CONFLICT"): (409, "CONFLICT"),
+    (409, "SNAPSHOT_COURSE_FACTS_UNKNOWN"): (409, "CONFLICT"),
+    (409, "SNAPSHOT_MISMATCH"): (409, "CONFLICT"),
+}
+
+
 def _rejected_response(exc: ToolRejected) -> tuple[int, str, Issue]:
     """Decide what the browser sees when Java answered with an error envelope.
 
@@ -112,6 +130,12 @@ def _rejected_response(exc: ToolRejected) -> tuple[int, str, Issue]:
             retryable=_transient(429),
         )
         return 429, "ERROR", issue
+    mapped = _JAVA_BUSINESS_REJECTIONS.get((exc.status_code, exc.issue_code))
+    if mapped is not None:
+        status_code, envelope_status = mapped
+        # 保留 Java 的原始 code：前端要据此区分「快照不存在」和「记录版本不一致」。
+        issue = Issue(code=exc.issue_code, message=_bounded(str(exc)), field=None, retryable=False)
+        return status_code, envelope_status, issue
     issue = Issue(
         code="TOOL_CONTRACT_VIOLATION",
         message=_bounded(
@@ -181,6 +205,12 @@ class InvalidInputError(ApiError):
     ) -> None:
         super().__init__(message, field=field)
         self.issue_code = code
+
+
+class InvalidQueryError(ApiError):
+    status_code = 400
+    status = "INVALID_INPUT"
+    issue_code = "INVALID_QUERY"
 
 
 class ForbiddenError(ApiError):
