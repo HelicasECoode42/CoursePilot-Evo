@@ -57,7 +57,15 @@ def list_courses(
 ) -> dict:
     context = make_context(request, subject_id, x_request_id, curriculum_snapshot_id)
     result = tool_client.call(
-        "listCourses", None, context, params={"query": query, "limit": limit, "cursor": cursor}
+        "listCourses",
+        None,
+        context,
+        params={
+            "curriculumSnapshotId": curriculum_snapshot_id,
+            "query": query,
+            "limit": limit,
+            "cursor": cursor,
+        },
     )
     return envelope(x_request_id, "OK", {"items": result, "nextCursor": None}).model_dump(
         mode="json"
@@ -81,7 +89,13 @@ def list_teacher_course_options(
         "listTeacherCourseOptions",
         None,
         context,
-        params={"courseCode": course_code, "query": query, "limit": limit, "cursor": cursor},
+        params={
+            "curriculumSnapshotId": curriculum_snapshot_id,
+            "courseCode": course_code,
+            "query": query,
+            "limit": limit,
+            "cursor": cursor,
+        },
     )
     return envelope(x_request_id, "OK", {"items": result, "nextCursor": None}).model_dump(
         mode="json"
