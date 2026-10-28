@@ -1,16 +1,17 @@
 package com.coursepilot.verifier.application;
 
 import com.coursepilot.verifier.domain.MeetingTime;
-import com.coursepilot.verifier.persistence.entity.Course;
 import com.coursepilot.verifier.persistence.entity.CourseOffering;
 import com.coursepilot.verifier.persistence.entity.CurriculumSnapshot;
+import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
 import com.coursepilot.verifier.persistence.entity.Transcript;
-import com.coursepilot.verifier.persistence.repo.CourseRepository;
+import com.coursepilot.verifier.persistence.repo.CurriculumCourseRepository;
 import com.coursepilot.verifier.persistence.repo.CurriculumSnapshotRepository;
 import com.coursepilot.verifier.persistence.repo.TranscriptRepository;
 import com.coursepilot.verifier.web.AccessDenied;
 import com.coursepilot.verifier.web.InvalidRecordInput;
 import com.coursepilot.verifier.web.SubjectGuard;
+import com.coursepilot.verifier.web.SnapshotMismatch;
 import com.coursepilot.verifier.web.UnknownSnapshot;
 import com.coursepilot.verifier.web.dto.AuditDtos.Issue;
 import com.coursepilot.verifier.web.dto.PlanDtos.Constraint;
@@ -67,18 +68,18 @@ public class PlanValidationService {
     private final SubjectGuard subjects;
     private final TranscriptRepository transcripts;
     private final CurriculumSnapshotRepository snapshots;
-    private final CourseRepository courses;
+    private final CurriculumCourseRepository curriculumCourses;
     private final ConflictChecker conflictChecker;
 
     public PlanValidationService(SubjectGuard subjects,
                                  TranscriptRepository transcripts,
                                  CurriculumSnapshotRepository snapshots,
-                                 CourseRepository courses,
+                                 CurriculumCourseRepository curriculumCourses,
                                  ConflictChecker conflictChecker) {
         this.subjects = subjects;
         this.transcripts = transcripts;
         this.snapshots = snapshots;
-        this.courses = courses;
+        this.curriculumCourses = curriculumCourses;
         this.conflictChecker = conflictChecker;
     }
 
@@ -91,6 +92,9 @@ public class PlanValidationService {
             .orElseThrow(() -> new AccessDenied("学业记录 " + req.academicRecordId() + " 不存在"));
         if (!snapshots.existsById(req.curriculumSnapshotId())) {
             throw new UnknownSnapshot(req.curriculumSnapshotId());
+        }
+        if (!req.curriculumSnapshotId().equals(transcript.getCurriculumSnapshotId())) {
+            throw new SnapshotMismatch(transcript.getCurriculumSnapshotId(), req.curriculumSnapshotId());
         }
         if (req.offeringSnapshotId() != null) {
             CurriculumSnapshot offering = snapshots.findById(req.offeringSnapshotId())
@@ -105,9 +109,10 @@ public class PlanValidationService {
             .distinct().toList();
         ConflictChecker.Analysis analysis = conflictChecker.analyze(classIds);
         Map<String, CourseOffering> offerings = analysis.offeringsById();
-        Map<String, Course> catalog = courses.findAllById(
+        Map<String, CurriculumCourse> catalog = curriculumCourses
+            .findBySnapshot_SnapshotIdAndCourse_CourseCodeIn(req.curriculumSnapshotId(),
                 items.stream().map(PlanItem::courseCode).distinct().toList())
-            .stream().collect(Collectors.toMap(Course::getCourseCode, Function.identity()));
+            .stream().collect(Collectors.toMap(cc -> cc.getCourse().getCourseCode(), Function.identity()));
 
         // 只有模拟模式、带快照、且每个方案项都落到一个存在的 SYNTHETIC 班次，才是 SIMULATION。
         boolean simulation = "SIMULATION".equals(req.mode())
@@ -127,7 +132,7 @@ public class PlanValidationService {
                     checkTimeConstraint(i, c, items, simulation, analysis, f);
                 case PIN_COURSE -> checkPinCourse(i, c, items, f);
                 case PIN_TEACHER_COURSE -> checkPinTeacherCourse(i, c, items, f);
-                case MAX_CREDITS -> checkMaxCredits(i, c, items, catalog, f);
+                case MAX_CREDITS -> checkMaxCredits(i, c, items, catalog, req.curriculumSnapshotId(), f);
                 default -> throw new IllegalStateException("kind 已在 validateShape 中校验: " + c.kind());
             }
         }
@@ -274,7 +279,8 @@ public class PlanValidationService {
         f.performed("硬约束 #" + i + " PIN_TEACHER_COURSE 核对");
     }
 
-    private void checkMaxCredits(int i, Constraint c, List<PlanItem> items, Map<String, Course> catalog, Findings f) {
+    private void checkMaxCredits(int i, Constraint c, List<PlanItem> items,
+                                 Map<String, CurriculumCourse> catalog, String snapshotId, Findings f) {
         String field = "hardConstraints[" + i + "]";
         if (c.courseCode() != null) {
             // 按课程限定的学分上限语义未在契约里定义，不擅自套用成全方案上限。
@@ -284,12 +290,17 @@ public class PlanValidationService {
         }
         BigDecimal total = BigDecimal.ZERO;
         for (String code : items.stream().map(PlanItem::courseCode).distinct().toList()) {
-            Course course = catalog.get(code);
-            if (course == null || course.getCredits() == null) {
+            CurriculumCourse membership = catalog.get(code);
+            if (membership == null || !hasUsableFacts(membership, snapshotId)) {
+                f.unknown("COURSE_FACTS_UNKNOWN",
+                    "课程 " + code + " 在培养快照 " + snapshotId
+                        + " 中缺少可追溯的快照级属性或来源，无法核验第 " + i + " 条学分上限", field);
+            } else if (membership.getCredits() == null) {
                 f.unknown("CREDITS_UNKNOWN",
-                    "课程 " + code + " 学分未知或不在课程库，无法计入第 " + i + " 条学分上限", field);
+                    "课程 " + code + " 在培养快照 " + snapshotId + " 中学分未知，无法计入第 "
+                        + i + " 条学分上限", field);
             } else {
-                total = total.add(BigDecimal.valueOf(course.getCredits()));
+                total = total.add(BigDecimal.valueOf(membership.getCredits()));
             }
         }
         BigDecimal limit = BigDecimal.valueOf(c.value());
@@ -300,6 +311,16 @@ public class PlanValidationService {
                     + " 条硬约束的上限 " + limit.stripTrailingZeros().toPlainString(), field);
         }
         f.performed("硬约束 #" + i + " MAX_CREDITS 学分合计核对");
+    }
+
+    private static boolean hasUsableFacts(CurriculumCourse cc, String snapshotId) {
+        var source = cc.getSourceReference();
+        return cc.getName() != null && !cc.getName().isBlank()
+            && cc.getCategory() != null && !cc.getCategory().isBlank()
+            && source != null && source.getRefId() != null && !source.getRefId().isBlank()
+            && snapshotId.equals(source.getSnapshotId())
+            && source.getLocator() != null && !source.getLocator().isBlank()
+            && ("CURRICULUM".equals(source.getKind()) || "SYNTHETIC".equals(source.getKind()));
     }
 
     private enum Applicability { YES, NO, UNKNOWN }

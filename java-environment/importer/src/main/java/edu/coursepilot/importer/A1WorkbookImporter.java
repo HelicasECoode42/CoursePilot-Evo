@@ -19,6 +19,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import org.apache.poi.ooxml.POIXMLException;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
@@ -40,6 +41,8 @@ public final class A1WorkbookImporter {
           "cybersecurity", "网安全",
           "ai-engineering-direct", "人智能直招",
           "ai-engineering", "人智能");
+  /** contracts/schemas/domain.schema.json Course.courseCode pattern. */
+  private static final Pattern COURSE_CODE = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$");
   private final XlsxInputGuard inputGuard = new XlsxInputGuard();
 
   public CurriculumDraft prepare(Path file, String trackId) {
@@ -67,6 +70,9 @@ public final class A1WorkbookImporter {
       issues.add(new ImportIssue(INVALID_OOXML, trackSheet, 1, 1));
     }
     String naturalKey = normalizedKey(trackId, requirements, entries, issues);
+    if (requirements.isEmpty() || entries.isEmpty()) {
+      issues.add(new ImportIssue(INVALID_ROW, trackSheet, 1, 1));
+    }
     return new CurriculumDraft(
         trackId,
         hash,
@@ -129,6 +135,10 @@ public final class A1WorkbookImporter {
       }
       String category = text(row, 1, formatter);
       BigDecimal credits = decimal(text(row, 2, formatter));
+      if (category.isBlank() || category.length() > 32) {
+        issues.add(new ImportIssue(INVALID_ROW, track, r + 1, 2));
+        continue;
+      }
       if (credits == null) {
         issues.add(new ImportIssue(INVALID_CREDITS, track, r + 1, 3));
         continue;
@@ -137,12 +147,12 @@ public final class A1WorkbookImporter {
         statedTotal = credits;
       } else {
         categoryTotal = categoryTotal.add(credits);
-        requirements.add(
+            requirements.add(
             new CategoryRequirement(
                 category,
                 credits,
                 text(row, 3, formatter),
-                source(hash, track, r, 2, text(row, 4, formatter))));
+                    source(hash, trackId(track), track, r, 2, text(row, 4, formatter))));
       }
     }
     if (statedTotal == null || statedTotal.compareTo(categoryTotal) != 0) {
@@ -175,7 +185,20 @@ public final class A1WorkbookImporter {
               credits,
               term,
               kind,
-              source(hash, track, r, 1, text(row, 6, formatter)));
+              source(hash, trackId(track), track, r, 1, text(row, 6, formatter)));
+      if (!"课程明细".equals(kind)) {
+        // Java currently stores only concrete courses, not choice groups or rule expressions.
+        // Refuse to publish those rows until a typed persistence model exists.
+        issues.add(new ImportIssue(UNSUPPORTED_ENTRY, track, r + 1, 3));
+      } else if (!COURSE_CODE.matcher(code).matches()) {
+        issues.add(new ImportIssue(INVALID_COURSE_CODE, track, r + 1, 3));
+      } else if (code.length() > 32) {
+        // The persisted Course primary key is narrower than the public DTO contract.
+        issues.add(new ImportIssue(COURSE_CODE_TOO_LONG, track, r + 1, 3));
+      }
+      if (name.length() > 200 || category.length() > 100) {
+        issues.add(new ImportIssue(INVALID_ROW, track, r + 1, 2));
+      }
       if (!code.isBlank()) {
         CurriculumEntry previous = byCode.putIfAbsent(code, entry);
         if (previous != null) {
@@ -260,11 +283,16 @@ public final class A1WorkbookImporter {
   }
 
   private SourceRef source(
-      String hash, String sheet, int zeroBasedRow, int zeroBasedColumn, String originalLocator) {
+      String hash,
+      String trackId,
+      String sheet,
+      int zeroBasedRow,
+      int zeroBasedColumn,
+      String originalLocator) {
     int row = zeroBasedRow + 1;
     int column = zeroBasedColumn + 1;
     return new SourceRef(
-        hash.substring(0, 16) + ":" + sheet + ":" + row + ":" + column,
+        hash + ":" + trackId + ":" + row + ":" + column,
         "A1_CURRICULUM_XLSX",
         null,
         hash,
@@ -275,11 +303,22 @@ public final class A1WorkbookImporter {
         Instant.now());
   }
 
+  private String trackId(String sheet) {
+    return TRACK_SHEETS.entrySet().stream()
+        .filter(entry -> entry.getValue().equals(sheet))
+        .map(Map.Entry::getKey)
+        .findFirst()
+        .orElseThrow(() -> new IllegalArgumentException("Unknown import sheet"));
+  }
+
   private BigDecimal decimal(String value) {
     if (value == null || value.isBlank()) return null;
     try {
       BigDecimal parsed = new BigDecimal(value.trim());
-      return parsed.scale() <= 2 ? parsed : null;
+      return parsed.scale() <= 2 && parsed.signum() >= 0
+              && parsed.compareTo(new BigDecimal("1000")) <= 0
+          ? parsed
+          : null;
     } catch (NumberFormatException e) {
       return null;
     }

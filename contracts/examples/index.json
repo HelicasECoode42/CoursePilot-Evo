@@ -65,6 +65,11 @@
     "valid": false
   },
   {
+    "file": "invalid-academic-record-string-credits.json",
+    "definition": "AcademicRecord",
+    "valid": false
+  },
+  {
     "file": "invalid-academic-record-missing-revision.json",
     "definition": "AcademicRecord",
     "valid": false

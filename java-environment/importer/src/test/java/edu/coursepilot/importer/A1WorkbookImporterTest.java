@@ -43,6 +43,42 @@ class A1WorkbookImporterTest {
   }
 
   @Test
+  void validatesCourseCodePatternAndPersistenceLength() throws Exception {
+    for (String code : new String[] {"CS 101", "中文101"}) {
+      var draft = new A1WorkbookImporter().prepare(
+          workbookWithCourse(code, "Valid name", "核心课程"), "cs-general");
+      assertFalse(draft.publishable());
+      assertTrue(draft.issues().stream()
+          .anyMatch(issue -> issue.code() == ImportModels.IssueCode.INVALID_COURSE_CODE));
+    }
+
+    var tooLong = new A1WorkbookImporter().prepare(
+        workbookWithCourse("A".repeat(33), "Valid name", "核心课程"), "cs-general");
+    assertFalse(tooLong.publishable());
+    assertTrue(tooLong.issues().stream()
+        .anyMatch(issue -> issue.code() == ImportModels.IssueCode.COURSE_CODE_TOO_LONG));
+  }
+
+  @Test
+  void courseNameAndCategoryRespectDtoAndMembershipBoundaries() throws Exception {
+    var maximum = new A1WorkbookImporter().prepare(
+        workbookWithCourse("A".repeat(32), "N".repeat(200), "C".repeat(100)), "cs-general");
+    assertTrue(maximum.publishable(), maximum.issues().toString());
+
+    var longName = new A1WorkbookImporter().prepare(
+        workbookWithCourse("COURSE1", "N".repeat(201), "核心课程"), "cs-general");
+    assertFalse(longName.publishable());
+    assertTrue(longName.issues().stream()
+        .anyMatch(issue -> issue.code() == ImportModels.IssueCode.INVALID_ROW));
+
+    var longCategory = new A1WorkbookImporter().prepare(
+        workbookWithCourse("COURSE1", "Valid name", "C".repeat(101)), "cs-general");
+    assertFalse(longCategory.publishable());
+    assertTrue(longCategory.issues().stream()
+        .anyMatch(issue -> issue.code() == ImportModels.IssueCode.INVALID_ROW));
+  }
+
+  @Test
   void blocksUnknownRuleAndNeverCallsPublishPort() throws Exception {
     var draft = new A1WorkbookImporter().prepare(workbook(true), "cs-general");
 
@@ -164,6 +200,21 @@ class A1WorkbookImporterTest {
 
   private Path workbook(boolean withUnknownRule) throws Exception {
     return workbook(withUnknownRule, false, false, false, false);
+  }
+
+  private Path workbookWithCourse(String code, String name, String category) throws Exception {
+    Path original = workbook(false);
+    Path modified = tempDir.resolve("course-properties.xlsx");
+    try (var input = Files.newInputStream(original); XSSFWorkbook workbook = new XSSFWorkbook(input)) {
+      var course = workbook.getSheet("计科学").getRow(17);
+      course.getCell(1).setCellValue(name);
+      course.getCell(2).setCellValue(code);
+      course.getCell(3).setCellValue(category);
+      try (OutputStream output = Files.newOutputStream(modified)) {
+        workbook.write(output);
+      }
+    }
+    return modified;
   }
 
   private Path workbook(

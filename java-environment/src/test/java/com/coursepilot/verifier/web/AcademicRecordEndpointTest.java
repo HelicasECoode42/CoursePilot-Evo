@@ -197,13 +197,18 @@ class AcademicRecordEndpointTest {
     }
 
     @Test
-    @DisplayName("没有 Idempotency-Key：400")
-    void missingIdempotencyKeyIsBadRequest() throws Exception {
+    @DisplayName("没有 Idempotency-Key：符合契约，重复写入按新版本处理")
+    void missingIdempotencyKeyWritesNormally() throws Exception {
         mvc.perform(post("/api/v1/academic-records")
                 .header(KEY, "test-key").header(SUBJECT, "S706")
                 .contentType(MediaType.APPLICATION_JSON).content(BODY_FOUR_OUTCOMES))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.issues[0].code").value("MISSING_HEADER"));
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.revision").value(1));
+        mvc.perform(post("/api/v1/academic-records")
+                .header(KEY, "test-key").header(SUBJECT, "S706")
+                .contentType(MediaType.APPLICATION_JSON).content(BODY_FOUR_OUTCOMES))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.revision").value(2));
     }
 
     @Test

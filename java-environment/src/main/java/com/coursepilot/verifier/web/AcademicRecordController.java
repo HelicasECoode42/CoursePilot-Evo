@@ -45,14 +45,14 @@ public class AcademicRecordController {
     }
 
     /**
-     * 写入。Idempotency-Key 必填（缺失由 MissingRequestHeaderException 给 400）。
+     * 写入。Idempotency-Key 可选；提供时同键同内容的重复提交回放原答复。
      * 成功返回 201 与契约 AcademicRecord；同键同内容的重复提交回放原答复。
      */
     @PostMapping("/academic-records")
     public ResponseEntity<Envelope<RecordDtos.AcademicRecord>> submit(
         @RequestHeader(value = "X-Request-Id", required = false) String requestId,
         @RequestHeader(value = "X-Subject-Id", required = false) String subjectId,
-        @RequestHeader("Idempotency-Key") String idempotencyKey,
+        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
         @RequestBody RecordDtos.AcademicRecordInput body) {
         String subject = subjects.require(subjectId);
         RecordDtos.AcademicRecord created = records.submit(subject, idempotencyKey, body);

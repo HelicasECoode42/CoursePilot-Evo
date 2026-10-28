@@ -3,9 +3,14 @@ package com.coursepilot.verifier.web;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 import com.coursepilot.verifier.persistence.entity.Course;
+import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
 import com.coursepilot.verifier.persistence.repo.CourseRepository;
+import com.coursepilot.verifier.persistence.repo.CurriculumCourseRepository;
+import com.coursepilot.verifier.persistence.repo.CurriculumSnapshotRepository;
+import java.time.Instant;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -42,12 +47,19 @@ class AcademicRecordAuditEndToEndTest {
     @Autowired private MockMvc mvc;
     @Autowired private ObjectMapper json;
     @Autowired private CourseRepository courses;
+    @Autowired private CurriculumCourseRepository curriculumCourses;
+    @Autowired private CurriculumSnapshotRepository snapshots;
 
     @Test
     @DisplayName("补录后立即核对：结果反映刚写入的课程与 revision，再次补录后 revision 递增")
     void auditReflectsWrittenRecord() throws Exception {
-        if (!courses.existsById("GE102")) {
-            courses.save(new Course("GE102", "通识阅读", 2.0, "通识"));
+        Course ge102 = courses.findById("GE102").orElseGet(() ->
+            courses.save(new Course("GE102", "全局仅作身份", 9.0, "全局类别不能用于核对")));
+        if (!curriculumCourses.existsBySnapshot_SnapshotIdAndCourse_CourseCode("PLAN_CS_2025", "GE102")) {
+            curriculumCourses.save(new CurriculumCourse(snapshots.getReferenceById("PLAN_CS_2025"), ge102,
+                "通识阅读（PLAN_CS_2025）", 2.0, "通识", "SYNTHETIC",
+                "synthetic:PLAN_CS_2025:GE102", "synthetic end-to-end fixture GE102",
+                Instant.parse("2025-09-01T00:00:00Z")));
         }
 
         // 补录前：没有学业记录，通识 4 学分无法确定，缺口为 null，不能当成确定的 0 或确定的缺口。
@@ -59,6 +71,15 @@ class AcademicRecordAuditEndToEndTest {
 
         // 补录：通识 GE101 + GE102 共 4 学分，必修 CS101 + CS102 共 7 学分。
         submit(sampleBody(true)).andExpect(status().isCreated());
+
+        String mismatchedAudit = """
+            {"schemaVersion":"1.0","curriculumSnapshotId":"PLAN_CS_2024","academicRecordId":"%s"}
+            """.formatted(STUDENT);
+        mvc.perform(post("/api/v1/requirements/audit")
+                .header(KEY, "test-key").header(SUBJECT, STUDENT)
+                .contentType(MediaType.APPLICATION_JSON).content(mismatchedAudit))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.issues[0].code").value("SNAPSHOT_MISMATCH"));
 
         JsonNode after = audit();
         JsonNode generalAfter = itemRequiring(after, 4.0);

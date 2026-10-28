@@ -28,17 +28,22 @@ class CatalogEnvelopeTest {
     private MockMvc mvc;
 
     @Test
-    @DisplayName("GET /courses：data 为 {items, nextCursor}，nextCursor 为 null，Course 带 sourceRefIds")
+    @DisplayName("GET /courses：按已发布快照返回课程和分页游标")
     void coursesEnvelope() throws Exception {
-        mvc.perform(get("/api/v1/courses").header("X-Service-Key", "test-key"))
+        mvc.perform(get("/api/v1/courses").param("curriculumSnapshotId", "PLAN_CS_2025")
+                .header("X-Service-Key", "test-key").header("X-Subject-Id", "S001"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("OK"))
             .andExpect(jsonPath("$.data").isMap())
             .andExpect(jsonPath("$.data.items").isArray())
-            .andExpect(jsonPath("$.data.nextCursor").doesNotExist())
-            .andExpect(jsonPath("$.data.items[?(@.courseCode=='CS101')].sourceRefIds[0]").value("course:CS101"))
+            .andExpect(jsonPath("$.data.nextCursor").value(org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.data.items[?(@.courseCode=='CS101')].sourceRefIds[0]")
+                .value("synthetic:PLAN_CS_2025:CS101"))
             .andExpect(jsonPath("$.data.items[?(@.courseCode=='CS103')].credits").value(org.hamcrest.Matchers.contains((Object) null)))
-            .andExpect(jsonPath("$.data.items[0].sourceRefIds").isArray());
+            .andExpect(jsonPath("$.data.items[0].sourceRefIds").isArray())
+            .andExpect(jsonPath("$.provenance[0].kind").value("SYNTHETIC"))
+            .andExpect(jsonPath("$.provenance[0].snapshotId").value("PLAN_CS_2025"))
+            .andExpect(jsonPath("$.provenance[0].locator").value("synthetic seed course CS101"));
     }
 
     @Test

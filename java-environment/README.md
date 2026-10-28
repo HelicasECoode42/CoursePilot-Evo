@@ -1,15 +1,13 @@
 # System 1：Java Environment / Truth / Verifier（部分实现）
 
-Java 21、Spring Boot（已引入 Web、Spring Data JPA、Validation；源码中尚无 `@Valid`/`@NotNull` 等校验注解在用）、H2 文件库（`./data`）、JUnit 5（经 spring-boot-starter-test）。尚未引入：Apache POI、MySQL 驱动、Flyway。首版**目标**是处理通过自动校验门槛的培养计划和 `SYNTHETIC` 班次 fixture，提供课程/要求/学分/冲突算法/计划核验/偏好指标和 typed Tool API；面向学生没有真实班次时返回 UNKNOWN。这是模块范围，不是当前能力——实际完成到哪一步见下一段。按 `../docs/trd/a-data.md`、`../docs/trd/b-verifier.md` 与[实施方案](../docs/10-java-import-and-rules.md)开发，未来浏览器采集边界见 `../docs/09-browser-adapter.md`。
+Java 21、Spring Boot（已引入 Web、Spring Data JPA、Validation；源码中尚无 `@Valid`/`@NotNull` 等校验注解在用）、H2 文件库（`./data`）、JUnit 5（经 spring-boot-starter-test）。Apache POI 5.5.1 用于 XLSX 导入；尚未引入 MySQL 驱动或 Flyway。首版**目标**是处理通过自动校验门槛的培养计划和 `SYNTHETIC` 班次 fixture，提供课程/要求/学分/冲突算法/计划核验/偏好指标和 typed Tool API；面向学生没有真实班次时返回 UNKNOWN。这是模块范围，不是当前能力——实际完成到哪一步见下一段。按 `../docs/trd/a-data.md`、`../docs/trd/b-verifier.md` 与[实施方案](../docs/10-java-import-and-rules.md)开发，未来浏览器采集边界见 `../docs/09-browser-adapter.md`。
 
 当前已实现：课程/班次查询（`GET /api/v1/courses`、`GET /api/v1/offerings`）、时间解析与冲突判断、学业核对
-（`POST /api/v1/requirements/audit`）、服务密钥与对象级授权。另有三个 `/api/v1/verification/*` 接口
+（`POST /api/v1/requirements/audit`）、服务密钥与对象级授权。培养计划 XLSX 导入器可在显式开启的本地演示模式下
+通过 `POST /api/v1/curriculum-snapshots/import` 发布为 `SYNTHETIC/SYNTHETIC`，不支持真实来源发布。另有三个 `/api/v1/verification/*` 接口
 （`credit-gap`、`parse-time`、`conflicts`）已实现，但未在 `contracts/java.openapi.json` 中声明，属于契约外的既有接口。
-**尚未实现**：培养快照列表（`GET /api/v1/curriculum-snapshots`，实现在未合入的 PR #29 中）、
-`POST /api/v1/plans/validate`、教师与课程评价实体、
-学业记录聚合实体（`GET /api/v1/academic-records` 与 `…/{recordId}` 目前是桩，返回 UNKNOWN 说明缺口，
-空 items 不代表该主体没有学业记录；`POST /api/v1/academic-records` 写入也未实现）、
-各 `import` 端点、MySQL/Flyway（当前是 H2）。现有数据全是 `SYNTHETIC` 演示种子，
+**尚未实现**：`POST /api/v1/plans/validate`、教师与课程评价实体、
+班次/评价导入、MySQL/Flyway（当前是 H2）。现有数据全是 `SYNTHETIC` 演示种子，
 没有真实教学计划或真实班次。
 
 ## 本地启动
@@ -34,6 +32,32 @@ $env:COURSEPILOT_SERVICE_KEY = "local-dev-key"
 `/api/v1` 一律返回 503 而不是放行**——没有密钥就分辨不出调用方，放行等于默认开放。
 密钥只从环境变量读，仓库里不放默认值（`../docs/04-infrastructure-workflow.md`）。
 `local-dev-key` 只是本地占位，别写进代码、配置文件或提交信息。
+
+### 本地 synthetic 培养计划导入
+
+导入接口默认关闭。仅在本机演示时设置独立管理员密钥并显式启用；上传内容一律标记为 `SYNTHETIC`，客户端不能指定 `sourceKind` 或 `sourceValidation`。接口只接受 loopback 调用，同时仍要求 `X-Service-Key` 和 `X-Admin-Key`。上传限制为 10 MiB，仅接受 `.xlsx`；有未解释规则或当前模型无法表示的行会拒绝发布。真实资料的来源核验、独立基线和 VERIFIED 发布流程尚未实现。
+
+```bash
+COURSEPILOT_SERVICE_KEY=local-dev-key \
+COURSEPILOT_ADMIN_KEY=local-admin-key \
+COURSEPILOT_SYNTHETIC_IMPORT_ENABLED=true \
+./mvnw spring-boot:run
+```
+
+另一终端用本地生成或明确授权的演示工作簿调用：
+
+```bash
+curl -X POST 'http://127.0.0.1:8081/api/v1/curriculum-snapshots/import' \
+  -H 'X-Service-Key: local-dev-key' \
+  -H 'X-Admin-Key: local-admin-key' \
+  -H 'X-Subject-Id: teacher:demo' \
+  -H 'X-Request-Id: curriculum-import-1' \
+  -F 'schemaVersion=1.0' \
+  -F 'trackId=cs-general' \
+  -F 'file=@./path/to/synthetic-curriculum.xlsx'
+```
+
+响应的 `provenance[0].kind` 为 `SYNTHETIC`；响应中的 `snapshotId` 可用于 `GET /api/v1/curriculum-snapshots` 和 `GET /api/v1/courses?curriculumSnapshotId=...`。相同内容的重复导入复用原快照。
 
 调接口时三个头一起带。`X-Subject-Id` 是调用方代为断言的主体，Java 信任它的前提
 是 `X-Service-Key` 已经证明调用方是已认证的 Python 服务（`../docs/16-engineering-and-debugging.md`）：

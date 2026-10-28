@@ -43,7 +43,7 @@ public class AcademicRecordWriter {
     @Transactional
     public RecordDtos.AcademicRecord submit(String subjectId, String key, String digest,
                                             RecordDtos.AcademicRecordInput input) {
-        Optional<RecordDtos.AcademicRecord> prior = replayFrom(subjectId, key, digest);
+        Optional<RecordDtos.AcademicRecord> prior = key == null ? Optional.empty() : replayFrom(subjectId, key, digest);
         if (prior.isPresent()) {
             return prior.get();
         }
@@ -56,7 +56,9 @@ public class AcademicRecordWriter {
         transcripts.save(t);
 
         RecordDtos.AcademicRecord response = AcademicRecordMapper.toDto(t);
-        idempotency.save(new IdempotencyEntry(subjectId, key, digest, writeJson(response), Instant.now()));
+        if (key != null) {
+            idempotency.save(new IdempotencyEntry(subjectId, key, digest, writeJson(response), Instant.now()));
+        }
         return response;
     }
 

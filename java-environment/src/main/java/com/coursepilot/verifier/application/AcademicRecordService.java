@@ -51,14 +51,17 @@ public class AcademicRecordService {
 
     public RecordDtos.AcademicRecord submit(String subjectId, String idempotencyKey,
                                             RecordDtos.AcademicRecordInput input) {
-        checkId("Idempotency-Key", idempotencyKey);
+        if (idempotencyKey != null) {
+            checkId("Idempotency-Key", idempotencyKey);
+        }
         validate(input);
         String digest = AcademicRecordMapper.digest(input);
         try {
             return writer.submit(subjectId, idempotencyKey, digest, input);
         } catch (DataAccessException | TransactionException e) {
             // 并发竞争：另一请求同时写入了同键或同主体。若同键同内容已落下则回放它，否则 409。
-            return writer.replay(subjectId, idempotencyKey, digest)
+            return (idempotencyKey == null ? Optional.<RecordDtos.AcademicRecord>empty()
+                : writer.replay(subjectId, idempotencyKey, digest))
                 .orElseThrow(() -> new RecordConflict("同一主体的学业记录正在被并发写入，请稍后重试"));
         }
     }

@@ -2,14 +2,18 @@ package com.coursepilot.verifier.application;
 
 import com.coursepilot.verifier.persistence.entity.Requirement;
 import com.coursepilot.verifier.persistence.entity.Transcript;
-import com.coursepilot.verifier.persistence.repo.CourseRepository;
+import com.coursepilot.verifier.persistence.entity.Course;
+import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
+import com.coursepilot.verifier.persistence.repo.CurriculumCourseRepository;
 import com.coursepilot.verifier.persistence.repo.RequirementRepository;
 import com.coursepilot.verifier.persistence.repo.TranscriptRepository;
+import com.coursepilot.verifier.web.SnapshotMismatch;
 import com.coursepilot.verifier.web.dto.AuditDtos;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 把学业核对结果摆成契约的 AuditResult。
@@ -30,18 +34,21 @@ public class AuditResultAssembler {
 
     private final RequirementRepository requirementRepo;
     private final TranscriptRepository transcriptRepo;
-    private final CourseRepository courseRepo;
+    private final CurriculumCourseRepository curriculumCourses;
 
     public AuditResultAssembler(RequirementRepository requirementRepo,
                                 TranscriptRepository transcriptRepo,
-                                CourseRepository courseRepo) {
+                                CurriculumCourseRepository curriculumCourses) {
         this.requirementRepo = requirementRepo;
         this.transcriptRepo = transcriptRepo;
-        this.courseRepo = courseRepo;
+        this.curriculumCourses = curriculumCourses;
     }
 
     public AuditDtos.AuditResult assemble(String curriculumSnapshotId, String academicRecordId) {
         Transcript transcript = transcriptRepo.findByStudentId(academicRecordId).orElse(null);
+        if (transcript != null && !curriculumSnapshotId.equals(transcript.getCurriculumSnapshotId())) {
+            throw new SnapshotMismatch(transcript.getCurriculumSnapshotId(), curriculumSnapshotId);
+        }
         // 契约 recordRevision 最小为 1。没有学业记录时没有真实修订号，这里用 1 占位，
         // 并在 unknowns 里说明，消费方不能把它当成真实版本。
         int recordRevision = transcript == null ? 1 : transcript.getRevision();
@@ -58,7 +65,16 @@ public class AuditResultAssembler {
                 recordRevision, transcriptComplete, List.of(), List.of(), List.copyOf(unknowns));
         }
 
-        AcademicLedger ledger = AcademicLedger.of(transcript, courseRepo::findById);
+        Map<String, Course> snapshotCatalog = transcript == null ? Map.of()
+            : curriculumCourses.findBySnapshot_SnapshotIdAndCourse_CourseCodeIn(
+                    curriculumSnapshotId, transcript.getCompletedCourses().stream()
+                        .map(c -> c.getCourseCode()).distinct().toList())
+                .stream().filter(cc -> hasUsableFacts(cc, curriculumSnapshotId))
+                .collect(java.util.stream.Collectors.toMap(
+                    cc -> cc.getCourse().getCourseCode(),
+                    cc -> new Course(cc.getCourse().getCourseCode(), cc.getName(), cc.getCredits(), cc.getCategory())));
+        AcademicLedger ledger = AcademicLedger.of(transcript,
+            code -> java.util.Optional.ofNullable(snapshotCatalog.get(code)));
         unknowns.addAll(ledger.issues());
 
         if (transcript == null) {
@@ -82,7 +98,7 @@ public class AuditResultAssembler {
                 ledger.earned(req.getCategory()),
                 gap,
                 state,
-                sourceRefIds(curriculumSnapshotId)));
+                sourceRefIds(req, curriculumSnapshotId)));
         }
 
         if (!transcriptComplete) {
@@ -90,9 +106,11 @@ public class AuditResultAssembler {
                 "学业记录未声明完整：已修学分只是下界，未满足的要求判 UNKNOWN、缺口不给确定值；已满足的要求不受影响",
                 "transcriptComplete", false));
         }
-        unknowns.add(new AuditDtos.Issue("REQUIREMENT_SOURCE_REFS_MISSING",
-            "当前 Requirement 没有记录课程清单与来源引用，courseCodes 仅由已修记录反推，sourceRefIds 为快照级引用",
-            "requirements", false));
+        if (requirements.stream().anyMatch(req -> !hasRequirementSource(req, curriculumSnapshotId))) {
+            unknowns.add(new AuditDtos.Issue("REQUIREMENT_SOURCE_REFS_MISSING",
+                "部分类别要求没有绑定到当前培养快照的来源引用，courseCodes 仅由已修记录反推",
+                "requirements", false));
+        }
 
         return new AuditDtos.AuditResult(
             curriculumSnapshotId, academicRecordId, recordRevision, transcriptComplete,
@@ -112,7 +130,34 @@ public class AuditResultAssembler {
      * 即结论必须可追溯。当前判断完全来自该培养快照里的类别学分要求，
      * 所以引用快照本身；等 Requirement 记录了原表行号后换成更细的引用。
      */
-    private List<String> sourceRefIds(String curriculumSnapshotId) {
+    private List<String> sourceRefIds(Requirement requirement, String curriculumSnapshotId) {
+        var source = requirement.getSourceReference();
+        if (source != null && hasRequirementSource(requirement, curriculumSnapshotId)) {
+            return List.of(source.getRefId());
+        }
+        // Legacy rows have no row-level provenance. Preserve the contract shape while adding
+        // REQUIREMENT_SOURCE_REFS_MISSING to unknowns; do not treat this fallback as a source.
         return List.of("curriculum:" + curriculumSnapshotId);
+    }
+
+    private boolean hasRequirementSource(Requirement requirement, String curriculumSnapshotId) {
+        var source = requirement.getSourceReference();
+        return source != null
+            && source.getRefId() != null
+            && !source.getRefId().isBlank()
+            && curriculumSnapshotId.equals(source.getSnapshotId())
+            && ("CURRICULUM".equals(source.getKind()) || "SYNTHETIC".equals(source.getKind()))
+            && source.getLocator() != null
+            && !source.getLocator().isBlank();
+    }
+
+    private static boolean hasUsableFacts(CurriculumCourse cc, String snapshotId) {
+        var source = cc.getSourceReference();
+        return cc.getName() != null && !cc.getName().isBlank()
+            && cc.getCategory() != null && !cc.getCategory().isBlank()
+            && source != null && source.getRefId() != null && !source.getRefId().isBlank()
+            && snapshotId.equals(source.getSnapshotId())
+            && source.getLocator() != null && !source.getLocator().isBlank()
+            && ("CURRICULUM".equals(source.getKind()) || "SYNTHETIC".equals(source.getKind()));
     }
 }

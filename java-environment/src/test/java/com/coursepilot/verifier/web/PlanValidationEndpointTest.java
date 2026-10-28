@@ -7,8 +7,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.coursepilot.verifier.persistence.entity.Course;
 import com.coursepilot.verifier.persistence.entity.CourseOffering;
+import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
+import com.coursepilot.verifier.persistence.entity.CurriculumSnapshot;
+import com.coursepilot.verifier.persistence.entity.Transcript;
 import com.coursepilot.verifier.persistence.repo.CourseOfferingRepository;
 import com.coursepilot.verifier.persistence.repo.CourseRepository;
+import com.coursepilot.verifier.persistence.repo.CurriculumCourseRepository;
+import com.coursepilot.verifier.persistence.repo.CurriculumSnapshotRepository;
 import com.coursepilot.verifier.persistence.repo.TranscriptRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,6 +27,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import java.time.Instant;
 
 /**
  * POST /api/v1/plans/validate 的端到端测试。
@@ -47,10 +53,21 @@ class PlanValidationEndpointTest {
     @Autowired private CourseOfferingRepository offerings;
     @Autowired private CourseRepository courses;
     @Autowired private TranscriptRepository transcripts;
+    @Autowired private CurriculumCourseRepository curriculumCourses;
+    @Autowired private CurriculumSnapshotRepository snapshots;
 
     @BeforeEach
     void extraFixtures() {
-        courses.save(new Course("CS201", "算法设计", 3.0, "必修"));
+        Course cs201 = courses.findById("CS201").orElseGet(() ->
+            courses.save(new Course("CS201", "全局身份 CS201", 99.0, "不可用于快照核验")));
+        Course cs101 = courses.findById("CS101").orElseThrow();
+        addSnapshotFacts("PLAN_CS_2025", cs201, "算法设计（PLAN_CS_2025）", 3.0, "必修");
+        snapshots.findById("TEST_CURR_MAX").orElseGet(() -> snapshots.save(new CurriculumSnapshot(
+            "TEST_CURR_MAX", CurriculumSnapshot.Kind.CURRICULUM, CurriculumSnapshot.State.PUBLISHED,
+            CurriculumSnapshot.SourceKind.SYNTHETIC, CurriculumSnapshot.SourceValidation.SYNTHETIC,
+            null, Instant.parse("2026-01-01T00:00:00Z"))));
+        addSnapshotFacts("TEST_CURR_MAX", cs101, "设计基础", 1.0, "必修");
+        addSnapshotFacts("TEST_CURR_MAX", cs201, "算法设计（低学分版）", 1.0, "专选");
         offerings.save(new CourseOffering("P_CS201_FRI", "CS201", "陈老师", "周五第5-6节{第1-16周}", "SYNTHETIC"));
         offerings.save(new CourseOffering("P_REAL_MON", "CS101", "张老师", "周一第1-2节{第1-16周}", "BROWSER_SNAPSHOT"));
     }
@@ -75,8 +92,12 @@ class PlanValidationEndpointTest {
     }
 
     private MvcResult validate(String body) throws Exception {
+        return validateAs(body, OWNER);
+    }
+
+    private MvcResult validateAs(String body, String subject) throws Exception {
         return mvc.perform(post("/api/v1/plans/validate")
-                .header(KEY, "test-key").header(SUBJECT, OWNER)
+                .header(KEY, "test-key").header(SUBJECT, subject)
                 .contentType(MediaType.APPLICATION_JSON).content(body))
             .andReturn();
     }
@@ -238,6 +259,32 @@ class PlanValidationEndpointTest {
         String items = ITEM_CS101 + "," + ITEM_CS201;
         assertEquals("INVALID", data(validate(body("SIMULATION", OWNER, items, over))).get("verdict").asText());
         assertEquals("VALID", data(validate(body("SIMULATION", OWNER, items, exact))).get("verdict").asText());
+
+        Transcript alternateRecord = new Transcript("S809");
+        alternateRecord.revise("TEST_CURR_MAX", true, Transcript.SourceKind.SYNTHETIC,
+            Instant.parse("2026-01-01T00:00:00Z"), java.util.List.of());
+        transcripts.save(alternateRecord);
+        String alternateSnapshot = body("SIMULATION", "S809", items, exact)
+            .replace("PLAN_CS_2025", "TEST_CURR_MAX");
+        assertEquals("VALID", data(validateAs(alternateSnapshot, "S809")).get("verdict").asText(),
+            "另一快照应按自己的 1+1 学分计算，不能读取全局 3+3 或原快照数据");
+        String originalSnapshotAtTwoCredits = body("SIMULATION", OWNER, items, exact.replace("\"value\":6", "\"value\":2"));
+        assertEquals("INVALID", data(validate(originalSnapshotAtTwoCredits)).get("verdict").asText());
+    }
+
+    @Test
+    @DisplayName("方案请求培养快照与学业记录不一致时返回 409 SNAPSHOT_MISMATCH")
+    void planValidationRejectsTranscriptSnapshotMismatch() throws Exception {
+        Transcript otherSnapshotRecord = new Transcript("S810");
+        otherSnapshotRecord.revise("PLAN_CS_2025", true, Transcript.SourceKind.SYNTHETIC,
+            Instant.parse("2026-01-01T00:00:00Z"), java.util.List.of());
+        transcripts.save(otherSnapshotRecord);
+        String mismatched = body("SIMULATION", "S810", ITEM_CS101, "")
+            .replace("PLAN_CS_2025", "TEST_CURR_MAX");
+        MvcResult response = validateAs(mismatched, "S810");
+        assertEquals(409, response.getResponse().getStatus());
+        assertEquals("SNAPSHOT_MISMATCH", json.readTree(response.getResponse().getContentAsString())
+            .get("issues").get(0).get("code").asText());
     }
 
     @Test
@@ -290,5 +337,15 @@ class PlanValidationEndpointTest {
                 .contentType(MediaType.APPLICATION_JSON).content(body("SIMULATION", "NOBODY", ITEM_CS201, "")))
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.status").value("ERROR"));
+    }
+
+    private void addSnapshotFacts(String snapshotId, Course course, String name,
+                                  Double credits, String category) {
+        if (!curriculumCourses.existsBySnapshot_SnapshotIdAndCourse_CourseCode(
+                snapshotId, course.getCourseCode())) {
+            curriculumCourses.save(new CurriculumCourse(snapshots.getReferenceById(snapshotId), course,
+                name, credits, category, "SYNTHETIC", "synthetic:" + snapshotId + ":" + course.getCourseCode(),
+                "synthetic test fixture " + course.getCourseCode(), Instant.parse("2026-01-01T00:00:00Z")));
+        }
     }
 }

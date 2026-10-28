@@ -18,14 +18,17 @@ public class SeedData {
                            RequirementRepository reqRepo,
                            CourseOfferingRepository offeringRepo,
                            CurriculumSnapshotRepository snapshotRepo,
+                           CurriculumCourseRepository curriculumCourseRepo,
                            TranscriptRepository transcriptRepo,
                            TeacherCourseRepository teacherCourseRepo,
                            ReviewNoteRepository reviewNoteRepo) {
         return args -> {
+            boolean createdSyntheticCurriculumSeed = false;
             // 快照种子用自己的「表为空才写」判断，不能放在课程种子的早退之后：
             // 文件库（ddl-auto=update）里课程表已非空时，快照表若仍为空，
             // listCurricula 会永远返回空数组。
             if (snapshotRepo.count() == 0) {
+                createdSyntheticCurriculumSeed = true;
                 // 演示种子一律 SYNTHETIC/SYNTHETIC：这些不是真实教学计划，
                 // 不能标成 CURRICULUM_FILE 或 VERIFIED（AGENTS.md：REAL 不能用 synthetic）。
                 snapshotRepo.save(new CurriculumSnapshot("PLAN_CS_2025",
@@ -121,6 +124,21 @@ public class SeedData {
             courseRepo.save(new Course("GE101", "通识写作", 2.0, "通识"));
             courseRepo.save(new Course("CS103", "操作系统", null, "必修")); // 学分未知
 
+            // 仅这些刚创建的演示课程显式归入 SYNTHETIC 快照。
+            // 旧库已有 course 行时上面的 early return 会阻止任何推断式回填。
+            if (createdSyntheticCurriculumSeed) {
+                CurriculumSnapshot demoCurriculum = snapshotRepo.findById("PLAN_CS_2025")
+                    .orElseThrow();
+                for (String courseCode : List.of("CS101", "CS102", "GE101", "CS103")) {
+                    curriculumCourseRepo.save(new CurriculumCourse(
+                        demoCurriculum, courseRepo.getReferenceById(courseCode),
+                        syntheticCourseName(courseCode), syntheticCredits(courseCode),
+                        syntheticCategory(courseCode), "SYNTHETIC",
+                        "synthetic:" + demoCurriculum.getSnapshotId() + ":" + courseCode,
+                        "synthetic seed course " + courseCode, Instant.parse("2025-09-01T00:00:00Z")));
+                }
+            }
+
             reqRepo.save(new Requirement("PLAN_CS_2025", "必修", 10.0));
             reqRepo.save(new Requirement("PLAN_CS_2025", "通识", 4.0));
 
@@ -130,6 +148,34 @@ public class SeedData {
                 "周一第2-3节{第1-16周}", "SYNTHETIC"));
             offeringRepo.save(new CourseOffering("O_CS103_01", "CS103", "王老师",
                 "时间待定", "SYNTHETIC")); // 时间未知
+        };
+    }
+
+    private static String syntheticCourseName(String code) {
+        return switch (code) {
+            case "CS101" -> "Java 程序设计";
+            case "CS102" -> "数据结构";
+            case "GE101" -> "通识写作";
+            case "CS103" -> "操作系统";
+            default -> throw new IllegalArgumentException("No synthetic course metadata for " + code);
+        };
+    }
+
+    private static Double syntheticCredits(String code) {
+        return switch (code) {
+            case "CS101" -> 3.0;
+            case "CS102" -> 4.0;
+            case "GE101" -> 2.0;
+            case "CS103" -> null;
+            default -> throw new IllegalArgumentException("No synthetic course metadata for " + code);
+        };
+    }
+
+    private static String syntheticCategory(String code) {
+        return switch (code) {
+            case "CS101", "CS102", "CS103" -> "必修";
+            case "GE101" -> "通识";
+            default -> throw new IllegalArgumentException("No synthetic course metadata for " + code);
         };
     }
 }
