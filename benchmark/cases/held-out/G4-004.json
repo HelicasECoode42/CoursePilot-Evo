@@ -1,0 +1,11 @@
+{
+  "caseId": "G4-004",
+  "groupId": "G4",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G4-004-teacher-review.json",
+  "userQuery": "张三老师这学期教什么课？给分怎么样？我想选他的课。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：人工题面 + 虚构的往届学生评价（teacherKey 为空、matchStatus=COURSE_ONLY）。考的是「历史评价只能作主观参考、须标来源与修读学期，不得当成本学期授课或给分的事实」。"
+}

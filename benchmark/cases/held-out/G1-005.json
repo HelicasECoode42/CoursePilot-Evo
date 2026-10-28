@@ -1,0 +1,11 @@
+{
+  "caseId": "G1-005",
+  "groupId": "G1",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G1-005-academic-record.json",
+  "userQuery": "我通识课修了 12 学分，公共基础课修了 98 学分，学科基础课修了 55 学分，专业选修修了 24 学分。我这样算下来还差多少学分毕业？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 的课程分类共计行（A6/A12/A13/A43/A44/A45/A46/A47）与总计行 F48。学生自报的已修学分为虚构 fixture，其中实践教学环节、任意选修课、高年级研讨课三项未提供。"
+}

@@ -1,0 +1,6 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的选课意愿：含一个 MUST 与一个 PREFER。",
+  "promptText": "张老师的课我必须选上；李老师的课最好也能选上。",
+  "offeringSnapshotId": null
+}
