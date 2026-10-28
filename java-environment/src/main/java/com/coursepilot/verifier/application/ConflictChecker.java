@@ -25,6 +25,85 @@ public class ConflictChecker {
         this.timeParser = timeParser;
     }
 
+    /** 一对相撞的班次，按入参顺序（左在前）。 */
+    public record ConflictPair(String leftId, String rightId) {}
+
+    /**
+     * 一次分析得到的全部事实：班次快照、时间解析结果、相撞的班次对。
+     * check() 与计划核验（PlanValidationService）共用它，所以时间只经 TimeParser 解析一次，
+     * 冲突判断也只写在这一处。
+     */
+    public static final class Analysis {
+        private final Map<String, CourseOffering> offeringsById;
+        private final List<String> missingIds;
+        private final Map<String, List<MeetingTime>> meetingsById;
+        private final Map<String, String> unparseableReasons;
+        private final List<ConflictPair> conflicts;
+
+        Analysis(Map<String, CourseOffering> offeringsById, List<String> missingIds,
+                 Map<String, List<MeetingTime>> meetingsById, Map<String, String> unparseableReasons,
+                 List<ConflictPair> conflicts) {
+            this.offeringsById = offeringsById;
+            this.missingIds = missingIds;
+            this.meetingsById = meetingsById;
+            this.unparseableReasons = unparseableReasons;
+            this.conflicts = conflicts;
+        }
+
+        /** 库里找到的班次，键为 offeringId。 */
+        public Map<String, CourseOffering> offeringsById() { return offeringsById; }
+        /** 入参中库里不存在的班次 ID。 */
+        public List<String> missingIds() { return missingIds; }
+        /** 只含解析成功的班次。时间解析失败的班次不在这里出现。 */
+        public Map<String, List<MeetingTime>> meetingsById() { return meetingsById; }
+        /** 解析失败的班次 -> 原因。这些班次既不能判冲突，也不能当作「无冲突」。 */
+        public Map<String, String> unparseableReasons() { return unparseableReasons; }
+        public List<ConflictPair> conflicts() { return conflicts; }
+    }
+
+    /**
+     * 分析入参班次的时间与冲突明细。去重并保留输入顺序；不做数量判断，
+     * 数量与「班次不存在」的文案由 check() 决定，计划核验按自己的规则处理。
+     */
+    public Analysis analyze(List<String> offeringIds) {
+        List<String> ids = offeringIds == null
+            ? List.of()
+            : new ArrayList<>(new LinkedHashSet<>(offeringIds));
+
+        Map<String, CourseOffering> byId = offeringRepo.findAllById(ids).stream()
+            .collect(Collectors.toMap(CourseOffering::getOfferingId, Function.identity()));
+        List<String> missing = ids.stream().filter(id -> !byId.containsKey(id)).toList();
+
+        // 按 ids 的顺序建表。早先是按 findAllById 的返回顺序建时间列表，
+        // 却用 offeringIds.get(i) 取名字；两个顺序不一致时就会点错班次。
+        Map<String, List<MeetingTime>> meetingsById = new LinkedHashMap<>();
+        Map<String, String> unparseable = new LinkedHashMap<>();
+        for (String id : ids) {
+            CourseOffering offering = byId.get(id);
+            if (offering == null) continue;
+            TimeParser.ParseOutcome outcome = timeParser.parse(offering.getMeetingTextRaw());
+            if (outcome.isOk()) {
+                meetingsById.put(id, outcome.getMeetings());
+            } else {
+                // 解析不出来就是未知，不能当成「这门课没有时间所以不冲突」。
+                unparseable.put(id, outcome.getReason());
+            }
+        }
+
+        List<ConflictPair> conflicts = new ArrayList<>();
+        for (int i = 0; i < ids.size(); i++) {
+            for (int j = i + 1; j < ids.size(); j++) {
+                List<MeetingTime> left = meetingsById.get(ids.get(i));
+                List<MeetingTime> right = meetingsById.get(ids.get(j));
+                // 一对只记一次，哪怕它们有多个时间段同时相撞。
+                if (left != null && right != null && overlaps(left, right)) {
+                    conflicts.add(new ConflictPair(ids.get(i), ids.get(j)));
+                }
+            }
+        }
+        return new Analysis(byId, missing, meetingsById, unparseable, conflicts);
+    }
+
     public ConflictResult check(List<String> offeringIds) {
         if (offeringIds == null || offeringIds.size() < 2) {
             return new ConflictResult(false, true, "至少需要两个班次才能检查冲突");
@@ -37,44 +116,22 @@ public class ConflictChecker {
             return new ConflictResult(false, true, "去重后不足两个班次，无法检查冲突");
         }
 
-        Map<String, CourseOffering> byId = offeringRepo.findAllById(ids).stream()
-            .collect(Collectors.toMap(CourseOffering::getOfferingId, Function.identity()));
-        List<String> missing = ids.stream().filter(id -> !byId.containsKey(id)).toList();
-        if (!missing.isEmpty()) {
+        Analysis analysis = analyze(ids);
+        if (!analysis.missingIds().isEmpty()) {
             return new ConflictResult(false, true,
-                "班次不存在，无法完整核验：" + String.join("、", missing));
+                "班次不存在，无法完整核验：" + String.join("、", analysis.missingIds()));
         }
 
-        // 按 ids 的顺序建表。早先是按 findAllById 的返回顺序建时间列表，
-        // 却用 offeringIds.get(i) 取名字；两个顺序不一致时就会点错班次——
-        // 实测把一个时间待定、根本不可能冲突的班次报成了冲突方。
-        Map<String, List<MeetingTime>> meetingsById = new LinkedHashMap<>();
-        List<String> unknownReasons = new ArrayList<>();
-        for (String id : ids) {
-            CourseOffering offering = byId.get(id);
-            TimeParser.ParseOutcome outcome = timeParser.parse(offering.getMeetingTextRaw());
-            if (outcome.isOk()) {
-                meetingsById.put(id, outcome.getMeetings());
-            } else {
-                // 解析不出来就是未知，不能当成「这门课没有时间所以不冲突」。
-                meetingsById.put(id, List.of());
-                unknownReasons.add("班次 " + id + " 时间无法解析：" + outcome.getReason());
-            }
-        }
+        List<String> unknownReasons = analysis.unparseableReasons().entrySet().stream()
+            .map(e -> "班次 " + e.getKey() + " 时间无法解析：" + e.getValue())
+            .toList();
+        List<String> conflictTexts = analysis.conflicts().stream()
+            .map(p -> "班次 " + p.leftId() + " 与 " + p.rightId() + " 时间冲突")
+            .toList();
 
-        List<String> conflicts = new ArrayList<>();
-        for (int i = 0; i < ids.size(); i++) {
-            for (int j = i + 1; j < ids.size(); j++) {
-                if (overlaps(meetingsById.get(ids.get(i)), meetingsById.get(ids.get(j)))) {
-                    // 一对只报一次，哪怕它们有多个时间段同时相撞。
-                    conflicts.add("班次 " + ids.get(i) + " 与 " + ids.get(j) + " 时间冲突");
-                }
-            }
-        }
-
-        if (!conflicts.isEmpty()) {
+        if (!conflictTexts.isEmpty()) {
             return new ConflictResult(true, !unknownReasons.isEmpty(),
-                String.join("；", conflicts));
+                String.join("；", conflictTexts));
         }
         if (!unknownReasons.isEmpty()) {
             return new ConflictResult(false, true, String.join("；", unknownReasons));
