@@ -28,7 +28,7 @@ CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 class FakeToolClient:
     """Test double: returns fixed (clearly-fake) data per tool."""
 
-    def call(self, tool: str, dto, context, *, params=None):
+    def call(self, tool: str, dto, context, *, params=None, idempotency_key=None):
         if tool == "auditRequirements":
             return AuditResult(
                 curriculumSnapshotId=dto.curriculumSnapshotId,

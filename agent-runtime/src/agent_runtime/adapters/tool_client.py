@@ -125,6 +125,7 @@ class ToolClient:
         context: ExecutionContext,
         *,
         params: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
         _include_page: bool = False,
     ) -> Any:
         spec = TOOLS.get(tool)
@@ -148,6 +149,11 @@ class ToolClient:
             "X-Request-Id": context.request_id,
             "Accept": "application/json",
         }
+        # 不转发这个头，Java 侧的幂等（唯一约束 + 乐观锁 + 并发冲突回放）在生产里
+        # 永远不会触发：去重只剩本进程的内存表，重启即失效。Java 把这个头当可选，
+        # 带上才会按 (主体, 键) 入账。
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
         timeout = _timeout_seconds(context)
         body = dto.model_dump(mode="json") if dto is not None else None
 

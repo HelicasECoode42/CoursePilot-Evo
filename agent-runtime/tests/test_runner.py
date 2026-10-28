@@ -19,6 +19,7 @@ from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient, ToolUnavailable
 from agent_runtime.api.schemas import (
     AuditResult,
+    CompletedCourse,
     Constraint,
     Course,
     PlanItem,
@@ -76,6 +77,10 @@ def test_run_returns_course_layer_recommendations_on_w2_fake_loop(
     answer = _runner().run(planning_request, _context(planning_request))
     assert answer.decision == "RECOMMENDATIONS"
     assert len(answer.recommendations) == 1
+    # 6 次 = getAcademicRecord + listCourses + listTeacherCourseOptions + auditRequirements
+    # + searchReviews（意图含 GPA 等动机时查一门）+ validatePlan，正好用满
+    # docs/04 第 3 节的 maxToolCalls=6。
+    assert answer.usage.toolCalls == 6
     recommendation = answer.recommendations[0]
     assert recommendation.verification.verdict == "UNKNOWN"
     assert recommendation.verification.scope == "COURSE_ONLY"
@@ -84,6 +89,49 @@ def test_run_returns_course_layer_recommendations_on_w2_fake_loop(
     assert any(issue.code == "FAKE_TOOL" for issue in answer.unknowns)
     assert any(issue.code == "FAKE_MODEL" for issue in answer.unknowns)
     assert all(issue.code != "FAKE_MODEL" for issue in recommendation.verification.unknownChecks)
+
+
+def test_taken_courses_are_excluded_and_cannot_be_returned(
+    planning_request: PlanningRequest,
+) -> None:
+    class RecordWithTakenCourse(TypedFakeToolClient):
+        def call(self, tool, dto, context, *, params=None):
+            result = super().call(tool, dto, context, params=params)
+            if tool == "getAcademicRecord":
+                return result.model_copy(
+                    update={
+                        "completedCourses": [
+                            CompletedCourse(
+                                courseCode="CS101",
+                                outcome="PASSED",
+                                earnedCredits=3,
+                                completedTerm=None,
+                            )
+                        ]
+                    }
+                )
+            return result
+
+    class RepeatingModel:
+        messages = []
+
+        def generate(self, *, context, messages, tool_schemas):
+            self.messages = messages
+            return ModelReply(items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
+
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    model = RepeatingModel()
+    runner = PlanningRunner(
+        tool_client=RecordWithTakenCourse(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=model,
+    )
+    answer = runner.run(planning_request, _context(planning_request))
+    assert answer.decision == "UNABLE_TO_VERIFY"
+    assert any(issue.code == "COURSE_ALREADY_TAKEN" for issue in answer.unknowns)
+    facts = json.loads(model.messages[-1]["content"].split("AVAILABLE_FACTS:", 1)[-1])
+    assert "CS101" not in facts["courseCodes"]
 
 
 def test_runner_passes_structured_intent_as_untrusted_model_data(
@@ -355,8 +403,10 @@ def test_empty_candidate_list_is_unable_to_verify(planning_request: PlanningRequ
 
 
 def test_empty_tool_catalog_is_unable_to_verify(planning_request: PlanningRequest) -> None:
-    class EmptyCatalog:
+    class EmptyCatalog(TypedFakeToolClient):
         def call(self, tool, dto, context, *, params=None):
+            if tool == "getAcademicRecord":
+                return super().call(tool, dto, context, params=params)
             del context, params
             if tool == "auditRequirements":
                 return AuditResult(
@@ -389,8 +439,10 @@ def test_empty_tool_catalog_is_unable_to_verify(planning_request: PlanningReques
 def test_fake_model_marker_does_not_rewrite_valid_verdict(
     planning_request: PlanningRequest,
 ) -> None:
-    class ValidJava:
+    class ValidJava(TypedFakeToolClient):
         def call(self, tool, dto, context, *, params=None):
+            if tool == "getAcademicRecord":
+                return super().call(tool, dto, context, params=params)
             del context, params
             if tool == "auditRequirements":
                 return AuditResult(
@@ -413,6 +465,9 @@ def test_fake_model_marker_does_not_rewrite_valid_verdict(
                     )
                 ]
             if tool == "listTeacherCourseOptions":
+                return []
+            if tool == "searchReviews":
+                # 这份假 Java 没有评价数据；空证据也要能走通，不能让 runner 崩。
                 return []
             if tool == "validatePlan":
                 return PlanValidation(
@@ -532,3 +587,132 @@ def test_budget_follows_settings() -> None:
     assert budget.max_tool_calls == 2
     assert budget.max_input_tokens == 8000
     assert budget.deadline_ms == 45000
+
+
+class _RecordingTools(TypedFakeToolClient):
+    """记录调用过的工具名，其余行为沿用受控假工具。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tools: list[str] = []
+
+    def call(self, tool, dto, context, *, params=None, idempotency_key=None):
+        self.tools.append(tool)
+        return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
+
+
+class _CapturingModel:
+    """抓住送给模型的 AVAILABLE_FACTS，用来断言 facts 的内容。"""
+
+    def __init__(self) -> None:
+        self.facts: dict = {}
+
+    def generate(self, *, context, messages, tool_schemas):
+        from agent_runtime.application.runner import FACTS_MESSAGE_PREFIX
+
+        del context, tool_schemas
+        for message in messages:
+            content = message.get("content", "")
+            if content.startswith(FACTS_MESSAGE_PREFIX):
+                self.facts = json.loads(content[len(FACTS_MESSAGE_PREFIX) :])
+        return ModelReply(items=None)
+
+
+def _runner_with(tools, model) -> PlanningRunner:
+    return PlanningRunner(
+        tool_client=tools,
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=model,
+    )
+
+
+def test_facts_carry_course_name_credits_and_category(planning_request: PlanningRequest) -> None:
+    """只给课程号时，模型无法把学生说的课名对上，也判断不了学分类别，只能反问。"""
+    model = _CapturingModel()
+    _runner_with(_RecordingTools(), model).run(planning_request, _context(planning_request))
+    courses = model.facts.get("courses")
+    assert courses, "facts 必须带课程对象，不能只有课程号"
+    assert set(courses[0]) == {"courseCode", "name", "credits", "category"}
+    assert courses[0]["name"], "课程名不能为空"
+
+
+def test_reviews_are_only_fetched_when_the_intent_needs_them(
+    planning_request: PlanningRequest,
+) -> None:
+    """SCHEDULE 这类动机不需要评价，省下的工具预算留给核验。"""
+    planning_request.intent.motives = ["SCHEDULE"]
+    planning_request.intent.priorityOrder = ["SCHEDULE"]
+    planning_request.intent.softPreferences = []
+    tools = _RecordingTools()
+    _runner_with(tools, _CapturingModel()).run(planning_request, _context(planning_request))
+    assert "searchReviews" not in tools.tools
+
+
+def test_review_evidence_names_both_queried_and_not_queried_courses(
+    planning_request: PlanningRequest,
+) -> None:
+    """不交出「没查哪几门」，模型会把「没查」当成「评价差」。"""
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    model = _CapturingModel()
+    tools = _RecordingTools()
+    _runner_with(tools, model).run(planning_request, _context(planning_request))
+    assert "searchReviews" in tools.tools, "GPA 动机必须去查评价"
+    evidence = model.facts.get("reviewEvidence")
+    assert evidence is not None
+    assert "queriedCourseCodes" in evidence
+    assert "notQueriedCourseCodes" in evidence
+    assert evidence["untrustedQuotedText"] is True, "评价正文必须标注为不可信文本"
+
+
+def test_review_lookups_never_exceed_the_run_tool_budget(
+    planning_request: PlanningRequest,
+) -> None:
+    """预算是部署设置（docs/04 第 3 节 maxToolCalls=6），不能为了多查评价悄悄放宽。"""
+    planning_request.intent.motives = ["GPA", "GOOD_REVIEWS"]
+    planning_request.intent.priorityOrder = ["GPA", "GOOD_REVIEWS"]
+    tools = _RecordingTools()
+    answer = _runner_with(tools, _CapturingModel()).run(
+        planning_request, _context(planning_request)
+    )
+    assert len(tools.tools) <= 6, f"工具调用 {len(tools.tools)} 次，超过 maxToolCalls=6"
+    assert answer.usage.toolCalls == len(tools.tools)
+
+
+def test_explanation_does_not_claim_a_verdict_it_did_not_get(
+    planning_request: PlanningRequest,
+) -> None:
+    """原来固定写「已经过核验器判决」，verdict 为 UNKNOWN 时也照常输出。
+
+    前端若只显示这句话、不读 verification 字段，学生会以为核验通过了。
+    """
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    answer = _runner_with(_RecordingTools(), FakeModelAdapter()).run(
+        planning_request, _context(planning_request)
+    )
+    for rec in answer.recommendations:
+        text = rec.explanation
+        if rec.verification.verdict != "VALID":
+            assert "判定为通过" not in text, (
+                f"verdict={rec.verification.verdict} 却声称通过：{text}"
+            )
+            assert "UNKNOWN" in text or "不通过" in text
+        if rec.verification.scope != "REAL_TIMETABLE":
+            assert "不是真实课表无冲突证明" in text
+
+
+def test_recommendation_cites_the_review_notes_it_used(
+    planning_request: PlanningRequest,
+) -> None:
+    """用了评价就要能追到是哪几条；没有评价记录时不得暗示做过评价判断。"""
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    answer = _runner_with(_RecordingTools(), FakeModelAdapter()).run(
+        planning_request, _context(planning_request)
+    )
+    for rec in answer.recommendations:
+        if rec.reviewNoteIds:
+            assert "参考了" in rec.explanation
+        else:
+            assert "参考了" not in rec.explanation

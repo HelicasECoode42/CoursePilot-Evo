@@ -48,8 +48,8 @@ class TypedFakeToolClient:
         ),
     )
 
-    def call(self, tool: str, dto, context, *, params=None):
-        del context, params
+    def call(self, tool: str, dto, context, *, params=None, idempotency_key=None):
+        del context, params, idempotency_key
         if tool == "auditRequirements":
             return AuditResult(
                 curriculumSnapshotId=dto.curriculumSnapshotId,
