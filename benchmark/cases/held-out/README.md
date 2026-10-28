@@ -1,6 +1,6 @@
 # held-out 题面
 
-本目录是**留出集**（`split=held-out`）的题面，共 12 条：四组各 3 条，与 `../evolution/` 一一对应。
+本目录是**留出集**（`split=held-out`）的题面，共 20 条：四组各 5 条，与 `../evolution/` 一一对应。
 
 ## 与 evolution 的区别
 
