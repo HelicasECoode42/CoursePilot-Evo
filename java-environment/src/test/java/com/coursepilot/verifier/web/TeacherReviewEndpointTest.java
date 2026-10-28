@@ -44,7 +44,7 @@ class TeacherReviewEndpointTest {
     /** 契约 ReviewNote 的字段集合（additionalProperties=false）。 */
     private static final Set<String> REVIEW_FIELDS = Set.of(
         "reviewNoteId", "courseCode", "teacherKey", "termId", "sourceKind", "publishedAt",
-        "sourceUrl", "excerpt", "dimensions", "matchStatus", "sourceRefId");
+        "sourceUrl", "excerpt", "teacherDisplayName", "dimensions", "matchStatus", "sourceRefId");
 
     @Autowired
     private MockMvc mvc;

@@ -142,17 +142,20 @@ public class TeacherReviewAssembler {
             n.getPublishedAt(),
             httpUrlOrNull(n.getSourceUrl()),
             n.getExcerpt(),
+            n.getTeacherDisplayName(),
             n.getDimensions().stream()
                 .sorted()
                 .map(d -> TeacherReviewDtos.Dimension.valueOf(d.name()))
                 .toList(),
             matchStatus(n),
             // 指向库内这条评价记录本身，不编造外部出处。
-            "review:" + n.getReviewNoteId());
+            n.getSourceRefId() == null ? "review:" + n.getReviewNoteId() : n.getSourceRefId());
     }
 
     /** 匹配状态现算：没有教师即课程级；有教师且存在同课程绑定才算已匹配；其余为未核验。 */
     private MatchStatus matchStatus(ReviewNote n) {
+        if ("UNVERIFIED".equals(n.getImportedMatchStatus())) return MatchStatus.UNVERIFIED;
+        if ("COURSE_ONLY".equals(n.getImportedMatchStatus())) return MatchStatus.COURSE_ONLY;
         if (n.getTeacherKey() == null) {
             return MatchStatus.COURSE_ONLY;
         }

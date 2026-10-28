@@ -33,6 +33,8 @@ const router = useRouter();
 
 const result = computed<PlanningAnswer | null>(() => store.planningResult);
 const answeringTradeoff = ref(false);
+const clarificationChoice = ref("");
+const clarificationText = ref("");
 const tradeoffChoices = computed(() => {
   const question = result.value?.clarification;
   if (
@@ -48,10 +50,30 @@ const tradeoffChoices = computed(() => {
   const schedule = choicesByValue.get("KEEP_SCHEDULE");
   return teacher && schedule ? [teacher, schedule] : [];
 });
+const clarificationRequiresQuestionnaire = computed(
+  () =>
+    result.value?.clarification?.requiredFor.some((target) =>
+      ["motives", "priorityOrder"].includes(target),
+    ) ?? false,
+);
 
 async function answerTradeoff(questionId: string, choiceValue: string) {
   if (answeringTradeoff.value) return;
   if (!store.answerTradeoffClarification(questionId, choiceValue)) return;
+  answeringTradeoff.value = true;
+  try {
+    await store.submitPlan();
+  } finally {
+    answeringTradeoff.value = false;
+  }
+}
+
+async function answerGeneralClarification(questionId: string) {
+  if (answeringTradeoff.value) return;
+  const question = result.value?.clarification;
+  const text = clarificationText.value.trim();
+  const response = [clarificationChoice.value, text].filter(Boolean).join("\n");
+  if (!question || !store.answerClarification(questionId, response)) return;
   answeringTradeoff.value = true;
   try {
     await store.submitPlan();
@@ -235,7 +257,14 @@ function resetPlanEdits() {
 }
 
 // 结果换了（重新提交或新答复），之前的替换和搜索都不再适用。
-watch(() => store.planningResult, resetPlanEdits);
+watch(
+  () => store.planningResult,
+  () => {
+    resetPlanEdits();
+    clarificationChoice.value = "";
+    clarificationText.value = "";
+  },
+);
 
 onBeforeUnmount(() => {
   searchController?.abort();
@@ -576,8 +605,68 @@ async function goBackToQuestions() {
             {{ choice.label }}并继续规划
           </button>
         </div>
-        <p v-else class="microcopy">
-          这类澄清暂不支持本页回填，请回到问卷修改条件后再提交。
+        <div
+          v-if="
+            tradeoffChoices.length !== 2 &&
+            !clarificationRequiresQuestionnaire &&
+            (result.clarification.choices.length ||
+              result.clarification.allowFreeText)
+          "
+          class="clarification-answer"
+        >
+          <label
+            v-if="result.clarification.choices.length"
+            class="field-label"
+            :for="`clarification-choice-${result.clarification.questionId}`"
+          >
+            选择一个选项
+          </label>
+          <select
+            v-if="result.clarification.choices.length"
+            :id="`clarification-choice-${result.clarification.questionId}`"
+            v-model="clarificationChoice"
+            class="text-control"
+          >
+            <option value="">请选择</option>
+            <option
+              v-for="choice in result.clarification.choices"
+              :key="choice.value"
+              :value="choice.value"
+            >
+              {{ choice.label }}
+            </option>
+          </select>
+          <label
+            v-if="result.clarification.allowFreeText"
+            class="field-label"
+            :for="`clarification-text-${result.clarification.questionId}`"
+          >
+            补充说明
+          </label>
+          <textarea
+            v-if="result.clarification.allowFreeText"
+            :id="`clarification-text-${result.clarification.questionId}`"
+            v-model="clarificationText"
+            class="text-control"
+            maxlength="2000"
+            rows="3"
+          />
+          <button
+            class="button button--primary"
+            type="button"
+            :disabled="answeringTradeoff"
+            @click="
+              answerGeneralClarification(result.clarification!.questionId)
+            "
+          >
+            回答并继续规划
+          </button>
+        </div>
+        <p v-else-if="clarificationRequiresQuestionnaire" class="microcopy">
+          此问题需要更新结构化选课目标，请返回问卷修改后重新提交。
+        </p>
+        <p v-else-if="tradeoffChoices.length !== 2" class="microcopy">
+          此问题没有可用的选项或文字回答入口，请回到问卷修改条件后再提交。
         </p>
         <p
           v-if="store.clarificationError"

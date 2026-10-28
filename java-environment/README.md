@@ -69,6 +69,44 @@ curl -H 'X-Service-Key: local-dev-key' \
      http://127.0.0.1:8081/api/v1/courses
 ```
 
+### 本地私有教师评价导入
+
+`data/private/a3/review-import/delivery/` 中的 ReviewImport JSON 与姓名 sidecar 可在本机按
+`reviewNoteId`、`sourceRefId`、`courseCode` 三字段联接。合并脚本只把姓名写入可选的
+`teacherDisplayName` 显示字段；不会生成 `teacherKey` 或改变 JSON 内的 `matchStatus`。
+输入文件应留在 `data/private`，输出文件也只写在该目录中：
+
+```bash
+python3 java-environment/scripts/prepare_review_import.py \
+  --reviews data/private/a3/review-import/delivery/review-import-faculty-history.json \
+  --sidecar data/private/a3/review-import/delivery/teacher-display-sidecar.csv \
+  --output data/private/a3/review-import/delivery/review-import-faculty-history-with-display-names.json
+```
+
+对 `review-import-winter.json` 重复运行并更换输入、输出文件名。本地启动服务时绑定 loopback 地址，
+分别对每个不超过 200 条的 JSON 文件调用导入端点；导入需要服务密钥、管理员密钥和主体头：
+
+```bash
+COURSEPILOT_SERVICE_KEY=local-dev-key \
+COURSEPILOT_ADMIN_KEY=local-admin-key \
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.address=127.0.0.1
+```
+
+另一终端调用：
+
+```bash
+curl -X POST 'http://127.0.0.1:8081/api/v1/reviews/import' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Service-Key: local-dev-key' \
+  -H 'X-Admin-Key: local-admin-key' \
+  -H 'X-Subject-Id: teacher:local-review-import' \
+  -H 'X-Request-Id: review-import-faculty-1' \
+  --data-binary @data/private/a3/review-import/delivery/review-import-faculty-history-with-display-names.json
+```
+
+旧 JSON 不带 `teacherDisplayName` 时仍可导入。按课程查询结果会返回该显示字段；课程级或未核验评价仍
+按其 `matchStatus` 展示为受限证据，姓名文本不用于教师绑定。
+
 ## 测试
 
 ```bash

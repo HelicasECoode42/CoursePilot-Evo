@@ -80,6 +80,11 @@
     "valid": true
   },
   {
+    "file": "review-note-with-display-name.json",
+    "definition": "ReviewNote",
+    "valid": true
+  },
+  {
     "file": "course-offering-unparsed.json",
     "definition": "CourseOffering",
     "valid": true

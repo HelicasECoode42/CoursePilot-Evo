@@ -23,6 +23,7 @@ const router = useRouter();
 const draftCourses = ref<CompletedCourse[]>([]);
 const transcriptComplete = ref(false);
 const formMessage = ref("");
+const editingRecord = ref(false);
 
 const canLoad = computed(
   () => store.sessionStatus === "ready" && Boolean(store.sessionId),
@@ -91,7 +92,19 @@ async function submitRecord() {
     draftCourses.value,
     transcriptComplete.value,
   );
-  if (saved) await store.runAudit();
+  if (saved) {
+    editingRecord.value = false;
+    await store.runAudit();
+  }
+}
+
+function editRecord() {
+  if (!store.selectedRecord) return;
+  draftCourses.value = store.selectedRecord.completedCourses.map((course) => ({
+    ...course,
+  }));
+  transcriptComplete.value = store.selectedRecord.transcriptComplete;
+  editingRecord.value = true;
 }
 
 async function useRecord(recordId: string) {
@@ -100,7 +113,15 @@ async function useRecord(recordId: string) {
 }
 
 async function goToQuestions() {
-  await router.push("/plan/questions/goals");
+  await router.push("/plan/questions/ready");
+}
+
+function explainUnknown(code: string, fallback: string): string {
+  if (code === "TRANSCRIPT_COMPLETENESS_UNKNOWN")
+    return "已修课程可能还未填全，暂时无法确定剩余要求。";
+  if (code === "REQUIREMENT_SOURCE_REFS_MISSING")
+    return "部分培养要求缺少可核对的来源，暂时无法确定。";
+  return fallback;
 }
 </script>
 
@@ -143,94 +164,126 @@ async function goToQuestions() {
 
       <!-- 已有记录：直接读取，不重复手填 -->
       <div v-if="store.records.length > 0" class="option-section">
-        <h2 class="sub-label">本会话已有的学业记录</h2>
-        <ul class="summary-list">
-          <li v-for="record in store.records" :key="record.academicRecordId">
+        <h2 class="sub-label">已填写的课程</h2>
+        <ul class="record-list">
+          <li
+            v-for="(record, index) in store.records"
+            :key="record.academicRecordId"
+          >
             <button
-              class="linkbtn"
+              class="record-choice"
               type="button"
               :aria-pressed="record.academicRecordId === store.selectedRecordId"
               @click="useRecord(record.academicRecordId)"
             >
-              {{ record.academicRecordId }}（第 {{ record.revision }} 版）
+              学业记录 {{ index + 1 }} ·
+              {{ record.completedCourses.length }} 门课程
             </button>
             <span class="microcopy">
-              · {{ record.completedCourses.length }} 门已修 ·
-              {{ describeCompleteness(record) }}
+              · {{ record.transcriptComplete ? "已填完整" : "尚未确认填全" }}
             </span>
+            <p class="microcopy">
+              {{
+                record.completedCourses
+                  .map((course) => course.courseCode)
+                  .join("、")
+              }}
+            </p>
           </li>
         </ul>
         <button
           class="button button--secondary"
           type="button"
-          :disabled="!store.selectedRecord"
+          :disabled="!store.selectedRecord || store.auditStatus === 'loading'"
           @click="store.runAudit()"
         >
-          用选中的记录核对培养要求
+          {{ store.auditStatus === "loading" ? "正在核对…" : "核对培养要求" }}
+        </button>
+        <button
+          class="button button--quiet"
+          type="button"
+          :disabled="!store.selectedRecord"
+          @click="editRecord"
+        >
+          修改已填写课程
         </button>
       </div>
 
       <!-- 缺记录：只补缺，不让学生猜内部编号 -->
-      <div v-else-if="store.recordsStatus === 'ready'" class="option-section">
-        <h2 class="sub-label">还没有学业记录，补一份</h2>
+      <div
+        v-if="
+          store.recordsStatus === 'ready' &&
+          (store.records.length === 0 || editingRecord)
+        "
+        class="option-section"
+      >
+        <h2 class="sub-label">
+          {{ editingRecord ? "修改课程" : "还没有学业记录，补一份" }}
+        </h2>
         <p class="microcopy">
-          只填已修课程。记录编号由服务端生成，不需要你填写。
+          填写你已修或正在修读的课程，系统会据此核对培养要求。
         </p>
         <div
           v-for="(course, index) in draftCourses"
           :key="index"
-          class="confirm-row"
+          class="course-row"
         >
-          <label class="field-label" :for="`code-${index}`">课程编号</label>
-          <input
-            :id="`code-${index}`"
-            class="text-control"
-            type="text"
-            maxlength="120"
-            :value="course.courseCode"
-            @input="
-              updateCourse(index, {
-                courseCode: ($event.target as HTMLInputElement).value,
-              })
-            "
-          />
-          <label class="field-label" :for="`outcome-${index}`">结果</label>
-          <select
-            :id="`outcome-${index}`"
-            class="select-control"
-            :value="course.outcome"
-            @change="
-              updateCourse(index, {
-                outcome: ($event.target as HTMLSelectElement)
-                  .value as CourseOutcome,
-              })
-            "
-          >
-            <option
-              v-for="option in OUTCOMES"
-              :key="option.value"
-              :value="option.value"
+          <div class="course-field">
+            <label class="field-label" :for="`code-${index}`">课程编号</label>
+            <input
+              :id="`code-${index}`"
+              class="text-control"
+              type="text"
+              maxlength="120"
+              :value="course.courseCode"
+              @input="
+                updateCourse(index, {
+                  courseCode: ($event.target as HTMLInputElement).value,
+                })
+              "
+            />
+          </div>
+          <div class="course-field">
+            <label class="field-label" :for="`outcome-${index}`">结果</label>
+            <select
+              :id="`outcome-${index}`"
+              class="select-control"
+              :value="course.outcome"
+              @change="
+                updateCourse(index, {
+                  outcome: ($event.target as HTMLSelectElement)
+                    .value as CourseOutcome,
+                })
+              "
             >
-              {{ option.label }}
-            </option>
-          </select>
-          <label class="field-label" :for="`credits-${index}`">学分</label>
-          <input
-            :id="`credits-${index}`"
-            class="text-control"
-            type="text"
-            inputmode="decimal"
-            maxlength="6"
-            placeholder="留空表示未知"
-            :value="course.earnedCredits ?? ''"
-            @input="
-              updateCourse(index, {
-                earnedCredits: parseCredits(
-                  ($event.target as HTMLInputElement).value,
-                ),
-              })
-            "
-          />
+              <option
+                v-for="option in OUTCOMES"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
+          <div class="course-field">
+            <label class="field-label" :for="`credits-${index}`">学分</label>
+            <input
+              :id="`credits-${index}`"
+              class="text-control"
+              type="text"
+              inputmode="decimal"
+              maxlength="6"
+              placeholder="留空表示未知"
+              :value="course.earnedCredits ?? ''"
+              @input="
+                updateCourse(index, {
+                  earnedCredits: parseCredits(
+                    ($event.target as HTMLInputElement).value,
+                  ),
+                })
+              "
+            />
+          </div>
           <button
             class="button button--quiet"
             type="button"
@@ -271,15 +324,16 @@ async function goToQuestions() {
     </template>
 
     <!-- 核对结果：三态分开，UNKNOWN 不并进已满足 -->
-    <template v-if="store.audit">
-      <p
-        v-if="store.auditStatus === 'loading'"
-        class="notice"
-        role="status"
-        aria-live="polite"
-      >
-        正在核对…
-      </p>
+    <p
+      v-if="store.auditStatus === 'loading'"
+      class="notice"
+      role="status"
+      aria-live="polite"
+    >
+      正在核对培养要求…
+    </p>
+    <template v-if="store.audit && store.auditStatus !== 'loading'">
+      <h2 class="sub-label">核对结果</h2>
       <p class="microcopy">
         {{ describeCompleteness(store.audit) }}
       </p>
@@ -290,9 +344,9 @@ async function goToQuestions() {
         :class="{ 'notice--warning': group.key === 'unknown' }"
       >
         <h2 class="sub-label">{{ group.label }}</h2>
-        <ul class="summary-list">
-          <li v-for="item in group.items" :key="item.requirementId">
-            {{ item.requirementId }}
+        <ul class="audit-list">
+          <li v-for="(item, index) in group.items" :key="item.requirementId">
+            培养要求 {{ index + 1 }}
             <template v-if="item.courseCodes.length">
               · {{ item.courseCodes.join("、") }}
             </template>
@@ -311,7 +365,7 @@ async function goToQuestions() {
         <p>以下内容无法确认：</p>
         <ul class="summary-list">
           <li v-for="issue in store.audit.unknowns" :key="issue.code">
-            {{ issue.message }}
+            {{ explainUnknown(issue.code, issue.message) }}
           </li>
         </ul>
       </div>
@@ -331,8 +385,65 @@ async function goToQuestions() {
         type="button"
         @click="goToQuestions"
       >
-        回到选课目标
+        返回资料确认
       </button>
     </nav>
   </section>
 </template>
+
+<style scoped>
+.course-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.course-field {
+  min-width: 0;
+}
+
+.course-field input,
+.course-field select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 560px) {
+  .course-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.record-list,
+.audit-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.record-list > li,
+.audit-list > li {
+  border: 1px solid #dbe3e8;
+  border-radius: 12px;
+  padding: 1rem;
+  background: #f8fafb;
+}
+
+.record-choice {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #164f55;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.record-choice[aria-pressed="true"]::after {
+  content: " · 已选择";
+  font-weight: 400;
+}
+</style>

@@ -866,6 +866,33 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     expect(options.method).toBe("GET");
   });
 
+  it("lists curriculum courses with a cursor for the next page", async () => {
+    const course = {
+      courseCode: "CS103",
+      name: "数据结构",
+      credits: 3,
+      category: "专业基础",
+      sourceRefIds: ["source:curriculum-cs103"],
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(200, envelope("OK", { items: [course], nextCursor: "next" })),
+      );
+    const client = await authedClient(fetcher);
+
+    await expect(client.listCourses("curriculum-2026")).resolves.toEqual({
+      items: [course],
+      nextCursor: "next",
+    });
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe(
+      "http://127.0.0.1:8000/api/v1/courses?curriculumSnapshotId=curriculum-2026&limit=100",
+    );
+    expect(options.method).toBe("GET");
+  });
+
   it("keeps an UNKNOWN teacher list as status UNKNOWN, not as a confirmed empty list", async () => {
     const fetcher = vi
       .fn()

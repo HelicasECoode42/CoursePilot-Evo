@@ -315,6 +315,36 @@ describe("result page course search and replacement", () => {
     expect(store.planningResult?.decision).toBe("RECOMMENDATIONS");
   });
 
+  it("submits both the selected clarification option and supplemental text", async () => {
+    store.planningResult = {
+      ...CLARIFY_ANSWER,
+      clarification: {
+        questionId: "clarify:preference",
+        text: "请选择你的偏好",
+        choices: [{ value: "light", label: "课程压力较小" }],
+        allowFreeText: true,
+        requiredFor: [],
+      },
+    };
+    const answerSpy = vi
+      .spyOn(store, "answerClarification")
+      .mockReturnValue(true);
+    const submitSpy = vi.spyOn(store, "submitPlan").mockResolvedValue();
+    const wrapper = mountPage();
+    await wrapper
+      .get("#clarification-choice-clarify\\:preference")
+      .setValue("light");
+    await wrapper
+      .get("#clarification-text-clarify\\:preference")
+      .setValue("周五尽量空闲");
+    await buttonByText(wrapper, "回答并继续规划")?.trigger("click");
+    expect(answerSpy).toHaveBeenCalledWith(
+      "clarify:preference",
+      "light\n周五尽量空闲",
+    );
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("shows conflicting, selectable, and unparsed offerings as three distinct states", async () => {
     stubOfferings();
     const wrapper = mountPage();

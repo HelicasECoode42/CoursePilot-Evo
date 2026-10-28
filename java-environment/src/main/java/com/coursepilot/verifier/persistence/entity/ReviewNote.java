@@ -50,6 +50,15 @@ public class ReviewNote {
     @Column(nullable = false, length = 1500)
     private String excerpt;
 
+    @Column(length = 120)
+    private String sourceRefId;
+
+    @Column(length = 32)
+    private String importedMatchStatus;
+
+    @Column(length = 120)
+    private String teacherDisplayName;
+
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "review_note_dimension", joinColumns = @JoinColumn(name = "review_note_id"))
     @Enumerated(EnumType.STRING)
@@ -81,4 +90,12 @@ public class ReviewNote {
     public String getSourceUrl() { return sourceUrl; }
     public String getExcerpt() { return excerpt; }
     public List<Dimension> getDimensions() { return dimensions; }
+    public String getSourceRefId() { return sourceRefId; }
+    public String getImportedMatchStatus() { return importedMatchStatus; }
+    public String getTeacherDisplayName() { return teacherDisplayName; }
+    public void setImportProvenance(String sourceRefId, String matchStatus) {
+        this.sourceRefId = sourceRefId;
+        this.importedMatchStatus = matchStatus;
+    }
+    public void setTeacherDisplayName(String teacherDisplayName) { this.teacherDisplayName = teacherDisplayName; }
 }

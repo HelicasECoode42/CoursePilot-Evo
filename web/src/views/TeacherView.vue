@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { api } from "../api";
 import { ApiFailure } from "../api/client";
-import type { ReviewNote, TeacherCourseOption } from "../contracts";
+import type { Course, ReviewNote, TeacherCourseOption } from "../contracts";
 import { usePlanningStore } from "../stores/planning";
 
 type TeacherMode = "MUST" | "PREFER";
@@ -28,7 +28,6 @@ interface ReviewState {
   unconfirmed: boolean;
 }
 
-const COURSE_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
 const MODE_LABEL: Record<TeacherMode, string> = {
   MUST: "必须保留",
   PREFER: "优先考虑",
@@ -75,6 +74,12 @@ const searchedCourse = ref<string | null>(null);
 const searchStatus = ref<"idle" | "loading" | "ready" | "error">("idle");
 const searchError = ref("");
 const options = ref<TeacherCourseOption[]>([]);
+const courseReviews = ref<ReviewNote[]>([]);
+const courseReviewsLoaded = ref(false);
+const courseReviewError = ref("");
+const courses = ref<Course[]>([]);
+const courseCatalogStatus = ref<"loading" | "ready" | "error">("loading");
+const courseCatalogError = ref("");
 /** 教师资料是 UNKNOWN（快照缺失或非当前）：空列表不能说成「没有可比较的教师」。 */
 const optionsUnconfirmed = ref(false);
 const expandedKey = ref<string | null>(null);
@@ -123,6 +128,11 @@ const reviewSeq = new Map<string, number>();
 const ready = computed(
   () => store.sessionStatus === "ready" && Boolean(store.selectedCurriculumId),
 );
+const courseChoices = computed(() =>
+  [...courses.value].sort((left, right) =>
+    left.courseCode.localeCompare(right.courseCode),
+  ),
+);
 const mustPicks = computed(() =>
   picks.value.filter((pick) => pick.mode === "MUST"),
 );
@@ -132,7 +142,30 @@ const preferPicks = computed(() =>
 
 onMounted(() => {
   heading.value?.focus();
+  void loadCourseCatalog();
 });
+
+async function loadCourseCatalog() {
+  if (!ready.value || !store.selectedCurriculumId) {
+    courseCatalogStatus.value = "ready";
+    return;
+  }
+  courseCatalogStatus.value = "loading";
+  try {
+    const items: Course[] = [];
+    let cursor: string | null = null;
+    do {
+      const result = await api.listCourses(store.selectedCurriculumId, cursor);
+      items.push(...result.items);
+      cursor = result.nextCursor;
+    } while (cursor);
+    courses.value = items;
+    courseCatalogStatus.value = "ready";
+  } catch (error) {
+    courseCatalogError.value = failureMessage(error);
+    courseCatalogStatus.value = "error";
+  }
+}
 
 function optionKey(option: TeacherCourseOption): string {
   return `${option.courseCode}/${option.teacherKey}`;
@@ -214,9 +247,11 @@ function classCountText(option: TeacherCourseOption): string {
 async function searchTeachers() {
   inputMessage.value = "";
   const code = courseInput.value.trim();
-  if (!COURSE_CODE_PATTERN.test(code)) {
-    inputMessage.value =
-      "请输入课程代码（字母、数字，可含 . _ : -），例如课程编号。";
+  if (
+    !code ||
+    !courseChoices.value.some((course) => course.courseCode === code)
+  ) {
+    inputMessage.value = "请从当前培养方案的课程列表中选择课程。";
     return;
   }
   if (!ready.value || !store.selectedCurriculumId) {
@@ -226,9 +261,18 @@ async function searchTeachers() {
   const seq = ++searchSeq;
   searchedCourse.value = code;
   searchStatus.value = "loading";
+  courseReviews.value = [];
+  courseReviewsLoaded.value = false;
+  courseReviewError.value = "";
   expandedKey.value = null;
-  optionsUnconfirmed.value = false;
   try {
+    if (courseCatalogStatus.value === "error") await loadCourseCatalog();
+    if (seq !== searchSeq) return;
+    if (courseCatalogStatus.value === "error") {
+      searchError.value = courseCatalogError.value;
+      searchStatus.value = "error";
+      return;
+    }
     const result = await api.listTeacherCourseOptions(
       store.selectedCurriculumId,
       code,
@@ -243,6 +287,24 @@ async function searchTeachers() {
     optionsUnconfirmed.value = false;
     searchError.value = failureMessage(error);
     searchStatus.value = "error";
+  }
+}
+
+async function loadCourseReviews() {
+  const code = searchedCourse.value;
+  if (!code) return;
+  const seq = searchSeq;
+  courseReviewError.value = "";
+  try {
+    const reviews = await api.searchReviews(code, null);
+    if (seq === searchSeq) {
+      courseReviews.value = reviews.items.filter(
+        (note) => note.courseCode === code && note.teacherKey === null,
+      );
+      courseReviewsLoaded.value = true;
+    }
+  } catch (error) {
+    if (seq === searchSeq) courseReviewError.value = failureMessage(error);
   }
 }
 
@@ -370,29 +432,41 @@ function dimensionText(dimensions: ReviewNote["dimensions"]): string {
     <p class="eyebrow">教师偏好</p>
     <h1 id="teacher-title" ref="heading" tabindex="-1">比较课程与教师</h1>
     <p class="lead">
-      先输入课程代码，查看这门课在当前培养方案下的教师资料。评价只作参考，依据不足的会标明。
+      从当前培养方案选择课程，查看对应的教师资料。评价只作参考，依据不足的会标明。
     </p>
+    <RouterLink class="button button--secondary" to="/plan/questions/ready">
+      返回资料确认
+    </RouterLink>
 
     <template v-if="!ready">
       <p class="notice" role="note">
         请先在规划页开始会话并选择培养方案，再来比较教师。
       </p>
-      <RouterLink class="button button--secondary" to="/plan/questions/goals">
-        返回规划
+      <RouterLink class="button button--secondary" to="/plan/questions/teacher">
+        返回教师偏好问题
       </RouterLink>
     </template>
 
     <template v-else>
       <form class="teacher-search" @submit.prevent="searchTeachers">
-        <label class="field-label" for="course-code">课程代码</label>
-        <input
+        <label class="field-label" for="course-code">选择课程</label>
+        <select
           id="course-code"
           v-model="courseInput"
           class="select-control"
-          type="text"
-          autocomplete="off"
-          maxlength="120"
-        />
+          :disabled="
+            courseCatalogStatus !== 'ready' || courseChoices.length === 0
+          "
+        >
+          <option value="" disabled>请选择当前培养方案中的课程</option>
+          <option
+            v-for="course in courseChoices"
+            :key="course.courseCode"
+            :value="course.courseCode"
+          >
+            {{ course.name }}（{{ course.courseCode }}）
+          </option>
+        </select>
         <button
           type="submit"
           class="button button--primary"
@@ -401,8 +475,64 @@ function dimensionText(dimensions: ReviewNote["dimensions"]): string {
           {{ searchStatus === "loading" ? "正在查找…" : "查找教师" }}
         </button>
       </form>
+      <p
+        v-if="courseCatalogStatus === 'loading'"
+        class="microcopy"
+        role="status"
+      >
+        正在读取当前培养方案的课程…
+      </p>
+      <div
+        v-else-if="courseCatalogStatus === 'error'"
+        class="notice notice--error"
+        role="alert"
+      >
+        <p>{{ courseCatalogError }}</p>
+        <button
+          type="button"
+          class="button button--secondary"
+          @click="loadCourseCatalog"
+        >
+          重试读取课程
+        </button>
+      </div>
+      <p v-else-if="courseChoices.length === 0" class="notice" role="status">
+        当前培养方案没有课程资料。
+      </p>
       <p v-if="inputMessage" class="notice notice--error" role="alert">
         {{ inputMessage }}
+      </p>
+      <button
+        v-if="searchStatus === 'ready'"
+        type="button"
+        class="button button--secondary"
+        @click="loadCourseReviews"
+      >
+        查看课程历史评价
+      </button>
+      <p v-if="courseReviewsLoaded && !courseReviews.length">
+        当前未找到课程级历史评价。
+      </p>
+      <section
+        v-if="courseReviews.length"
+        class="notice"
+        aria-label="课程历史评价"
+      >
+        <h2>课程历史评价</h2>
+        <p>以下评价的教师身份尚未核实，仅供了解课程历史反馈。</p>
+        <ul>
+          <li v-for="note in courseReviews" :key="note.reviewNoteId">
+            <span v-if="note.teacherDisplayName"
+              >教师姓名（未核验）：{{ note.teacherDisplayName }}；</span
+            >
+            {{
+              note.sourceKind === "SYNTHETIC" ? "虚构演示评价：" : "历史资料："
+            }}{{ note.excerpt }}
+          </li>
+        </ul>
+      </section>
+      <p v-if="courseReviewError" class="notice notice--error" role="alert">
+        课程评价读取失败：{{ courseReviewError }}
       </p>
 
       <p v-if="searchStatus === 'loading'" class="microcopy" role="status">
@@ -497,8 +627,8 @@ function dimensionText(dimensions: ReviewNote["dimensions"]): string {
 
             <div
               v-if="expandedKey === optionKey(option)"
-              class="teacher-reviews"
               :id="panelId(option)"
+              class="teacher-reviews"
               role="region"
               :aria-label="`${option.teacherDisplayName} 的课程评价`"
               @keydown.esc="collapseReviews(option)"
@@ -593,6 +723,9 @@ function dimensionText(dimensions: ReviewNote["dimensions"]): string {
                         <strong>{{ SOURCE_LABEL[note.sourceKind] }}</strong>
                         · {{ yearText(note.publishedAt) }}
                       </p>
+                      <p v-if="note.teacherDisplayName">
+                        教师姓名（显示文本）：{{ note.teacherDisplayName }}
+                      </p>
                       <p>维度：{{ dimensionText(note.dimensions) }}</p>
                       <p>{{ note.excerpt }}</p>
                       <p
@@ -623,10 +756,7 @@ function dimensionText(dimensions: ReviewNote["dimensions"]): string {
 
     <section class="teacher-picks" aria-labelledby="picks-title">
       <h2 id="picks-title">已选择的课程与教师</h2>
-      <p class="microcopy">
-        选择会跟着这次规划一起提交（契约的
-        pinnedTeacherCoursePairs）。和其他答案一样只在内存里，刷新页面会清除。
-      </p>
+      <p class="microcopy">选择会加入本次规划。刷新页面后需要重新选择。</p>
       <dl class="summary-list">
         <div>
           <dt>必须保留</dt>

@@ -7,6 +7,7 @@ import type {
   AcademicRecordInput,
   AcademicRecordList,
   AuditResult,
+  Course,
   Envelope,
   PlanningAnswer,
   PlanningRequest,
@@ -67,6 +68,10 @@ export type TeacherCourseOptionSearch = {
   items: TeacherCourseOption[];
   status: BusinessStatus;
 };
+export type CourseSearch = {
+  items: Course[];
+  nextCursor: string | null;
+};
 export type ReviewNoteSearch = {
   items: ReviewNote[];
   status: BusinessStatus;
@@ -76,6 +81,11 @@ export interface CoursePilotApiClient {
   readonly mode: "http" | "fixture" | "simulation";
   createSession(signal?: AbortSignal): Promise<SessionView>;
   listCurricula(signal?: AbortSignal): Promise<CurriculumResult>;
+  listCourses(
+    curriculumSnapshotId: string,
+    cursor?: string | null,
+    signal?: AbortSignal,
+  ): Promise<CourseSearch>;
   /** E2 / E-F1：列出本会话已有的学业记录。items 为空数组是正常业务状态。 */
   listSessionRecords(signal?: AbortSignal): Promise<AcademicRecordList>;
   /** E2 / E-F1：缺记录时才补录。academicRecordId 由服务端生成并返回。 */
@@ -171,6 +181,7 @@ const validatePlanValidation = ajv.getSchema(
 const validateTeacherCourseOption = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/TeacherCourseOption",
 );
+const validateCourse = ajv.getSchema("coursepilot-domain-v1#/$defs/Course");
 const validateReviewNote = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/ReviewNote",
 );
@@ -401,6 +412,38 @@ export class HttpApiClient implements CoursePilotApiClient {
           : []),
       ],
     };
+  }
+
+  async listCourses(
+    curriculumSnapshotId: string,
+    cursor: string | null = null,
+    signal?: AbortSignal,
+  ): Promise<CourseSearch> {
+    const { response, envelope } = await this.request(
+      withQuery("/api/v1/courses", {
+        curriculumSnapshotId,
+        limit: "100",
+        cursor,
+      }),
+      { method: "GET", sessionToken: this.requireSession(), signal },
+    );
+    if (!isSuccessEnvelope(envelope)) {
+      throw errorForResponse(response.status, envelope);
+    }
+    const data = envelope.data;
+    if (
+      !isObject(data) ||
+      !Array.isArray(data.items) ||
+      !everyValid(data.items, validateCourse) ||
+      (data.nextCursor !== null && typeof data.nextCursor !== "string")
+    ) {
+      throw new ApiFailure(
+        "服务返回的课程列表不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return { items: data.items as Course[], nextCursor: data.nextCursor };
   }
 
   private requireSession(): string {

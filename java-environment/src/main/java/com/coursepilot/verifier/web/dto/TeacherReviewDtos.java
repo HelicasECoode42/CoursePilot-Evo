@@ -49,6 +49,7 @@ public final class TeacherReviewDtos {
         Instant publishedAt,
         String sourceUrl,
         String excerpt,
+        String teacherDisplayName,
         List<Dimension> dimensions,
         MatchStatus matchStatus,
         String sourceRefId) {}

@@ -4,6 +4,7 @@ import type {
   AcademicRecordList,
   AuditResult,
   Constraint,
+  Course,
   CourseOffering,
   PlanItem,
   PlanningAnswer,
@@ -19,6 +20,7 @@ import {
   ApiFailure,
   type CoursePilotApiClient,
   type CurriculumResult,
+  type CourseSearch,
   type ReviewNoteSearch,
   type SessionOfferingSearch,
   type SessionView,
@@ -32,6 +34,22 @@ const DEMO_SESSION: SessionView = {
 const DEMO_SESSION_TOKEN = "fixture-token-0123456789abcdef0123456789abcdef";
 const DEMO_RECORD_ID = "fixture-academic-record-e1";
 const DEMO_CURRICULUM_ID = "fixture-curriculum-computer-science";
+const DEMO_COURSES: Course[] = [
+  {
+    courseCode: "CS102",
+    name: "程序设计基础（演示）",
+    credits: null,
+    category: "演示课程",
+    sourceRefIds: ["source:fixture-course-cs102"],
+  },
+  {
+    courseCode: "CS103",
+    name: "数据结构与算法（演示）",
+    credits: null,
+    category: "演示课程",
+    sourceRefIds: ["source:fixture-course-cs103"],
+  },
+];
 
 const DEMO_CURRICULA: CurriculumResult = {
   items: [
@@ -450,6 +468,21 @@ export class FixtureApiClient implements CoursePilotApiClient {
     if (!this.sessionToken)
       throw new Error("Fixture session has not been created");
     return { items: [...DEMO_CURRICULA.items], unknownMessages: [] };
+  }
+
+  async listCourses(
+    curriculumSnapshotId: string,
+    cursor: string | null = null,
+    signal?: AbortSignal,
+  ): Promise<CourseSearch> {
+    void cursor;
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    if (curriculumSnapshotId !== DEMO_CURRICULUM_ID) {
+      return { items: [], nextCursor: null };
+    }
+    return { items: structuredClone(DEMO_COURSES), nextCursor: null };
   }
 
   async listSessionRecords(signal?: AbortSignal): Promise<AcademicRecordList> {

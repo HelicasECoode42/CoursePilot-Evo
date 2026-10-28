@@ -146,7 +146,7 @@ def test_http_model_schema_invalid_item_is_invalid_output() -> None:
         2000,
         transport=httpx.MockTransport(handler),
     )
-    with pytest.raises(ModelInvalidOutput, match="不符合契约"):
+    with pytest.raises(ModelInvalidOutput, match="不符合契约：缺少必填字段"):
         adapter.generate(context=_context(), messages=[], tool_schemas=[])
 
 

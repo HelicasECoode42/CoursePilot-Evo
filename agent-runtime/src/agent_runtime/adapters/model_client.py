@@ -264,7 +264,14 @@ def _reply_from_content(content: str) -> ModelReply:
             raise ModelInvalidOutput("模型未给出候选")
         return ModelReply(items=[PlanItem.model_validate(item) for item in raw_items])
     except ValidationError as exc:
-        raise ModelInvalidOutput("模型输出不符合契约") from exc
+        types = {error["type"] for error in exc.errors(include_input=False, include_url=False)}
+        if "missing" in types:
+            detail = "缺少必填字段"
+        elif "extra_forbidden" in types:
+            detail = "包含不允许的字段"
+        else:
+            detail = "字段格式或取值不正确"
+        raise ModelInvalidOutput(f"模型输出不符合契约：{detail}") from exc
 
 
 def build_model_adapter(

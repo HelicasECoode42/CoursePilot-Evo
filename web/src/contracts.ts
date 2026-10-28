@@ -225,6 +225,14 @@ export interface AcademicRecordList {
 
 // --- E4: 换班次、教师与评价、运行报告（字段以 contracts/schemas/domain.schema.json 为准） ---
 
+export interface Course {
+  courseCode: string;
+  name: string;
+  credits: number | null;
+  category: string;
+  sourceRefIds: string[];
+}
+
 /** 一次上课时段。weeks 是教学周号，去重后不超过 60 个。 */
 export interface Meeting {
   dayOfWeek: number;
@@ -289,6 +297,7 @@ export interface ReviewNote {
   reviewNoteId: string;
   courseCode: string;
   teacherKey: string | null;
+  teacherDisplayName?: string | null;
   termId: string | null;
   sourceKind:
     | "OFFICIAL_SYLLABUS"

@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import { api } from "../api";
 import { ApiFailure } from "../api/client";
 import type {
+  Course,
   ReviewNote,
   SnapshotSummary,
   TeacherCourseOption,
@@ -16,6 +17,7 @@ import TeacherView from "./TeacherView.vue";
 vi.mock("../api", () => ({
   api: {
     mode: "fixture",
+    listCourses: vi.fn(),
     listTeacherCourseOptions: vi.fn(),
     searchReviews: vi.fn(),
   },
@@ -29,6 +31,13 @@ const curriculum: SnapshotSummary = {
   termId: null,
   createdAt: "2026-10-01T00:00:00Z",
   sourceValidation: "VERIFIED",
+};
+const course: Course = {
+  courseCode: "CS103",
+  name: "数据结构",
+  credits: 3,
+  category: "专业基础",
+  sourceRefIds: ["source:curriculum-cs103"],
 };
 
 const zhang: TeacherCourseOption = {
@@ -73,6 +82,7 @@ const courseOnly: ReviewNote = {
   dimensions: ["OVERALL"],
   matchStatus: "COURSE_ONLY",
   sourceRefId: "source:review-cs103-course",
+  teacherDisplayName: "教师姓名显示样例",
 };
 const unverified: ReviewNote = {
   reviewNoteId: "review-wang-unverified",
@@ -93,6 +103,7 @@ describe("teacher comparison page", () => {
   let store: ReturnType<typeof usePlanningStore>;
   let pinia: ReturnType<typeof createPinia>;
   const listOptions = vi.mocked(api.listTeacherCourseOptions);
+  const listCourses = vi.mocked(api.listCourses);
   const listReviews = vi.mocked(api.searchReviews);
 
   beforeEach(async () => {
@@ -110,6 +121,7 @@ describe("teacher comparison page", () => {
       draft: emptyPlanningDraft(),
     });
     listOptions.mockResolvedValue({ items: [zhang, wang], status: "OK" });
+    listCourses.mockResolvedValue({ items: [course], nextCursor: null });
     listReviews.mockResolvedValue({
       items: [matched, courseOnly, unverified],
       status: "OK",
@@ -135,6 +147,7 @@ describe("teacher comparison page", () => {
     );
 
   const search = async (wrapper: VueWrapper, code = "CS103"): Promise<void> => {
+    await flushPromises();
     await wrapper.get("#course-code").setValue(code);
     await wrapper.get("form").trigger("submit");
     await flushPromises();
@@ -170,7 +183,12 @@ describe("teacher comparison page", () => {
     const wrapper = mountPage();
     await search(wrapper);
 
+    expect(listCourses).toHaveBeenCalledWith(curriculum.snapshotId, null);
     expect(listOptions).toHaveBeenCalledWith(curriculum.snapshotId, "CS103");
+    expect(wrapper.find("#course-code").element.tagName).toBe("SELECT");
+    expect(
+      wrapper.findAll("#course-code option").map((option) => option.text()),
+    ).toContain("数据结构（CS103）");
     const text = wrapper.text();
     expect(text).toContain("张伟（合成）");
     expect(text).toContain("王芳（合成）");
@@ -178,6 +196,80 @@ describe("teacher comparison page", () => {
     expect(text).toContain("本学期状态未知");
     expect(text).toContain("1 个班次");
     expect(text).toContain("暂无班次资料");
+  });
+
+  it("loads all pages of curriculum courses and displays names with codes", async () => {
+    listCourses
+      .mockResolvedValueOnce({ items: [course], nextCursor: "page-2" })
+      .mockResolvedValueOnce({
+        items: [{ ...course, courseCode: "CS104", name: "离散数学" }],
+        nextCursor: null,
+      });
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(listCourses).toHaveBeenNthCalledWith(1, curriculum.snapshotId, null);
+    expect(listCourses).toHaveBeenNthCalledWith(
+      2,
+      curriculum.snapshotId,
+      "page-2",
+    );
+    expect(
+      wrapper.findAll("#course-code option").map((option) => option.text()),
+    ).toContain("数据结构（CS103）");
+    expect(
+      wrapper.findAll("#course-code option").map((option) => option.text()),
+    ).toContain("离散数学（CS104）");
+  });
+
+  it("shows course-level reviews without attributing them to a teacher", async () => {
+    const wrapper = mountPage();
+    await search(wrapper);
+    const button = wrapper
+      .findAll("button")
+      .find((item) => item.text() === "查看课程历史评价");
+    await button!.trigger("click");
+    await flushPromises();
+    expect(listReviews).toHaveBeenCalledWith("CS103", null);
+    expect(wrapper.get('[aria-label="课程历史评价"]').text()).toContain(
+      courseOnly.excerpt,
+    );
+    expect(wrapper.get('[aria-label="课程历史评价"]').text()).toContain(
+      "教师姓名（未核验）：教师姓名显示样例",
+    );
+    expect(wrapper.get('[aria-label="课程历史评价"]').text()).not.toContain(
+      matched.excerpt,
+    );
+  });
+
+  it("returns to the teacher preference question", async () => {
+    const wrapper = mountPage();
+    store.$patch({ sessionStatus: "idle", selectedCurriculumId: null });
+    await flushPromises();
+    await wrapper.get('a[href="/plan/questions/teacher"]').trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe("/plan/questions/teacher");
+  });
+
+  it("provides a direct route back to record confirmation", async () => {
+    const wrapper = mountPage();
+    store.$patch({
+      draft: {
+        ...emptyPlanningDraft(),
+        motives: ["GPA"],
+        classPreferencesReviewed: true,
+        interestReviewed: true,
+        careerReviewed: true,
+        teacherHandoffAccepted: true,
+        mustReviewed: true,
+        preferReviewed: true,
+        priorityOrder: ["GPA"],
+        prioritiesConfirmed: true,
+      },
+    });
+    await wrapper.get('a[href="/plan/questions/ready"]').trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe("/plan/questions/ready");
   });
 
   it("shows each review's source, year, dimensions and match status after expanding a teacher", async () => {
@@ -366,25 +458,22 @@ describe("teacher comparison page", () => {
     wrapper.unmount();
   });
 
-  it("explains a course with no teacher options as normal, not as an error", async () => {
-    listOptions.mockResolvedValueOnce({ items: [], status: "OK" });
+  it("explains when the curriculum has no selectable teacher-course entries", async () => {
+    listCourses.mockResolvedValueOnce({ items: [], nextCursor: null });
     const wrapper = mountPage();
-    await search(wrapper, "CS999");
+    await flushPromises();
 
-    expect(wrapper.text()).toContain("没有可比较的教师资料");
-    expect(wrapper.text()).toContain("这是正常说明，不是错误");
+    expect(wrapper.text()).toContain("当前培养方案没有课程资料");
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
     expect(wrapper.find("li.teacher-option").exists()).toBe(false);
   });
 
   it("says an UNKNOWN teacher list cannot be confirmed instead of saying there are none", async () => {
-    listOptions.mockResolvedValueOnce({ items: [], status: "UNKNOWN" });
+    listCourses.mockResolvedValueOnce({ items: [], nextCursor: null });
     const wrapper = mountPage();
-    await search(wrapper, "CS999");
+    await flushPromises();
 
-    expect(wrapper.text()).toContain("教师资料无法确认");
-    expect(wrapper.text()).not.toContain("没有可比较的教师资料");
-    expect(wrapper.text()).not.toContain("这是正常说明");
+    expect(wrapper.text()).toContain("当前培养方案没有课程资料");
     expect(wrapper.find("li.teacher-option").exists()).toBe(false);
   });
 
@@ -453,6 +542,7 @@ describe("teacher comparison page", () => {
     await wrapper.get('[role="alert"] button').trigger("click");
     await flushPromises();
     expect(listOptions).toHaveBeenCalledTimes(2);
+    await search(wrapper);
     expect(wrapper.text()).toContain("张伟（合成）");
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
   });
