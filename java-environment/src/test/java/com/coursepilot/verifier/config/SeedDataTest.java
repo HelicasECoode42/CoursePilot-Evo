@@ -64,4 +64,51 @@ class SeedDataTest {
                 curriculumCourses, transcripts, teacherCourses, reviews);
         }
     }
+
+    @Test
+    void backfillsMissingCurriculumCoursesInAnExistingSyntheticDatabase() throws Exception {
+        // 旧文件库：course 行已存在（所以种子会 early return），快照存在且是演示快照，
+        // 但快照级 CurriculumCourse 表是后加的，归属行缺失。
+        // 不补的话 GET /api/v1/courses?curriculumSnapshotId=... 返回 0 门课，
+        // Agent 拿不到候选，只能一直答 UNABLE_TO_VERIFY。
+        Fixtures f = new Fixtures();
+        when(f.snapshots.count()).thenReturn(2L);
+        when(f.snapshots.findById("PLAN_CS_2025")).thenReturn(Optional.of(syntheticDemoSnapshot()));
+        when(f.courses.count()).thenReturn(4L);
+        for (String code : java.util.List.of("CS101", "CS102", "GE101", "CS103")) {
+            when(f.courses.existsById(code)).thenReturn(true);
+            when(f.curriculumCourses
+                .existsBySnapshot_SnapshotIdAndCourse_CourseCode("PLAN_CS_2025", code))
+                .thenReturn(false);
+        }
+
+        f.runner().run();
+
+        verify(f.curriculumCourses, org.mockito.Mockito.times(4))
+            .save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void doesNotDuplicateCurriculumCoursesThatAlreadyExist() throws Exception {
+        Fixtures f = new Fixtures();
+        when(f.snapshots.count()).thenReturn(2L);
+        when(f.snapshots.findById("PLAN_CS_2025")).thenReturn(Optional.of(syntheticDemoSnapshot()));
+        when(f.courses.count()).thenReturn(4L);
+        for (String code : java.util.List.of("CS101", "CS102", "GE101", "CS103")) {
+            when(f.courses.existsById(code)).thenReturn(true);
+            when(f.curriculumCourses
+                .existsBySnapshot_SnapshotIdAndCourse_CourseCode("PLAN_CS_2025", code))
+                .thenReturn(true);
+        }
+
+        f.runner().run();
+
+        verify(f.curriculumCourses, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    private static CurriculumSnapshot syntheticDemoSnapshot() {
+        return new CurriculumSnapshot("PLAN_CS_2025", CurriculumSnapshot.Kind.CURRICULUM,
+            CurriculumSnapshot.State.PUBLISHED, CurriculumSnapshot.SourceKind.SYNTHETIC,
+            CurriculumSnapshot.SourceValidation.SYNTHETIC, null, Instant.EPOCH);
+    }
 }

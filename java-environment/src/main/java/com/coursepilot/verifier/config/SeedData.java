@@ -13,6 +13,9 @@ import java.util.List;
 @Configuration
 public class SeedData {
 
+    private static final String DEMO_CURRICULUM_ID = "PLAN_CS_2025";
+    private static final List<String> DEMO_COURSE_CODES = List.of("CS101", "CS102", "GE101", "CS103");
+
     @Bean
     CommandLineRunner init(CourseRepository courseRepo,
                            RequirementRepository reqRepo,
@@ -117,6 +120,14 @@ public class SeedData {
                     List.of(ReviewNote.Dimension.PRESENTATION, ReviewNote.Dimension.EXAM)));
             }
 
+            // 旧库补齐：文件库（ddl-auto=update）里 course 行已存在、但快照级
+            // CurriculumCourse 表是后加的，于是下面的 early return 会跳过归属写入，
+            // GET /api/v1/courses?curriculumSnapshotId=... 对每个快照都返回 0 门课。
+            // 后果是 Agent 拿不到任何候选，只能一直答 UNABLE_TO_VERIFY。
+            // 这里只补「本文件里写死的那几门演示课」与「本文件里写死的演示快照」的
+            // 关联，逐门检查是否已存在，不根据库里其它课程做任何推断。
+            backfillSyntheticCurriculumCourses(snapshotRepo, courseRepo, curriculumCourseRepo);
+
             if (courseRepo.count() > 0) return;
 
             courseRepo.save(new Course("CS101", "Java 程序设计", 3.0, "必修"));
@@ -127,9 +138,9 @@ public class SeedData {
             // 仅这些刚创建的演示课程显式归入 SYNTHETIC 快照。
             // 旧库已有 course 行时上面的 early return 会阻止任何推断式回填。
             if (createdSyntheticCurriculumSeed) {
-                CurriculumSnapshot demoCurriculum = snapshotRepo.findById("PLAN_CS_2025")
+                CurriculumSnapshot demoCurriculum = snapshotRepo.findById(DEMO_CURRICULUM_ID)
                     .orElseThrow();
-                for (String courseCode : List.of("CS101", "CS102", "GE101", "CS103")) {
+                for (String courseCode : DEMO_COURSE_CODES) {
                     curriculumCourseRepo.save(new CurriculumCourse(
                         demoCurriculum, courseRepo.getReferenceById(courseCode),
                         syntheticCourseName(courseCode), syntheticCredits(courseCode),
@@ -149,6 +160,37 @@ public class SeedData {
             offeringRepo.save(new CourseOffering("O_CS103_01", "CS103", "王老师",
                 "时间待定", "SYNTHETIC")); // 时间未知
         };
+    }
+
+    /** 演示快照与演示课程都在本文件里写死；只补两者之间缺失的归属行。 */
+    private static void backfillSyntheticCurriculumCourses(
+            CurriculumSnapshotRepository snapshotRepo,
+            CourseRepository courseRepo,
+            CurriculumCourseRepository curriculumCourseRepo) {
+        CurriculumSnapshot demoCurriculum = snapshotRepo.findById(DEMO_CURRICULUM_ID).orElse(null);
+        if (demoCurriculum == null) return;
+        // 只回填演示种子自己的 SYNTHETIC/SYNTHETIC 快照。同名 id 若已是导入的真实
+        // 培养方案，往里塞演示课程就是把 synthetic 混进 REAL（AGENTS.md 明确禁止），
+        // 而且会让核对结果凭空多出几门不存在的课。
+        if (demoCurriculum.getSourceKind() != CurriculumSnapshot.SourceKind.SYNTHETIC
+                || demoCurriculum.getSourceValidation()
+                    != CurriculumSnapshot.SourceValidation.SYNTHETIC) {
+            return;
+        }
+        for (String courseCode : DEMO_COURSE_CODES) {
+            // 课程行不在库里就跳过：那说明这是一个全新库，下面的正常种子会创建它们。
+            if (!courseRepo.existsById(courseCode)) continue;
+            if (curriculumCourseRepo.existsBySnapshot_SnapshotIdAndCourse_CourseCode(
+                    DEMO_CURRICULUM_ID, courseCode)) {
+                continue;
+            }
+            curriculumCourseRepo.save(new CurriculumCourse(
+                demoCurriculum, courseRepo.getReferenceById(courseCode),
+                syntheticCourseName(courseCode), syntheticCredits(courseCode),
+                syntheticCategory(courseCode), "SYNTHETIC",
+                "synthetic:" + DEMO_CURRICULUM_ID + ":" + courseCode,
+                "synthetic seed course " + courseCode, Instant.parse("2025-09-01T00:00:00Z")));
+        }
     }
 
     private static String syntheticCourseName(String code) {
