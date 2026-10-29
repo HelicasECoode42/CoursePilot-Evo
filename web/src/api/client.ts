@@ -51,6 +51,9 @@ export interface CurriculumResult {
   unknownMessages: string[];
 }
 
+/** 开课快照列表。与培养方案结果同形，但语义不同：只含 kind=OFFERING 的快照。 */
+export type OfferingSnapshotResult = CurriculumResult;
+
 /**
  * envelope 的业务状态，只有 OK 和 UNKNOWN（docs/04）。UNKNOWN 表示快照缺失或非当前，
  * 是无法确认；这时列表为空也不能说成「确定没有」。
@@ -81,6 +84,8 @@ export interface CoursePilotApiClient {
   readonly mode: "http" | "fixture" | "simulation";
   createSession(signal?: AbortSignal): Promise<SessionView>;
   listCurricula(signal?: AbortSignal): Promise<CurriculumResult>;
+  /** 已发布的开课快照（班次来源）。是否可用于当前模式由调用方用 isCurriculumUsableForMode 判断。 */
+  listOfferingSnapshots(signal?: AbortSignal): Promise<OfferingSnapshotResult>;
   listCourses(
     curriculumSnapshotId: string,
     cursor?: string | null,
@@ -411,6 +416,58 @@ export class HttpApiClient implements CoursePilotApiClient {
           ? ["演示培养方案不会用于真实服务模式。"]
           : []),
       ],
+    };
+  }
+
+  /**
+   * 列出已发布的开课快照。只按 kind/state 过滤，不按模式取舍：
+   * 「演示只用 SYNTHETIC、真实只用已核验」由 store 统一用 isCurriculumUsableForMode 判断，
+   * 客户端不再另写一套规则（两处分开写会漂移）。
+   * 没有开课快照时 items 为空，调用方据此让课表留空并说明原因，不编造。
+   */
+  async listOfferingSnapshots(
+    signal?: AbortSignal,
+  ): Promise<OfferingSnapshotResult> {
+    if (!this.sessionToken) {
+      throw new ApiFailure("请先建立本次会话。", "http", 401, "UNAUTHORIZED");
+    }
+    const { response, envelope } = await this.request(
+      "/api/v1/offering-snapshots",
+      {
+        method: "GET",
+        sessionToken: this.sessionToken,
+        signal,
+      },
+    );
+    if (!response.ok) throw errorForResponse(response.status, envelope);
+    if (envelope.status !== "OK" && envelope.status !== "UNKNOWN") {
+      throw errorForResponse(response.status, envelope);
+    }
+    if (!isObject(envelope.data) || !Array.isArray(envelope.data.items)) {
+      throw new ApiFailure(
+        "服务返回的开课快照列表格式不完整。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    if (
+      !envelope.data.items.every((item) => Boolean(validateSnapshot?.(item)))
+    ) {
+      throw new ApiFailure(
+        "服务返回的开课快照信息不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    const items = (envelope.data.items as SnapshotSummary[]).filter(
+      (item) => item.kind === "OFFERING" && item.state === "PUBLISHED",
+    );
+    return {
+      items,
+      unknownMessages:
+        envelope.status === "UNKNOWN"
+          ? ["部分开课快照暂不可用，当前只列出可用资料。"]
+          : [],
     };
   }
 

@@ -91,6 +91,14 @@ function advance() {
     validationMessage.value = "请选择一个培养方案后继续。";
     return;
   }
+  if (
+    question === "curriculum" &&
+    store.usableOfferingSnapshots.length > 1 &&
+    !store.selectedOfferingSnapshotId
+  ) {
+    validationMessage.value = "请选择一个开课快照（班次来源）后继续。";
+    return;
+  }
   if (question === "teacher") store.updateDraft("teacherHandoffAccepted", true);
   if (question === "preferences")
     store.updateDraft("classPreferencesReviewed", true);
@@ -216,6 +224,13 @@ onBeforeUnmount(() => {
   globalThis.document.removeEventListener("pointerup", endGesture);
   globalThis.document.removeEventListener("pointercancel", endGesture);
 });
+
+function offeringOptionLabel(item: SnapshotSummary): string {
+  const term = item.termId ?? "学期未注明";
+  const source =
+    item.sourceValidation === "SYNTHETIC" ? "演示数据" : "班次快照";
+  return `${term} · ${source}`;
+}
 
 function curriculumOptionLabel(item: SnapshotSummary, index: number): string {
   const date = new Intl.DateTimeFormat("zh-CN", {
@@ -370,6 +385,37 @@ async function openRecords() {
         class="notice notice--warning"
       >
         这份资料的来源尚未核验，页面不会把它当作已验证的真实课程事实。
+      </p>
+      <template v-if="store.usableOfferingSnapshots.length > 1">
+        <label class="field-label" for="offering-select"
+          >开课快照（班次来源）</label
+        >
+        <select
+          id="offering-select"
+          :value="store.selectedOfferingSnapshotId ?? ''"
+          class="select-control"
+          @change="
+            store.chooseOfferingSnapshot(
+              ($event.target as HTMLSelectElement).value,
+            )
+          "
+        >
+          <option disabled value="">请选择</option>
+          <option
+            v-for="item in store.usableOfferingSnapshots"
+            :key="item.snapshotId"
+            :value="item.snapshotId"
+          >
+            {{ offeringOptionLabel(item) }}
+          </option>
+        </select>
+      </template>
+      <p
+        v-else-if="store.usableOfferingSnapshots.length === 0"
+        class="notice notice--warning"
+        role="status"
+      >
+        当前没有可用于本模式的开课快照，课表会留空，不会替你编排班次。
       </p>
     </template>
 

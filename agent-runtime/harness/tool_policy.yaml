@@ -18,3 +18,5 @@ tools:
     max_calls: 1
   - name: validatePlan
     max_calls: 2
+  - name: listOfferingSnapshots
+    max_calls: 1

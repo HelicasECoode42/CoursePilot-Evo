@@ -61,6 +61,9 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     const expiresAt = ref<string | null>(null);
     const curricula = ref<SnapshotSummary[]>([]);
     const selectedCurriculumId = ref<string | null>(null);
+    // 开课快照（班次来源）。只在建会话时取一次；不与培养方案列表混放。
+    const offeringSnapshots = ref<SnapshotSummary[]>([]);
+    const selectedOfferingSnapshotId = ref<string | null>(null);
     const unknownMessages = ref<string[]>([]);
     const errorMessage = ref("");
     const sessionVersion = ref(0);
@@ -196,6 +199,8 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       expiresAt.value = null;
       curricula.value = [];
       selectedCurriculumId.value = null;
+      offeringSnapshots.value = [];
+      selectedOfferingSnapshotId.value = null;
       sessionStatus.value = "expired";
       errorMessage.value = message;
       clearPlanningHandoff();
@@ -246,6 +251,12 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         curricula.value.find(
           (item) => item.snapshotId === selectedCurriculumId.value,
         ) ?? null,
+    );
+    // 能用于当前模式的开课快照。规则与培养方案共用 isCurriculumUsableForMode，不另写。
+    const usableOfferingSnapshots = computed(() =>
+      offeringSnapshots.value.filter((item) =>
+        isCurriculumUsableForMode(item, planningMode.value),
+      ),
     );
     const mode = computed(() => client.mode);
     const selectedRecord = computed(
@@ -299,9 +310,24 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
           throw new ApiFailure("无法建立会话，请重试。", "invalid_response");
         const result = await client.listCurricula(controller.signal);
         if (version !== sessionVersion.value) return;
+        const offeringResult = await client.listOfferingSnapshots(
+          controller.signal,
+        );
+        if (version !== sessionVersion.value) return;
         clearPlanningHandoff();
         curricula.value = result.items;
-        unknownMessages.value = result.unknownMessages;
+        unknownMessages.value = [
+          ...result.unknownMessages,
+          ...offeringResult.unknownMessages,
+        ];
+        offeringSnapshots.value = offeringResult.items;
+        // 恰好一个可用时自动选中；多个让用户在培养方案那一步选；一个都没有就留空，
+        // 课表会说明「没有班次快照」，不替用户编一个。
+        const offeringUsable = offeringResult.items.filter((item) =>
+          isCurriculumUsableForMode(item, planningMode.value),
+        );
+        selectedOfferingSnapshotId.value =
+          offeringUsable.length === 1 ? offeringUsable[0].snapshotId : null;
         // 只自动选能用于当前模式的方案。不加这个判断，一个 UNVERIFIED、既无课程也无
         // 类别要求的快照会因为「只有一个」被直接选中，用户走完 8 步才知道它不能用。
         const usable = result.items.filter((item) =>
@@ -339,6 +365,17 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       } finally {
         if (activeController === controller) activeController = null;
       }
+    }
+
+    function chooseOfferingSnapshot(snapshotId: string) {
+      if (
+        !usableOfferingSnapshots.value.some(
+          (item) => item.snapshotId === snapshotId,
+        )
+      )
+        return;
+      selectedOfferingSnapshotId.value = snapshotId;
+      clearPlanningHandoff();
     }
 
     function chooseCurriculum(snapshotId: string) {
@@ -437,7 +474,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         academicRecordId:
           selectedRecord.value?.academicRecordId ??
           client.fixtureAcademicRecordId(),
-        offeringSnapshotId: null,
+        offeringSnapshotId: selectedOfferingSnapshotId.value,
         mode: planningMode.value,
       });
       if (built.ok && clarificationPriorityOrder.value !== null) {
@@ -783,6 +820,9 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       curricula,
       selectedCurriculumId,
       selectedCurriculum,
+      offeringSnapshots,
+      selectedOfferingSnapshotId,
+      usableOfferingSnapshots,
       unknownMessages,
       errorMessage,
       draft,
@@ -806,6 +846,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       startSession,
       invalidateSession,
       chooseCurriculum,
+      chooseOfferingSnapshot,
       planningMode,
       setMotives,
       updateDraft,

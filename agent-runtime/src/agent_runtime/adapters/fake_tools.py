@@ -113,6 +113,7 @@ class TypedFakeToolClient:
             )
         if tool in {
             "listCurricula",
+            "listOfferingSnapshots",
             "listOfferings",
             "searchReviews",
             "listCareerDirections",

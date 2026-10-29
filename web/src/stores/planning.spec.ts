@@ -38,6 +38,10 @@ function fakeClient(
       items: [curriculum],
       unknownMessages: [],
     })),
+    listOfferingSnapshots: vi.fn(async () => ({
+      items: [],
+      unknownMessages: [],
+    })),
     clearSession: vi.fn(),
     fixtureAcademicRecordId: vi.fn(() => null),
     listSessionRecords: vi.fn(async () => ({ items: [] })),
@@ -195,6 +199,10 @@ describe("planning session store", () => {
         signalListStarted();
         return lateCurricula.promise;
       }),
+      listOfferingSnapshots: vi.fn(async () => ({
+        items: [],
+        unknownMessages: [],
+      })),
       clearSession: vi.fn(() => {
         bearer = null;
       }),
@@ -1365,5 +1373,140 @@ describe("planning session store", () => {
         expect(store.auditStatus).toBe("idle");
       });
     });
+  });
+});
+
+/** 开课快照：真实模式只认已核验的，演示模式只认 SYNTHETIC（规则在 isCurriculumUsableForMode）。 */
+function offering(
+  snapshotId: string,
+  sourceKind: SnapshotSummary["sourceKind"],
+  sourceValidation: SnapshotSummary["sourceValidation"],
+): SnapshotSummary {
+  return {
+    snapshotId,
+    kind: "OFFERING",
+    state: "PUBLISHED",
+    sourceKind,
+    termId: "2025-FALL",
+    createdAt: "2025-08-15T00:00:00Z",
+    sourceValidation,
+  };
+}
+
+describe("offering snapshot selection", () => {
+  let pinia: ReturnType<typeof createPinia>;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+  });
+
+  afterEach(() => {
+    disposePinia(pinia);
+  });
+
+  function startWith(
+    offerings: SnapshotSummary[],
+    overrides: Partial<CoursePilotApiClient> = {},
+  ) {
+    const client = fakeClient({
+      listOfferingSnapshots: vi.fn(async () => ({
+        items: offerings,
+        unknownMessages: [],
+      })),
+      ...overrides,
+    });
+    const store = createPlanningStore(client)();
+    return { client, store, start: () => store.startSession() };
+  }
+
+  it("auto-selects the only offering usable in real mode and passes it into the request", async () => {
+    const only = offering("offer-verified", "BROWSER_SNAPSHOT", "VERIFIED");
+    const { store, start } = startWith([only], {
+      fixtureAcademicRecordId: vi.fn(() => "record-1"),
+    });
+
+    await start();
+
+    expect(store.selectedOfferingSnapshotId).toBe("offer-verified");
+    expect(
+      store.usableOfferingSnapshots.map((item) => item.snapshotId),
+    ).toEqual(["offer-verified"]);
+    store.$patch({
+      draft: {
+        ...store.draft,
+        motives: ["GPA"],
+        priorityOrder: ["GPA"],
+        classPreferencesReviewed: true,
+        prioritiesConfirmed: true,
+        mustReviewed: true,
+        preferReviewed: true,
+      },
+    });
+    const built = store.preparePlanningHandoff();
+    expect(built).toMatchObject({ ok: true });
+    expect(store.planningHandoff?.offeringSnapshotId).toBe("offer-verified");
+  });
+
+  it("does not auto-select an unverified offering in real mode", async () => {
+    const { store, start } = startWith([
+      offering("offer-unverified", "BROWSER_SNAPSHOT", "UNVERIFIED"),
+    ]);
+
+    await start();
+
+    expect(store.selectedOfferingSnapshotId).toBeNull();
+    expect(store.usableOfferingSnapshots).toEqual([]);
+  });
+
+  it("never offers a synthetic offering in real mode", async () => {
+    const { store, start } = startWith([
+      offering("offer-demo", "SYNTHETIC", "SYNTHETIC"),
+    ]);
+
+    await start();
+
+    expect(store.selectedOfferingSnapshotId).toBeNull();
+    expect(store.usableOfferingSnapshots).toEqual([]);
+  });
+
+  it("lets the user choose when several offerings are usable", async () => {
+    const first = offering("offer-a", "BROWSER_SNAPSHOT", "VERIFIED");
+    const second = offering("offer-b", "BROWSER_SNAPSHOT", "VERIFIED");
+    const { store, start } = startWith([first, second]);
+
+    await start();
+
+    expect(store.selectedOfferingSnapshotId).toBeNull();
+    store.chooseOfferingSnapshot("offer-unknown");
+    expect(store.selectedOfferingSnapshotId).toBeNull();
+    store.chooseOfferingSnapshot("offer-b");
+    expect(store.selectedOfferingSnapshotId).toBe("offer-b");
+  });
+
+  it("leaves the selection empty when there are no offerings at all", async () => {
+    const { store, start } = startWith([]);
+
+    await start();
+
+    expect(store.sessionStatus).toBe("ready");
+    expect(store.selectedOfferingSnapshotId).toBeNull();
+    expect(store.offeringSnapshots).toEqual([]);
+  });
+
+  it("in simulation mode auto-selects the synthetic offering and rejects verified real ones", async () => {
+    const demo = offering("offer-demo", "SYNTHETIC", "SYNTHETIC");
+    const real = offering("offer-real", "BROWSER_SNAPSHOT", "VERIFIED");
+    const { store, start } = startWith([demo, real], { mode: "fixture" });
+
+    await start();
+
+    expect(store.planningMode).toBe("SIMULATION");
+    expect(store.selectedOfferingSnapshotId).toBe("offer-demo");
+    expect(
+      store.usableOfferingSnapshots.map((item) => item.snapshotId),
+    ).toEqual(["offer-demo"]);
+    store.chooseOfferingSnapshot("offer-real");
+    expect(store.selectedOfferingSnapshotId).toBe("offer-demo");
   });
 });

@@ -79,6 +79,11 @@ class ToolPage:
 # ModelAdapter may only call these; any other name is rejected before HTTP.
 TOOLS: dict[str, ToolSpec] = {
     "listCurricula": ToolSpec("GET", "/api/v1/curriculum-snapshots", SnapshotSummary, listed=True),
+    # 开课快照列表（contracts/java.openapi.json listOfferingSnapshots）。与 listCurricula 分开：
+    # 开课快照不能混进培养方案列表，否则会被误当培养方案使用。
+    "listOfferingSnapshots": ToolSpec(
+        "GET", "/api/v1/offering-snapshots", SnapshotSummary, listed=True
+    ),
     "listCourses": ToolSpec("GET", "/api/v1/courses", Course, listed=True),
     "listOfferings": ToolSpec("GET", "/api/v1/offerings", CourseOffering, listed=True),
     "listTeacherCourseOptions": ToolSpec(

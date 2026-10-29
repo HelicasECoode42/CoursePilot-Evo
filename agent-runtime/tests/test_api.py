@@ -72,6 +72,7 @@ class FakeToolClient:
             )
         if tool in {
             "listCurricula",
+            "listOfferingSnapshots",
             "listCourses",
             "listTeacherCourseOptions",
             "searchReviews",
@@ -584,3 +585,14 @@ def test_valid_session_for_missing_object_stays_404() -> None:
     assert response.status_code == 404
     assert response.json()["status"] == "NOT_FOUND"
     assert response.json()["issues"][0]["code"] == "NOT_FOUND"
+
+
+def test_gateway_offering_snapshots_route_with_fake_tools() -> None:
+    # 网关只透传 listOfferingSnapshots；演示假工具返回空列表（没有开课快照就是空，不编造）。
+    client = TestClient(create_app(Settings(use_fake_tools=True)))
+    response = client.get(
+        "/api/v1/offering-snapshots",
+        headers={"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:offer-list"},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"] == {"items": []}

@@ -450,3 +450,26 @@ def test_java_business_rejections_are_not_reported_as_contract_violations() -> N
         ToolRejected("createAcademicRecord", 400, "INVALID_INPUT", "bad field")
     )
     assert (status, envelope_status, issue.code) == (502, "ERROR", "TOOL_CONTRACT_VIOLATION")
+
+
+def test_list_offering_snapshots_hits_offering_path_and_keeps_kind() -> None:
+    # 开课快照走自己的路径，且 kind 原样保留：不能被当成培养方案返回。
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        item = {
+            "snapshotId": "OFFER_2025_FALL",
+            "kind": "OFFERING",
+            "state": "PUBLISHED",
+            "sourceKind": "SYNTHETIC",
+            "termId": "2025-FALL",
+            "createdAt": "2025-08-15T00:00:00Z",
+            "sourceValidation": "SYNTHETIC",
+        }
+        return httpx.Response(200, json=_envelope("OK", {"items": [item]}))
+
+    items = _client(handler).call("listOfferingSnapshots", None, _context())
+    assert seen == ["/api/v1/offering-snapshots"]
+    assert [i.kind for i in items] == ["OFFERING"]
+    assert items[0].sourceValidation == "SYNTHETIC"

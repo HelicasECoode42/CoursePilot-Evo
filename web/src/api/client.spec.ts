@@ -995,3 +995,41 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     });
   });
 });
+
+describe("HTTP API client offering snapshots", () => {
+  it("reads /api/v1/offering-snapshots with bearer auth and keeps only published offerings", async () => {
+    const publishedOffering = {
+      ...curriculum,
+      snapshotId: "offer-2025-fall",
+      kind: "OFFERING",
+      termId: "2025-FALL",
+      sourceKind: "BROWSER_SNAPSHOT",
+      sourceValidation: "UNVERIFIED",
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          200,
+          envelope("OK", {
+            items: [publishedOffering, curriculum],
+          }),
+        ),
+      );
+    const client = new HttpApiClient("http://127.0.0.1:8000", fetcher);
+    await client.createSession();
+
+    const result = await client.listOfferingSnapshots();
+
+    expect(result.items.map((item) => item.snapshotId)).toEqual([
+      "offer-2025-fall",
+    ]);
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toContain("/api/v1/offering-snapshots");
+    expect(url).not.toContain("curriculum-snapshots");
+    expect((options.headers as Headers).get("Authorization")).toBe(
+      `Bearer ${session.sessionToken}`,
+    );
+  });
+});

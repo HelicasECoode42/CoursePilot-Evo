@@ -51,6 +51,19 @@ def list_curricula(
     return envelope(x_request_id, "OK", {"items": result}).model_dump(mode="json")
 
 
+@router.get("/api/v1/offering-snapshots")
+def list_offering_snapshots(
+    request: Request,
+    subject_id: Annotated[str, Depends(require_subject)],
+    x_request_id: Annotated[str, Header(alias="X-Request-Id")],
+    tool_client: Annotated[ToolClient, Depends(get_tool_client)],
+) -> dict:
+    # 只透传 Java 的 listOfferingSnapshots；不在这里筛选或猜测哪一份可用。
+    context = make_context(request, subject_id, x_request_id)
+    result = tool_client.call("listOfferingSnapshots", None, context)
+    return envelope(x_request_id, "OK", {"items": result}).model_dump(mode="json")
+
+
 @router.get("/api/v1/courses")
 def list_courses(
     request: Request,

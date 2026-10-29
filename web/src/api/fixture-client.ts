@@ -14,12 +14,14 @@ import type {
   RunReport,
   SessionPlanReplaceInput,
   SessionPlanReplacement,
+  SnapshotSummary,
   TeacherCourseOption,
 } from "../contracts";
 import {
   ApiFailure,
   type CoursePilotApiClient,
   type CurriculumResult,
+  type OfferingSnapshotResult,
   type CourseSearch,
   type ReviewNoteSearch,
   type SessionOfferingSearch,
@@ -155,6 +157,19 @@ const DEMO_AUDIT: AuditResult = {
  */
 export const FIXTURE_PREVIOUS_PLAN_ID = "fixture-plan-e4-v1";
 const FIXTURE_OFFERING_SNAPSHOT_ID = "fixture-offering-e4";
+
+/** 演示开课快照：SYNTHETIC，只在演示模式可用；与规划结果里写死的 FIXTURE_OFFERING_SNAPSHOT_ID 一致。 */
+const DEMO_OFFERING_SNAPSHOTS: SnapshotSummary[] = [
+  {
+    snapshotId: FIXTURE_OFFERING_SNAPSHOT_ID,
+    kind: "OFFERING",
+    state: "PUBLISHED",
+    sourceKind: "SYNTHETIC",
+    termId: "2025-FALL",
+    createdAt: "2026-10-01T00:00:00Z",
+    sourceValidation: "SYNTHETIC",
+  },
+];
 const WEEKS_1_TO_16 = Array.from({ length: 16 }, (_, index) => index + 1);
 
 /**
@@ -471,6 +486,15 @@ export class FixtureApiClient implements CoursePilotApiClient {
     if (!this.sessionToken)
       throw new Error("Fixture session has not been created");
     return { items: [...DEMO_CURRICULA.items], unknownMessages: [] };
+  }
+
+  async listOfferingSnapshots(
+    signal?: AbortSignal,
+  ): Promise<OfferingSnapshotResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    return { items: [...DEMO_OFFERING_SNAPSHOTS], unknownMessages: [] };
   }
 
   async listCourses(
