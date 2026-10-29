@@ -10,6 +10,7 @@ from agent_runtime.adapters.model_client import (
     HttpModelAdapter,
     ModelConfigError,
     ModelInvalidOutput,
+    ModelOutputTruncated,
     ModelTimeout,
     ModelUpstreamError,
     _reply_from_content,
@@ -411,3 +412,75 @@ def test_system_prompt_spells_out_the_choice_object_shape() -> None:
     system_prompt = seen["messages"][0]["content"]  # type: ignore[index]
     assert '"value"' in system_prompt and '"label"' in system_prompt
     assert "不能是字符串" in system_prompt
+
+
+def _truncating_adapter(payload: dict[str, object]) -> HttpModelAdapter:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, json=payload)
+
+    return HttpModelAdapter(
+        "https://api.deepseek.com",
+        "test-key",
+        "deepseek-chat",
+        0.0,
+        2000,
+        transport=httpx.MockTransport(handler),
+    )
+
+
+def test_truncated_json_is_not_reported_as_invalid_output() -> None:
+    """finish_reason=length 是预算截断，不是模型输出非法。
+
+    实测 2026-10-29：真实规划两次都失败，日志是
+    {"finish_reason": "length", "output_tokens": 2000, "shape": "content_string",
+     "parse_failure": "content_not_accepted"}。
+    output_tokens 正好顶到输出上限 2000，JSON 写到一半被切断。
+    之前报成 MODEL_INVALID_OUTPUT，把人引去查提示词和 schema，
+    而真正要改的是输出预算或单次回复的长度。
+    """
+    adapter = _truncating_adapter(
+        {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    # 合法 JSON 的开头，被截断所以解析不了。
+                    "message": {"content": '{"items": [{"courseCode": "CS1'},
+                }
+            ],
+            "usage": {"prompt_tokens": 3392, "completion_tokens": 2000},
+        }
+    )
+    with pytest.raises(ModelOutputTruncated) as caught:
+        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+    message = str(caught.value)
+    assert "输出预算截断" in message
+    # 要给出那个要改的数，不然看了也不知道改哪里。
+    assert "2000" in message
+    assert caught.value.output_tokens == 2000
+    assert caught.value.diagnostics["finish_reason"] == "length"
+
+
+def test_truncated_empty_content_is_also_truncation_not_missing_content() -> None:
+    """content 为空 + finish_reason=length：同样是被截断，不是「缺少 content」。"""
+    adapter = _truncating_adapter(
+        {
+            "choices": [{"finish_reason": "length", "message": {"content": ""}}],
+            "usage": {"prompt_tokens": 3392, "completion_tokens": 2000},
+        }
+    )
+    with pytest.raises(ModelOutputTruncated):
+        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+
+
+def test_unparseable_json_without_length_stays_invalid_output() -> None:
+    """finish_reason 不是 length 时仍然是 MODEL_INVALID_OUTPUT，分类没有被放宽。"""
+    adapter = _truncating_adapter(
+        {
+            "choices": [{"finish_reason": "stop", "message": {"content": "not json"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 10},
+        }
+    )
+    with pytest.raises(ModelInvalidOutput) as caught:
+        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+    assert not isinstance(caught.value, ModelOutputTruncated)

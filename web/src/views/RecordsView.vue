@@ -10,7 +10,10 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "../api";
 import CourseSearchPicker from "../components/CourseSearchPicker.vue";
-import { coursesSuggestedBeforeYear } from "../domain/academic-year";
+import {
+  coursesSuggestedBeforeYear,
+  describeYearSuggestionGap,
+} from "../domain/academic-year";
 import type { CompletedCourse, Course, CourseOutcome } from "../contracts";
 import {
   describeCompleteness,
@@ -170,7 +173,18 @@ function addCourse() {
 }
 
 async function addSuggestedCourses() {
-  if (!store.selectedCurriculumId || !studyYear.value) return;
+  // 没选培养方案就直接 return 的话，按钮点下去毫无反应，看起来像坏了。
+  if (!store.selectedCurriculumId) {
+    yearImportStatus.value = "idle";
+    yearImportMessage.value =
+      "还没有选定培养方案，没法按年级整理。请先在规划流程里选一份培养方案，或者直接手动添加已修课程。";
+    return;
+  }
+  if (!studyYear.value) {
+    yearImportStatus.value = "idle";
+    yearImportMessage.value = "请先选择目前年级。";
+    return;
+  }
   const year = Number(studyYear.value);
   yearImportStatus.value = "loading";
   yearImportMessage.value = "";
@@ -203,12 +217,40 @@ async function addSuggestedCourses() {
       })),
     ];
     yearImportStatus.value = "idle";
+    // 空结果有三种完全不同的原因，笼统说一句「没有可整理的课程」看起来像功能坏了。
     yearImportMessage.value = candidates.length
       ? `已生成 ${candidates.length} 门待确认基础课程。请展开检查，把未修或未通过的课程更正后保存。`
-      : "没有可按年级自动整理的基础课程，请添加已修课程。";
+      : explainEmptyYearImport(courses, year);
   } catch {
     yearImportStatus.value = "error";
     yearImportMessage.value = "课程目录读取失败，请重试或手动添加。";
+  }
+}
+
+/**
+ * 为什么一门都没生成。
+ *
+ * 实测：SYN_0263… 这份快照是早一轮导入发布的，105 门课的 suggestedTerm 全是
+ * null，于是选哪个年级都是 0 门，页面却说「没有可按年级自动整理的基础课程」，
+ * 看起来像坏了。这三种原因要分开讲，而且要告诉学生下一步能做什么。
+ */
+function explainEmptyYearImport(
+  courses: readonly Course[],
+  year: number,
+): string {
+  const gap = describeYearSuggestionGap(courses, year);
+  switch (gap.kind) {
+    case "no-suggested-term":
+      return (
+        "这份培养方案里没有「建议修读学年」这项数据，所以按年级整理不出课程——" +
+        "换哪个年级都一样。换一份带建议学年的培养方案，或者直接手动添加已修课程。"
+      );
+    case "first-year":
+      return "大一之前没有更早的学年，所以没有可自动整理的已修课程。直接手动添加你已经修过的课。";
+    case "nothing-before-year":
+      return "这份培养方案在该年级之前没有可自动识别的基础课（选修课、占位编号和多学期安排都不自动整理）。请手动添加。";
+    default:
+      return "没有可按年级自动整理的基础课程，请手动添加已修课程。";
   }
 }
 
@@ -522,7 +564,9 @@ async function goToCredits() {
           <p class="microcopy">
             按培养方案的建议学年整理基础课；具体是否修过、是否通过需要你确认。选修课请另外添加。
           </p>
-          <p v-if="yearImportMessage" role="status">{{ yearImportMessage }}</p>
+          <p v-if="yearImportMessage" class="year-assist__result" role="status">
+            {{ yearImportMessage }}
+          </p>
         </div>
         <details v-if="draftCourses.length" :open="draftCourses.length <= 8">
           <summary>
@@ -777,6 +821,43 @@ async function goToCredits() {
 .record-choice[aria-pressed="true"]::after {
   content: " · 已选择";
   font-weight: 400;
+}
+</style>
+
+<style scoped>
+/*
+ * 这一块原先一个样式都没有，所以「按年级生成」和下面的「添加一门已修课程」
+ * 挤在一起，中间那句结果提示还按正文字号渲染，看着像标题。
+ */
+.year-assist {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+  margin: 0 0 2rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--wash);
+}
+
+.year-assist .microcopy {
+  margin: 0;
+  line-height: 1.65;
+}
+
+.year-assist__result {
+  margin: 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  background: white;
+  border: 1px solid var(--line);
+  font-size: 0.88rem;
+  line-height: 1.7;
+  color: var(--ink);
+}
+
+.year-assist .select-control {
+  max-width: 100%;
 }
 </style>
 

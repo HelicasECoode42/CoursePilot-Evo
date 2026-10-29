@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from agent_runtime.adapters.model_client import (
     ModelInvalidOutput,
+    ModelOutputTruncated,
     ModelTimeout,
     ModelUpstreamError,
 )
@@ -280,6 +281,20 @@ def register_error_handlers(app: FastAPI) -> None:
             retryable=_transient(503),
         )
         return _json(request, 503, "ERROR", [issue])
+
+    @app.exception_handler(ModelOutputTruncated)
+    async def model_output_truncated(request: Request, exc: ModelOutputTruncated) -> JSONResponse:
+        # 输出被预算截断不是「模型输出非法」：JSON 不完整只是因为被切断了。
+        # 报成 MODEL_INVALID_OUTPUT 会让人去查提示词和 schema，而真正要改的是
+        # 输出预算（docs/04 第 3 节）或单次回复的长度。
+        # retryable=False：同样的预算和同样的提示词，重试还是会在同一处断掉。
+        issue = Issue(
+            code="MODEL_OUTPUT_TRUNCATED",
+            message=_bounded(str(exc)),
+            field=None,
+            retryable=False,
+        )
+        return _json(request, 422, "ERROR", [issue])
 
     @app.exception_handler(ModelInvalidOutput)
     async def model_invalid_output(request: Request, exc: ModelInvalidOutput) -> JSONResponse:

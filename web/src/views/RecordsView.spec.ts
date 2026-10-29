@@ -294,3 +294,38 @@ describe("学业资料", () => {
     expect(router.currentRoute.value.path).toBe("/plan/questions/ready");
   });
 });
+
+describe("按年级生成的空结果", () => {
+  it("没选培养方案时说明原因，而不是点了没反应", async () => {
+    // 原先这里直接 return，按钮点下去什么都不发生，看着像功能坏了。
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = usePlanningStore();
+    store.$patch({
+      sessionStatus: "ready",
+      sessionId: "session-test",
+      // 补录表单只在「记录已读取且一条都没有」时出现。
+      recordsStatus: "ready",
+      records: [],
+    });
+    vi.spyOn(store, "loadRecords").mockResolvedValue();
+    vi.spyOn(store, "loadSchoolProgress").mockResolvedValue();
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/records", component: RecordsView }],
+    });
+    await router.push("/records");
+    await router.isReady();
+    const wrapper = mount(RecordsView, {
+      global: { plugins: [pinia, router] },
+    });
+    // 没选年级时按钮是禁用的，所以先选年级，才能走到「没选培养方案」这条分支。
+    await wrapper.get("#study-year").setValue("2");
+    const button = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("按年级生成"))!;
+    await button.trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("还没有选定培养方案");
+  });
+});

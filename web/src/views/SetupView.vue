@@ -12,12 +12,14 @@
  *     CP_IMPORT_READY 回来，不论 ok 真假，插件就是装着的。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { api } from "../api";
 import {
   describeExtensionPresent,
   describePortMismatch,
   isExtensionReply,
 } from "../domain/extension-probe";
+import { usePlanningStore } from "../stores/planning";
 
 /** 学校学业情况页面。插件的 content script 只匹配这一个地址。 */
 const SCHOOL_PAGE_URL =
@@ -28,6 +30,32 @@ const SCHOOL_PAGE_URL =
  * 不可改写，不注入就测不到「端口不对」这条分支。
  */
 const props = defineProps<{ pagePort?: string }>();
+
+const router = useRouter();
+const store = usePlanningStore();
+const goingToRecords = ref(false);
+const recordsError = ref("");
+
+/**
+ * 去学业资料页之前先建会话。
+ *
+ * /records 自己不建会话，没有会话时只会显示「还没有可用会话，请先回到引导页」——
+ * 从配置页直接链过去就是个死胡同。这里先把会话建起来再跳。
+ */
+async function goToRecords() {
+  goingToRecords.value = true;
+  recordsError.value = "";
+  try {
+    if (store.sessionStatus !== "ready") await store.startSession();
+    if (store.sessionStatus !== "ready") {
+      recordsError.value = store.errorMessage || "没能建立会话，请稍后重试。";
+      return;
+    }
+    await router.push("/records?import=school");
+  } finally {
+    goingToRecords.value = false;
+  }
+}
 
 type ProbeState = "idle" | "probing" | "present" | "silent";
 
@@ -142,10 +170,14 @@ onUnmounted(() => {
       </li>
 
       <li class="setup-step">
-        <h2>第 2 步 · 在学校页面登录</h2>
+        <h2>第 2 步 · 在学校页面登录（先只登录）</h2>
         <p class="microcopy">
           点下面的按钮，会在新标签打开学校的「学业情况查询」页面。
-          <strong>在那一页用你自己的账号登录</strong>，登录完回到这里继续。
+          <strong
+            >在那一页用你自己的账号登录就行，先不要点浮窗里的导入。</strong
+          >
+          插件要先在 CoursePilot
+          这边登记好接收的页面，学校那边的导入才有地方送。
         </p>
         <button
           class="button button--secondary"
@@ -155,20 +187,41 @@ onUnmounted(() => {
           打开学校学业情况页面
         </button>
         <p v-if="openedSchoolPage" class="setup-step__note" role="status">
-          已在新标签打开。登录后那一页会出现插件的导入浮窗。
+          已在新标签打开。登录完回到这里做第 3 步，再回学校那一页点导入。
         </p>
       </li>
 
       <li class="setup-step">
-        <h2>第 3 步 · 导入我的学业记录</h2>
+        <h2>第 3 步 · 先连接，再导入</h2>
+        <p class="microcopy">顺序不能反，这是插件的硬要求：</p>
+        <ol class="setup-order">
+          <li>在下面的学业资料页点「<strong>连接教务</strong>」</li>
+          <li>
+            回到学校那一页，点浮窗里的「<strong>导入 CoursePilot 并返回</strong
+            >」
+          </li>
+        </ol>
         <p class="microcopy">
-          这一步导入的是<strong>你学过哪些课、过没过</strong>。
-          学校开设哪些课（培养方案）已经导好了，不用你再导；
-          本学期「谁上课、周几第几节」要等选课开放才公开，现在拿不到。
+          反过来做，学校页面会提示「请先在 CoursePilot 点击连接教务」——
+          那不是出错，是还没登记接收页面。另外这一步导入的是<strong>你学过哪些课、过没过</strong>：
+          学校开设哪些课（培养方案）已经导好了，不用你再导；本学期「谁上课、周几第几节」
+          要等选课开放才公开，现在拿不到。
         </p>
-        <RouterLink class="button button--primary" to="/records?import=school">
-          去导入学业记录
-        </RouterLink>
+        <button
+          class="button button--primary"
+          type="button"
+          :disabled="goingToRecords"
+          @click="goToRecords"
+        >
+          {{ goingToRecords ? "正在准备…" : "去学业资料页连接并导入" }}
+        </button>
+        <p
+          v-if="recordsError"
+          class="setup-step__note setup-step__note--warn"
+          role="alert"
+        >
+          {{ recordsError }}
+        </p>
       </li>
     </ol>
 
@@ -205,6 +258,14 @@ onUnmounted(() => {
 .setup-step .microcopy {
   margin: 0 0 0.75rem;
   line-height: 1.65;
+}
+
+.setup-order {
+  margin: 0 0 0.75rem;
+  padding-left: 1.3rem;
+  font-size: 0.88rem;
+  line-height: 1.8;
+  color: var(--soft);
 }
 
 .setup-step__note {

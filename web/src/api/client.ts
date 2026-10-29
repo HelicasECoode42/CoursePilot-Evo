@@ -233,6 +233,23 @@ const validateRunReport = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/RunReport",
 );
 
+/**
+ * 按 issue code 给出照实的说明。
+ *
+ * 2026-10-29 实测：真实模型两次规划都失败，页面只说「服务没有完成请求，请稍后
+ * 重试」。真实原因是输出被 2000 token 的输出预算截断（finish_reason=length），
+ * 重试多少次都一样。这类失败必须说清楚，不能用「稍后重试」糊过去。
+ */
+const EXPLAINED_ISSUE_CODES: Record<string, string> = {
+  MODEL_OUTPUT_TRUNCATED:
+    "模型的回复被输出预算截断了，没写完所以用不了。重试不会有帮助——" +
+    "需要调高输出预算，或者减少一次要规划的课程数量。",
+  MODEL_INVALID_OUTPUT:
+    "模型这次返回的内容不符合接口约定，已经被拦下，没有写入任何方案。",
+  MODEL_RATE_LIMITED: "模型服务正在限流，请过一会儿再试。",
+  RATE_LIMITED: "操作太频繁了，请过几分钟再试。",
+};
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -306,9 +323,14 @@ function errorForResponse(
     status === 429 ||
     status === 503 ||
     status === 504;
-  const fallback = retryable
-    ? "服务暂时不可用，请稍后重试。"
-    : "服务没有完成请求，请稍后重试。";
+  // 有些失败「请稍后重试」是错的建议：重试一定还是同样的结果。
+  // 这几条要照实说清楚，否则学生只会一直点重试。
+  const explained = EXPLAINED_ISSUE_CODES[issue?.code ?? ""];
+  const fallback =
+    explained ??
+    (retryable
+      ? "服务暂时不可用，请稍后重试。"
+      : "服务没有完成请求，请稍后重试。");
   return new ApiFailure(
     fallback,
     "http",

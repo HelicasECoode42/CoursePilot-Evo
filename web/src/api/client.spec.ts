@@ -1129,3 +1129,53 @@ describe("HTTP API client offering snapshots", () => {
     );
   });
 });
+
+describe("HTTP API client · 失败说明", () => {
+  const planningRequest: PlanningRequest = {
+    schemaVersion: "1.0",
+    curriculumSnapshotId: "curriculum-2026",
+    offeringSnapshotId: null,
+    academicRecordId: "record-1",
+    motives: ["EXPLORE"],
+    constraints: [],
+    selectedCourseCodes: [],
+    priorityOrder: [],
+  } as unknown as PlanningRequest;
+
+  async function failWith(code: string, retryable = false) {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          422,
+          envelope("ERROR", {}, [
+            { code, message: "服务端的原文", field: null, retryable },
+          ]),
+        ),
+      );
+    const client = new HttpApiClient(
+      "http://127.0.0.1:8000",
+      fetcher as unknown as typeof fetch,
+    );
+    await client.createSession();
+    return client
+      .submitPlanning(planningRequest, "idem-explained-1")
+      .catch((error) => error);
+  }
+
+  it("输出被截断时不说「请稍后重试」，因为重试一定还是一样", async () => {
+    // 实测：真实规划两次都因 finish_reason=length 失败，页面却只说
+    // 「服务没有完成请求，请稍后重试」，学生只会一直点重试。
+    const error = await failWith("MODEL_OUTPUT_TRUNCATED");
+    expect(error).toBeInstanceOf(ApiFailure);
+    expect(error.message).toContain("输出预算截断");
+    expect(error.message).toContain("重试不会有帮助");
+    expect(error.message).not.toContain("请稍后重试");
+  });
+
+  it("没有专门说明的失败仍然走原来的兜底文案", async () => {
+    const error = await failWith("SOMETHING_ELSE");
+    expect(error.message).toBe("服务没有完成请求，请稍后重试。");
+  });
+});

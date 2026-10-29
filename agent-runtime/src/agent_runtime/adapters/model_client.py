@@ -50,6 +50,19 @@ class ModelInvalidOutput(RuntimeError):
         self.diagnostics = diagnostics or {}
 
 
+class ModelOutputTruncated(ModelInvalidOutput):
+    """Provider stopped at the output cap (finish_reason == "length").
+
+    This is NOT invalid model output: the JSON is unparseable only because it was
+    cut off mid-way. Reporting it as MODEL_INVALID_OUTPUT sends everyone looking
+    for a prompt or schema defect, when the thing that needs changing is the
+    output budget (docs/04 section 3) or the size of the reply being asked for.
+
+    Stays a subclass so the Runner keeps charging the failed call's tokens to the
+    budget exactly as before.
+    """
+
+
 class ModelTimeout(RuntimeError):
     """Provider timed out or the transport failed (-> 504, retryable, no repair)."""
 
@@ -162,6 +175,15 @@ class HttpModelAdapter:
         self._max_output_tokens = max_output_tokens
         self._transport = transport
 
+    def _truncation_message(self, output_tokens: int | None) -> str:
+        """说清是预算截断，并给出要改的那个数，不要让人去查 prompt。"""
+        used = output_tokens if output_tokens is not None else self._max_output_tokens
+        return (
+            f"模型输出在 {used} token 处被输出预算截断（上限 {self._max_output_tokens}），"
+            "回复没写完所以不是完整 JSON。这不是提示词或 schema 的问题："
+            "要么调高输出预算，要么让单次回复更短。"
+        )
+
     def generate(
         self,
         *,
@@ -238,6 +260,13 @@ class HttpModelAdapter:
                 "output_tokens": output_tokens,
             }
             _log_invalid_response(diagnostics)
+            if diagnostics.get("finish_reason") == "length":
+                raise ModelOutputTruncated(
+                    self._truncation_message(output_tokens),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    diagnostics=diagnostics,
+                )
             raise ModelInvalidOutput(
                 "模型响应缺少 content",
                 input_tokens=input_tokens,
@@ -258,6 +287,13 @@ class HttpModelAdapter:
                 "parse_failure": "content_not_accepted",
             }
             _log_invalid_response(exc.diagnostics)
+            if exc.diagnostics.get("finish_reason") == "length":
+                raise ModelOutputTruncated(
+                    self._truncation_message(output_tokens),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    diagnostics=exc.diagnostics,
+                ) from exc
             raise
         return ModelReply(
             clarify=reply.clarify,
