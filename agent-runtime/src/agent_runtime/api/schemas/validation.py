@@ -59,3 +59,27 @@ class PlanValidation(DomainModel):
         if self.scope in ("REAL_TIMETABLE", "SIMULATION") and self.offeringSnapshotId is None:
             raise ValueError("scope REAL_TIMETABLE/SIMULATION requires offeringSnapshotId")
         return self
+
+
+class SessionPlanCourseRemovalRequest(DomainModel):
+    previousPlanId: Id
+    courseCode: Id
+
+
+class SessionPlanEditResult(DomainModel):
+    previousPlanId: Id
+    planId: Id
+    items: list[PlanItem] = Field(max_length=30)
+    hardConstraints: list[Constraint] = Field(max_length=30)
+    verification: PlanValidation | None
+    empty: bool
+
+    @model_validator(mode="after")
+    def _empty_plan_has_no_verification(self) -> SessionPlanEditResult:
+        if self.empty != (len(self.items) == 0):
+            raise ValueError("empty must match whether items is empty")
+        if self.empty and self.verification is not None:
+            raise ValueError("empty plan cannot carry a verification")
+        if not self.empty and self.verification is None:
+            raise ValueError("non-empty plan requires a verification")
+        return self

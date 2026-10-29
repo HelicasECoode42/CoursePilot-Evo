@@ -72,7 +72,7 @@ def list_courses(
     tool_client: Annotated[ToolClient, Depends(get_tool_client)],
     curriculum_snapshot_id: Annotated[str, Query(alias="curriculumSnapshotId")],
     query: Annotated[str | None, Query()] = None,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    limit: Annotated[int, Query(ge=1, le=200)] = 20,
     cursor: Annotated[str | None, Query()] = None,
 ) -> dict:
     _validate_cursor(cursor)
@@ -134,9 +134,11 @@ def search_reviews(
     teacher_key: Annotated[str | None, Query(alias="teacherKey")] = None,
     term_id: Annotated[str | None, Query(alias="termId")] = None,
     limit: Annotated[int, Query(ge=1, le=10)] = 5,
+    cursor: Annotated[str | None, Query()] = None,
 ) -> dict:
+    _validate_cursor(cursor)
     context = make_context(request, subject_id, x_request_id)
-    result = tool_client.call(
+    result = tool_client.call_page(
         "searchReviews",
         None,
         context,
@@ -145,9 +147,12 @@ def search_reviews(
             "teacherKey": teacher_key,
             "termId": term_id,
             "limit": limit,
+            "cursor": cursor,
         },
     )
-    return envelope(x_request_id, "OK", {"items": result}).model_dump(mode="json")
+    return envelope(
+        x_request_id, "OK", {"items": result.items, "nextCursor": result.next_cursor}
+    ).model_dump(mode="json")
 
 
 @router.get("/api/v1/career-directions")

@@ -14,12 +14,14 @@ from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient
 from agent_runtime.api.errors import register_error_handlers
 from agent_runtime.api.idempotency import IdempotencyStore
+from agent_runtime.api.rate_limit import FixedWindowRateLimiter, RateLimit
 from agent_runtime.api.routes import (
     academic_records,
     gateway,
     plan_replacement,
     planning,
     reports,
+    school_progress,
     sessions,
 )
 from agent_runtime.api.session_store import SessionStore
@@ -51,7 +53,14 @@ def create_app(
 
     app = FastAPI(title="CoursePilot planning API", version="1.0.0")
     app.state.settings = settings
-    app.state.session_store = SessionStore(settings.session_ttl_seconds)
+    app.state.session_store = SessionStore(settings.session_ttl_seconds, settings.max_live_sessions)
+    app.state.session_rate_limiter = FixedWindowRateLimiter(
+        RateLimit(
+            max_events=settings.session_rate_limit_max,
+            window_seconds=settings.session_rate_limit_window_seconds,
+            max_tracked_keys=settings.max_tracked_sessions,
+        )
+    )
     app.state.plan_store = SessionPlanStore()
     app.state.idempotency = IdempotencyStore()
     app.state.harness = harness
@@ -109,6 +118,7 @@ def create_app(
     app.include_router(planning.router)
     app.include_router(plan_replacement.router)
     app.include_router(academic_records.router)
+    app.include_router(school_progress.router)
     app.include_router(gateway.router)
     app.include_router(reports.router)
     return app

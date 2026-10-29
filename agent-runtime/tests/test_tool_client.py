@@ -15,7 +15,7 @@ from agent_runtime.adapters.tool_client import (
     ToolRejected,
     ToolUnavailable,
 )
-from agent_runtime.api.schemas import AuditRequest
+from agent_runtime.api.schemas import AuditRequest, SchoolProgressImport
 from agent_runtime.application.context import ExecutionContext
 
 
@@ -182,6 +182,92 @@ def test_post_sends_dto_and_parses_audit() -> None:
         _context(),
     )
     assert result.suggestedCourseCodes == ["CS101"]
+
+
+def test_school_progress_import_uses_put_and_parses_persisted_result() -> None:
+    request_body = SchoolProgressImport.model_validate(
+        {
+            "schemaVersion": "1.0",
+            "curriculumSnapshotId": "curr:demo",
+            "snapshot": {
+                "format": "coursepilot-shu-academic-progress",
+                "version": 1,
+                "capturedAt": "2026-10-29T00:00:00Z",
+                "source": "fictional fixture",
+                "nodes": [
+                    {
+                        "nodeId": "node:1",
+                        "parentId": None,
+                        "schoolNodeId": "98",
+                        "leaf": True,
+                        "name": "公共基础课",
+                        "requiredCredits": 4,
+                        "earnedCredits": 2,
+                        "remainingCredits": 2,
+                    }
+                ],
+                "courses": [
+                    {
+                        "nodeId": "node:1",
+                        "courseCode": "CP001",
+                        "name": "虚构课程",
+                        "credits": 2,
+                        "outcome": "UNKNOWN",
+                        "completedYear": None,
+                        "completedTerm": None,
+                        "grade": None,
+                        "makeup": None,
+                        "retake": None,
+                        "suggestedYear": None,
+                        "suggestedTerm": None,
+                    }
+                ],
+            },
+        }
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert request.headers["Idempotency-Key"] == "school-key-1"
+        assert request.url.path == "/api/v1/school-progress"
+        return httpx.Response(
+            200,
+            json=_envelope(
+                "OK",
+                {
+                    "receipt": {
+                        "schoolProgressId": "school:demo",
+                        "contentHash": "a" * 64,
+                        "importedAt": "2026-10-29T00:00:00Z",
+                        "reused": False,
+                    },
+                    "snapshot": request_body.model_dump(mode="json")["snapshot"],
+                    "academicRecord": {
+                        "academicRecordId": "record:demo",
+                        "revision": 1,
+                        "curriculumSnapshotId": "curr:demo",
+                        "completedCourses": [
+                            {
+                                "courseCode": "CP001",
+                                "earnedCredits": None,
+                                "outcome": "UNKNOWN",
+                                "completedTerm": None,
+                            }
+                        ],
+                        "transcriptComplete": False,
+                        "sourceKind": "USER_IMPORT",
+                        "createdAt": "2026-10-29T00:00:00Z",
+                    },
+                },
+            ),
+        )
+
+    result = _client(handler).call(
+        "importSchoolProgress", request_body, _context(), idempotency_key="school-key-1"
+    )
+    assert result.receipt.schoolProgressId == "school:demo"
+    assert result.snapshot.courses[0].outcome == "UNKNOWN"
+    assert result.academicRecord.sourceKind == "USER_IMPORT"
 
 
 def test_plan_tool_request_serializes_max_credits_as_json_number() -> None:

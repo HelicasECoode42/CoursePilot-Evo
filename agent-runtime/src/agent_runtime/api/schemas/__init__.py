@@ -69,12 +69,20 @@ from .offering import (
     Week,
 )
 from .review import MatchStatus, ReviewDimension, ReviewImport, ReviewNote, ReviewSourceKind
+from .school_progress import (
+    SchoolProgressImport,
+    SchoolProgressImportResult,
+    SchoolProgressReceipt,
+    SchoolProgressSnapshot,
+)
 from .trace import EventType, TraceEvent
 from .validation import (
     PlanItem,
     PlanValidation,
     PlanValidationRequest,
     Scope,
+    SessionPlanCourseRemovalRequest,
+    SessionPlanEditResult,
     ValidationMode,
     Verdict,
 )
@@ -117,6 +125,8 @@ __all__ = [
     "PlanItem",
     "PlanValidation",
     "PlanValidationRequest",
+    "SessionPlanCourseRemovalRequest",
+    "SessionPlanEditResult",
     "PlanningAnswer",
     "PlanningMode",
     "PlanningRequest",
@@ -130,6 +140,10 @@ __all__ = [
     "ReviewImport",
     "ReviewNote",
     "ReviewSourceKind",
+    "SchoolProgressImport",
+    "SchoolProgressImportResult",
+    "SchoolProgressReceipt",
+    "SchoolProgressSnapshot",
     "RunDecision",
     "RunManifest",
     "RunReport",
@@ -174,6 +188,8 @@ SCHEMA_DEFS: dict[str, type[DomainModel]] = {
     "PlanItem": PlanItem,
     "PlanValidationRequest": PlanValidationRequest,
     "PlanValidation": PlanValidation,
+    "SessionPlanCourseRemovalRequest": SessionPlanCourseRemovalRequest,
+    "SessionPlanEditResult": SessionPlanEditResult,
     "ReviewNote": ReviewNote,
     "ReviewImport": ReviewImport,
     "Question": Question,

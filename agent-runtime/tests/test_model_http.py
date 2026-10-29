@@ -12,6 +12,7 @@ from agent_runtime.adapters.model_client import (
     ModelInvalidOutput,
     ModelTimeout,
     ModelUpstreamError,
+    _reply_from_content,
     build_model_adapter,
 )
 from agent_runtime.application.context import ExecutionContext
@@ -28,6 +29,24 @@ def _context() -> ExecutionContext:
         deadline=datetime.now(UTC) + timedelta(seconds=20),
         harness_version="harness:v0",
     )
+
+
+def test_model_json_preserves_course_reasons_and_exploration() -> None:
+    reply = _reply_from_content(
+        json.dumps(
+            {
+                "items": [{"courseCode": "CS101", "teacherKey": None, "classId": None}],
+                "courseRationales": [
+                    {"courseCode": "CS101", "reason": "学习基础", "reviewNoteIds": []}
+                ],
+                "explorationDirections": [
+                    {"title": "科研", "description": "探索研究", "steps": ["读入门资料"]}
+                ],
+            }
+        )
+    )
+    assert reply.course_rationales[0].reason == "学习基础"
+    assert reply.exploration_directions[0].steps == ["读入门资料"]
 
 
 def test_build_model_adapter_rejects_placeholder_when_endpoint_is_set() -> None:
@@ -224,11 +243,19 @@ def test_http_model_server_error_is_not_invalid_output() -> None:
     assert caught.value.status_code == 503
 
 
-def test_http_model_invalid_json_raises() -> None:
+def test_http_model_invalid_json_logs_only_finish_reason_and_usage(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    marker = "sensitive-model-text-marker"
+
     def handler(request: httpx.Request) -> httpx.Response:
+        del request
         return httpx.Response(
             200,
-            json={"choices": [{"message": {"content": "当然可以帮你选课"}}]},
+            json={
+                "choices": [{"message": {"content": marker}, "finish_reason": "length"}],
+                "usage": {"prompt_tokens": 78, "completion_tokens": 1000},
+            },
         )
 
     adapter = HttpModelAdapter(
@@ -239,8 +266,83 @@ def test_http_model_invalid_json_raises() -> None:
         2000,
         transport=httpx.MockTransport(handler),
     )
-    with pytest.raises(ModelInvalidOutput):
+    with pytest.raises(ModelInvalidOutput) as caught:
         adapter.generate(context=_context(), messages=[], tool_schemas=[])
+
+    assert caught.value.input_tokens == 78
+    assert caught.value.output_tokens == 1000
+    assert caught.value.diagnostics == {
+        "shape": "content_string",
+        "finish_reason": "length",
+        "http_status": 200,
+        "input_tokens": 78,
+        "output_tokens": 1000,
+        "parse_failure": "content_not_accepted",
+    }
+    assert marker not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("response_body", "shape", "finish_reason"),
+    [
+        (
+            {"usage": {"prompt_tokens": 31, "completion_tokens": 7}},
+            "choices_missing_or_not_list",
+            None,
+        ),
+        (
+            {"choices": [], "usage": {"prompt_tokens": 12, "completion_tokens": 2}},
+            "choices_empty",
+            None,
+        ),
+        (
+            {
+                "choices": [{"message": {"content": None}, "finish_reason": "length"}],
+                "usage": {"prompt_tokens": 44, "completion_tokens": 1000},
+            },
+            "content_not_string",
+            "length",
+        ),
+        (
+            {
+                "choices": [{"message": {"content": "  "}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 1},
+            },
+            "content_empty",
+            "stop",
+        ),
+    ],
+)
+def test_http_model_missing_content_records_only_safe_response_metadata(
+    response_body: dict[str, object],
+    shape: str,
+    finish_reason: str | None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    marker = "must-never-be-logged"
+    response_body["private_marker"] = marker
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, json=response_body)
+
+    adapter = HttpModelAdapter(
+        "https://api.example.test",
+        "test-key",
+        "test-model",
+        0.0,
+        1000,
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ModelInvalidOutput) as caught:
+        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+
+    diagnostic = caught.value.diagnostics
+    assert diagnostic["shape"] == shape
+    assert diagnostic.get("finish_reason") == finish_reason
+    assert caught.value.input_tokens == diagnostic["input_tokens"]
+    assert caught.value.output_tokens == diagnostic["output_tokens"]
+    assert marker not in caplog.text
 
 
 def test_http_model_sends_max_tokens_so_the_provider_truncates() -> None:

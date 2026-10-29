@@ -10,6 +10,7 @@ from fastapi import Depends, Header, Request
 from agent_runtime.adapters.tool_client import ToolClient
 from agent_runtime.api.errors import ForbiddenError, UnauthorizedError
 from agent_runtime.api.idempotency import IdempotencyStore
+from agent_runtime.api.rate_limit import FixedWindowRateLimiter
 from agent_runtime.api.session_store import SessionNotFound, SessionStore
 from agent_runtime.application.budget import SessionSpendLedger
 from agent_runtime.application.context import ExecutionContext
@@ -39,6 +40,10 @@ def get_runner(request: Request) -> PlanningRunner:
 
 def get_spend_ledger(request: Request) -> SessionSpendLedger:
     return request.app.state.spend_ledger
+
+
+def get_session_rate_limiter(request: Request) -> FixedWindowRateLimiter:
+    return request.app.state.session_rate_limiter
 
 
 def require_subject(

@@ -36,6 +36,11 @@ class Settings(BaseSettings):
 
     # Sessions and CORS.
     session_ttl_seconds: int = 1800
+    # 建会话的配额与内存上限。POST /sessions 不要认证，不限流的话一个循环就能把
+    # 会话表、幂等表、方案库撑爆。这些和 Budget 一样是部署设置，不在 harness 白名单里。
+    session_rate_limit_max: int = Field(default=10, ge=1)
+    session_rate_limit_window_seconds: int = Field(default=300, ge=1)
+    max_live_sessions: int = Field(default=10000, ge=1)
     cors_origins: str = "http://127.0.0.1:5173"
 
     # Harness whitelist directory (relative to the agent-runtime module root).

@@ -171,6 +171,24 @@ def test_gateway_teacher_options_preserves_java_next_cursor() -> None:
     assert response.json()["data"] == {"items": [], "nextCursor": "20"}
 
 
+def test_gateway_review_pagination_forwards_cursor() -> None:
+    class PagedFake(FakeToolClient):
+        def call_page(self, tool, dto, context, *, params=None):
+            assert tool == "searchReviews"
+            assert params["courseCode"] == "CS101"
+            assert params["cursor"] == "5"
+            return ToolPage([], "10")
+
+    client = TestClient(create_app(tool_client=PagedFake()))
+    response = client.get(
+        "/api/v1/reviews/search",
+        params={"courseCode": "CS101", "cursor": "5"},
+        headers={"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:review-page"},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"] == {"items": [], "nextCursor": "10"}
+
+
 def test_gateway_list_routes_work_with_configured_typed_fake_tools() -> None:
     client = TestClient(create_app(Settings(use_fake_tools=True)))
     headers = {"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:fake-page"}

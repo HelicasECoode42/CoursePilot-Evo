@@ -17,6 +17,7 @@ from agent_runtime.api.schemas import (
     CourseOffering,
     PlanValidation,
     ReviewNote,
+    SchoolProgressImportResult,
     SnapshotSummary,
     TeacherCourseOption,
 )
@@ -100,6 +101,8 @@ TOOLS: dict[str, ToolSpec] = {
     # listSessionRecords (planning.openapi.json) is the gateway's list endpoint; the
     # Java side (java.openapi.json) still needs GET /api/v1/academic-records to back it.
     "listAcademicRecords": ToolSpec("GET", "/api/v1/academic-records", AcademicRecord, listed=True),
+    "importSchoolProgress": ToolSpec("PUT", "/api/v1/school-progress", SchoolProgressImportResult),
+    "getSchoolProgress": ToolSpec("GET", "/api/v1/school-progress", SchoolProgressImportResult),
 }
 
 
@@ -250,10 +253,10 @@ class ToolClient:
         body: dict | None,
         timeout: float,
     ) -> httpx.Response:
+        if method not in {"GET", "POST", "PUT"}:
+            raise InvalidTool(f"unsupported HTTP method for {method}")
         with httpx.Client(timeout=timeout, transport=self._transport) as client:
-            if method == "GET":
-                return client.get(url, headers=headers, params=query)
-            return client.post(url, headers=headers, params=query, json=body)
+            return client.request(method, url, headers=headers, params=query, json=body)
 
 
 _MIN_TIMEOUT_SECONDS = 0.1

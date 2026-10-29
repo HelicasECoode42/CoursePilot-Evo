@@ -19,6 +19,7 @@ class CourseFact:
     name: str
     credits: str | None
     category: str
+    source_ref_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

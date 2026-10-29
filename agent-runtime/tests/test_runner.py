@@ -25,10 +25,12 @@ from agent_runtime.api.schemas import (
     PlanItem,
     PlanningRequest,
     PlanValidation,
+    ReviewNote,
     RunManifest,
     SoftPreference,
     TeacherPreference,
 )
+from agent_runtime.api.schemas.answer import CourseRationale, ExplorationDirection
 from agent_runtime.application.budget import Budget, BudgetExceeded
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.runner import PlanningRunner
@@ -91,8 +93,9 @@ def test_run_returns_course_layer_recommendations_on_w2_fake_loop(
     assert all(issue.code != "FAKE_MODEL" for issue in recommendation.verification.unknownChecks)
 
 
+@pytest.mark.parametrize("outcome", ["PASSED", "IN_PROGRESS"])
 def test_taken_courses_are_excluded_and_cannot_be_returned(
-    planning_request: PlanningRequest,
+    planning_request: PlanningRequest, outcome: str
 ) -> None:
     class RecordWithTakenCourse(TypedFakeToolClient):
         def call(self, tool, dto, context, *, params=None):
@@ -103,8 +106,8 @@ def test_taken_courses_are_excluded_and_cannot_be_returned(
                         "completedCourses": [
                             CompletedCourse(
                                 courseCode="CS101",
-                                outcome="PASSED",
-                                earnedCredits=3,
+                                outcome=outcome,
+                                earnedCredits=3 if outcome == "PASSED" else None,
                                 completedTerm=None,
                             )
                         ]
@@ -512,6 +515,144 @@ def test_configured_model_has_no_fake_marker(planning_request: PlanningRequest) 
     assert all(issue.code != "FAKE_MODEL" for issue in answer.unknowns)
 
 
+def test_model_reasons_and_exploration_are_returned(planning_request: PlanningRequest) -> None:
+    class Model:
+        def generate(self, *, context, messages, tool_schemas):
+            return ModelReply(
+                items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)],
+                course_rationales=[
+                    CourseRationale(courseCode="CS101", reason="适合学习基础", reviewNoteIds=[])
+                ],
+                exploration_directions=[
+                    ExplorationDirection(
+                        title="科研探索", description="了解研究问题", steps=["阅读入门资料"]
+                    )
+                ],
+            )
+
+    planning_request.intent.motives = ["CAREER"]
+    planning_request.intent.priorityOrder = ["CAREER"]
+    answer = _runner(Model()).run(planning_request, _context(planning_request))
+    assert answer.recommendations[0].courseRationales[0].reason == "适合学习基础"
+    rationale = answer.recommendations[0].courseRationales[0]
+    assert rationale.courseSourceRefIds == ["source:fake-w2"]
+    assert rationale.reviewBasisStatus == "NO_RECORDS"
+    assert rationale.rationaleSource == "MODEL"
+    assert answer.recommendations[0].explorationDirections[0].steps == ["阅读入门资料"]
+
+
+def test_runner_labels_reviews_not_queried(planning_request: PlanningRequest) -> None:
+    planning_request.intent.motives = ["SCHEDULE"]
+    planning_request.intent.priorityOrder = ["SCHEDULE"]
+    planning_request.intent.softPreferences = []
+    planning_request.promptText = ""
+    answer = _runner().run(planning_request, _context(planning_request))
+    rationale = answer.recommendations[0].courseRationales[0]
+    assert rationale.reviewBasisStatus == "NOT_QUERIED"
+
+
+def test_runner_generates_factual_rationale_for_every_recommended_course(
+    planning_request: PlanningRequest,
+) -> None:
+    class Model:
+        def generate(self, *, context, messages, tool_schemas):
+            return ModelReply(
+                items=[
+                    PlanItem(courseCode="CS101", teacherKey=None, classId=None),
+                    PlanItem(courseCode="MATH201", teacherKey=None, classId=None),
+                ]
+            )
+
+    planning_request.intent.motives = ["CAREER"]
+    planning_request.intent.priorityOrder = ["CAREER"]
+    answer = _runner(Model()).run(planning_request, _context(planning_request))
+    rationales = answer.recommendations[0].courseRationales
+    assert {rationale.courseCode for rationale in rationales} == {"CS101", "MATH201"}
+    assert all(rationale.courseSourceRefIds == ["source:fake-w2"] for rationale in rationales)
+    statuses = {rationale.courseCode: rationale.reviewBasisStatus for rationale in rationales}
+    assert statuses == {"CS101": "NO_RECORDS", "MATH201": "NOT_QUERIED"}
+    assert all("课程目录列示" in rationale.reason for rationale in rationales)
+    assert all(rationale.rationaleSource == "COURSE_FACTS" for rationale in rationales)
+
+
+def test_runner_returns_server_derived_review_source_for_cited_evidence(
+    planning_request: PlanningRequest,
+) -> None:
+    note = ReviewNote(
+        reviewNoteId="review:cs101",
+        courseCode="CS101",
+        teacherKey=None,
+        termId=None,
+        sourceKind="USER_IMPORT",
+        publishedAt=None,
+        sourceUrl=None,
+        excerpt="作业较多",
+        dimensions=["WORKLOAD"],
+        matchStatus="COURSE_ONLY",
+        sourceRefId="review-source:cs101:line-8",
+    )
+
+    class Tools(TypedFakeToolClient):
+        def call(self, tool, dto, context, *, params=None, idempotency_key=None):
+            if tool == "searchReviews":
+                return [note]
+            return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
+
+    class Model:
+        def generate(self, *, context, messages, tool_schemas):
+            return ModelReply(
+                items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)],
+                course_rationales=[
+                    CourseRationale(
+                        courseCode="CS101",
+                        reason="目標包含较低工作量，现有记录提到作业较多",
+                        reviewNoteIds=["review:cs101"],
+                    )
+                ],
+            )
+
+    planning_request.intent.motives = ["LOW_WORKLOAD"]
+    planning_request.intent.priorityOrder = ["LOW_WORKLOAD"]
+    answer = PlanningRunner(
+        tool_client=Tools(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=Model(),
+    ).run(planning_request, _context(planning_request))
+    rationale = answer.recommendations[0].courseRationales[0]
+    assert rationale.reviewBasisStatus == "HAS_EVIDENCE"
+    assert [item.model_dump() for item in rationale.reviewEvidenceRefs] == [
+        {"reviewNoteId": "review:cs101", "sourceRefId": "review-source:cs101:line-8"}
+    ]
+
+
+def test_course_rationale_accepts_old_payload_without_evidence_fields() -> None:
+    rationale = CourseRationale.model_validate(
+        {"courseCode": "CS101", "reason": "旧推荐理由", "reviewNoteIds": []}
+    )
+    assert rationale.courseSourceRefIds == []
+    assert rationale.reviewBasisStatus is None
+    assert rationale.rationaleSource is None
+    assert rationale.reviewEvidenceRefs == []
+
+
+def test_model_cannot_cite_unqueried_review(planning_request: PlanningRequest) -> None:
+    class Model:
+        def generate(self, *, context, messages, tool_schemas):
+            return ModelReply(
+                items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)],
+                course_rationales=[
+                    CourseRationale(
+                        courseCode="CS101", reason="评价好", reviewNoteIds=["review:invented"]
+                    )
+                ],
+            )
+
+    planning_request.intent.motives = ["CAREER"]
+    planning_request.intent.priorityOrder = ["CAREER"]
+    with pytest.raises(ModelInvalidOutput, match="评价"):
+        _runner(Model()).run(planning_request, _context(planning_request))
+
+
 def test_run_raises_tool_unavailable_without_java(planning_request: PlanningRequest) -> None:
     harness = HarnessSnapshot(version="harness:v0", root=Path("."))
     runner = PlanningRunner(tool_client=ToolClient(base_url=None, service_key=""), harness=harness)
@@ -632,8 +773,105 @@ def test_facts_carry_course_name_credits_and_category(planning_request: Planning
     _runner_with(_RecordingTools(), model).run(planning_request, _context(planning_request))
     courses = model.facts.get("courses")
     assert courses, "facts 必须带课程对象，不能只有课程号"
-    assert set(courses[0]) == {"courseCode", "name", "credits", "category"}
+    assert set(courses[0]) == {
+        "courseCode",
+        "name",
+        "credits",
+        "category",
+        "sourceRefIds",
+    }
     assert courses[0]["name"], "课程名不能为空"
+
+
+def test_course_candidates_prioritize_interest_and_omit_ambiguous_codes(
+    planning_request: PlanningRequest,
+) -> None:
+    class Tools(_RecordingTools):
+        def call(self, tool, dto, context, *, params=None, idempotency_key=None):
+            if tool == "listCourses":
+                assert params["limit"] == 200
+                return [
+                    Course(
+                        courseCode="DUP",
+                        name="体育一",
+                        credits=1,
+                        category="公共",
+                        sourceRefIds=["s:1"],
+                    ),
+                    Course(
+                        courseCode="DUP",
+                        name="体育二",
+                        credits=1,
+                        category="公共",
+                        sourceRefIds=["s:2"],
+                    ),
+                    Course(
+                        courseCode="AI101",
+                        name="人工智能导论",
+                        credits=3,
+                        category="选修",
+                        sourceRefIds=["s:3"],
+                    ),
+                    Course(
+                        courseCode="A101",
+                        name="普通课程",
+                        credits=3,
+                        category="选修",
+                        sourceRefIds=["s:4"],
+                    ),
+                ]
+            return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
+
+    planning_request.promptText = "想探索人工智能"
+    planning_request.intent.motives = ["CAREER"]
+    planning_request.intent.priorityOrder = ["CAREER"]
+    model = _CapturingModel()
+    _runner_with(Tools(), model).run(planning_request, _context(planning_request))
+    assert model.facts["courseCodes"][0] == "AI101"
+    assert "DUP" not in model.facts["courseCodes"]
+
+
+def test_pinned_courses_are_included_in_model_candidates(planning_request: PlanningRequest) -> None:
+    planning_request.intent.hardConstraints = [
+        Constraint(
+            kind="PIN_COURSE",
+            courseCode="MATH201",
+            teacherKey=None,
+            dayOfWeek=None,
+            section=None,
+            value=None,
+            sourceText="学生选入规划",
+        )
+    ]
+    planning_request.intent.motives = ["CAREER"]
+    planning_request.intent.priorityOrder = ["CAREER"]
+    model = _CapturingModel()
+    _runner_with(_RecordingTools(), model).run(planning_request, _context(planning_request))
+    assert model.facts["courseCodes"][0] == "MATH201"
+
+
+def test_selected_course_is_kept_when_model_does_not_return_it(
+    planning_request: PlanningRequest,
+) -> None:
+    class Model:
+        def generate(self, *, context, messages, tool_schemas):
+            return ModelReply(items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
+
+    planning_request.intent.hardConstraints = [
+        Constraint(
+            kind="PIN_COURSE",
+            courseCode="MATH201",
+            teacherKey=None,
+            dayOfWeek=None,
+            section=None,
+            value=None,
+            sourceText="学生选入规划",
+        )
+    ]
+    planning_request.intent.motives = ["CAREER"]
+    planning_request.intent.priorityOrder = ["CAREER"]
+    answer = _runner(Model()).run(planning_request, _context(planning_request))
+    assert {item.courseCode for item in answer.recommendations[0].items} == {"CS101", "MATH201"}
 
 
 def test_reviews_are_only_fetched_when_the_intent_needs_them(
@@ -643,9 +881,25 @@ def test_reviews_are_only_fetched_when_the_intent_needs_them(
     planning_request.intent.motives = ["SCHEDULE"]
     planning_request.intent.priorityOrder = ["SCHEDULE"]
     planning_request.intent.softPreferences = []
+    planning_request.promptText = ""
     tools = _RecordingTools()
     _runner_with(tools, _CapturingModel()).run(planning_request, _context(planning_request))
     assert "searchReviews" not in tools.tools
+
+
+def test_free_text_triggers_review_lookup_with_credit_progress_only(
+    planning_request: PlanningRequest,
+) -> None:
+    planning_request.intent.motives = ["CREDIT_PROGRESS"]
+    planning_request.intent.priorityOrder = ["CREDIT_PROGRESS"]
+    planning_request.intent.interestTags = []
+    planning_request.intent.softPreferences = []
+    planning_request.promptText = "下学期希望往 Java 开发方向发展。"
+    tools = _RecordingTools()
+
+    _runner_with(tools, _CapturingModel()).run(planning_request, _context(planning_request))
+
+    assert "searchReviews" in tools.tools
 
 
 def test_review_evidence_names_both_queried_and_not_queried_courses(

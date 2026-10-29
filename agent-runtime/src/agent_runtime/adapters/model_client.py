@@ -8,6 +8,8 @@ endpoint. W2 ships a typed fake that only proposes ids already returned by tools
 from __future__ import annotations
 
 import json
+import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -16,10 +18,12 @@ import httpx
 from pydantic import ValidationError
 
 from agent_runtime.api.schemas import PlanItem, Question
+from agent_runtime.api.schemas.answer import CourseRationale, ExplorationDirection
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.domain.policies.candidate_guard import KnownFacts
 
 FACTS_MESSAGE_PREFIX = "AVAILABLE_FACTS:"
+logger = logging.getLogger(__name__)
 
 
 class ModelInvalidOutput(RuntimeError):
@@ -31,6 +35,19 @@ class ModelInvalidOutput(RuntimeError):
 
     input_tokens: int | None = None
     output_tokens: int | None = None
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        diagnostics: dict[str, str | int | bool | None] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.diagnostics = diagnostics or {}
 
 
 class ModelTimeout(RuntimeError):
@@ -58,6 +75,8 @@ class ModelReply:
 
     clarify: Question | None = None
     items: list[PlanItem] | None = None
+    course_rationales: list[CourseRationale] | None = None
+    exploration_directions: list[ExplorationDirection] | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
 
@@ -165,7 +184,10 @@ class HttpModelAdapter:
                     "role": "system",
                     "content": (
                         "只输出一个 JSON 对象，不要解释。"
-                        '格式为 {"items":[{"courseCode":"...","teacherKey":null,"classId":null}]} '
+                        '格式为 {"items":[{"courseCode":"...","teacherKey":null,"classId":null}],'
+                        '"courseRationales":[{"courseCode":"...","reason":"...","reviewNoteIds":[]}],'
+                        '"explorationDirections":[{"title":"...","description":"...",'
+                        '"steps":["..."]}]} '
                         '或 {"clarify":{"questionId":"...","text":"...",'
                         '"choices":[{"value":"...","label":"..."}],'
                         '"allowFreeText":true,"requiredFor":[]}}。'
@@ -200,21 +222,48 @@ class HttpModelAdapter:
             raise ModelInvalidOutput("模型端点拒绝请求")
         try:
             payload_json = response.json()
-            content = payload_json["choices"][0]["message"]["content"]
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise ModelInvalidOutput("模型响应缺少 content") from exc
-        if not isinstance(content, str) or not content.strip():
-            raise ModelInvalidOutput("模型响应缺少 content")
+        except ValueError as exc:
+            _log_invalid_response({"shape": "invalid_json", "http_status": response.status_code})
+            raise ModelInvalidOutput(
+                "模型响应缺少 content",
+                diagnostics={"shape": "invalid_json", "http_status": response.status_code},
+            ) from exc
         input_tokens, output_tokens = _usage_tokens(payload_json)
+        content, response_diagnostics = _content_and_diagnostics(payload_json)
+        if content is None:
+            diagnostics = {
+                **response_diagnostics,
+                "http_status": response.status_code,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
+            _log_invalid_response(diagnostics)
+            raise ModelInvalidOutput(
+                "模型响应缺少 content",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                diagnostics=diagnostics,
+            )
         try:
             reply = _reply_from_content(content)
         except ModelInvalidOutput as exc:
             exc.input_tokens = input_tokens
             exc.output_tokens = output_tokens
+            exc.diagnostics = {
+                "shape": response_diagnostics["shape"],
+                "finish_reason": response_diagnostics.get("finish_reason"),
+                "http_status": response.status_code,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "parse_failure": "content_not_accepted",
+            }
+            _log_invalid_response(exc.diagnostics)
             raise
         return ModelReply(
             clarify=reply.clarify,
             items=reply.items,
+            course_rationales=reply.course_rationales,
+            exploration_directions=reply.exploration_directions,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
@@ -233,7 +282,9 @@ def _extract_json_object(content: str) -> str:
     return text
 
 
-def _usage_tokens(payload: dict) -> tuple[int | None, int | None]:
+def _usage_tokens(payload: object) -> tuple[int | None, int | None]:
+    if not isinstance(payload, dict):
+        return None, None
     usage = payload.get("usage")
     if not isinstance(usage, dict):
         return None, None
@@ -242,6 +293,54 @@ def _usage_tokens(payload: dict) -> tuple[int | None, int | None]:
     input_tokens = prompt if isinstance(prompt, int) and prompt >= 0 else None
     output_tokens = completion if isinstance(completion, int) and completion >= 0 else None
     return input_tokens, output_tokens
+
+
+def _content_and_diagnostics(
+    payload: object,
+) -> tuple[str | None, dict[str, str | int | bool | None]]:
+    """Extract completion text and safe structural metadata without retaining text."""
+    details: dict[str, str | int | bool | None] = {}
+    if not isinstance(payload, dict):
+        return None, {"shape": "top_level_not_object"}
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return None, {"shape": "choices_missing_or_not_list"}
+    details["choice_count"] = len(choices)
+    if not choices:
+        return None, {**details, "shape": "choices_empty"}
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        return None, {**details, "shape": "first_choice_not_object"}
+    details["finish_reason"] = _safe_finish_reason(choice.get("finish_reason"))
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        return None, {**details, "shape": "message_missing_or_not_object"}
+    if "content" not in message:
+        return None, {**details, "shape": "content_missing"}
+    content = message.get("content")
+    if not isinstance(content, str):
+        return None, {**details, "shape": "content_not_string"}
+    if not content.strip():
+        return None, {**details, "shape": "content_empty"}
+    return content, {**details, "shape": "content_string"}
+
+
+def _safe_finish_reason(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    # Finish reason is provider metadata; bound and restrict it to a short code.
+    if len(value) > 40 or not re.fullmatch(r"[A-Za-z0-9_-]*", value):
+        return "other"
+    return value
+
+
+def _log_invalid_response(diagnostics: dict[str, str | int | bool | None]) -> None:
+    """Log only response shape and usage metadata. Never log prompt or response text."""
+    logger.warning(
+        "Invalid model response structure: %s",
+        json.dumps(diagnostics, sort_keys=True),
+        extra={"model_response_diagnostics": diagnostics},
+    )
 
 
 def _reply_from_content(content: str) -> ModelReply:
@@ -262,7 +361,19 @@ def _reply_from_content(content: str) -> ModelReply:
             return ModelReply(items=[])
         if not isinstance(raw_items, list):
             raise ModelInvalidOutput("模型未给出候选")
-        return ModelReply(items=[PlanItem.model_validate(item) for item in raw_items])
+        rationales = data.get("courseRationales", [])
+        directions = data.get("explorationDirections", [])
+        if not isinstance(rationales, list) or len(rationales) > 30:
+            raise ModelInvalidOutput("课程理由格式不正确")
+        if not isinstance(directions, list) or len(directions) > 3:
+            raise ModelInvalidOutput("探索方向格式不正确")
+        return ModelReply(
+            items=[PlanItem.model_validate(item) for item in raw_items],
+            course_rationales=[CourseRationale.model_validate(item) for item in rationales],
+            exploration_directions=[
+                ExplorationDirection.model_validate(item) for item in directions
+            ],
+        )
     except ValidationError as exc:
         types = {error["type"] for error in exc.errors(include_input=False, include_url=False)}
         if "missing" in types:

@@ -219,6 +219,20 @@ class ForbiddenError(ApiError):
     issue_code = "FORBIDDEN"
 
 
+class RateLimitedError(ApiError):
+    """建会话超出配额。429 在 planning.openapi.json 的 /sessions 已声明。
+
+    retryable=True：等窗口过去就能再试，和「配置错了」那类不可重试的失败不同。
+    """
+
+    status_code = 429
+    status = "ERROR"
+    issue_code = "RATE_LIMITED"
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=True)
+
+
 def _request_id(request: Request) -> str:
     raw = request.headers.get("X-Request-Id")
     if raw and _ID_RE.fullmatch(raw):
