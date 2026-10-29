@@ -14,6 +14,7 @@ import {
   coursesSuggestedBeforeYear,
   describeYearSuggestionGap,
 } from "../domain/academic-year";
+import { isCurriculumUsableForMode } from "../domain/planning-request";
 import type { CompletedCourse, Course, CourseOutcome } from "../contracts";
 import {
   describeCompleteness,
@@ -41,6 +42,9 @@ const schoolImportMessage = ref("");
 const schoolImporting = ref(false);
 
 let schoolImportRequestId = "";
+
+/** 学业进度 JSON 的大小上限。105 门课的导出按 2 空格缩进就有几十 KB，原来的 100KB 太紧。 */
+const MAX_SCHOOL_PROGRESS_BYTES = 2_000_000;
 
 function startSchoolImport() {
   schoolImportRequestId = crypto.randomUUID();
@@ -127,15 +131,63 @@ async function readSchoolProgress(event: Event) {
   const file = input.files?.[0];
   if (!file) return;
   try {
-    if (file.size > 100_000) throw new Error();
-    await saveSchoolProgress(JSON.parse(await file.text()));
+    // 原先这里是 throw new Error()，消息是空串，于是界面什么都不显示——
+    // 看起来像点了没反应。另外 100KB 对 105 门课的导出来说太紧了。
+    if (file.size > MAX_SCHOOL_PROGRESS_BYTES) {
+      throw new Error(
+        `文件 ${Math.round(file.size / 1024)} KB，超过 ${Math.round(
+          MAX_SCHOOL_PROGRESS_BYTES / 1024,
+        )} KB 上限，没有读取。请确认选的是扩展导出的学业进度 JSON。`,
+      );
+    }
+    const text = await file.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(
+        "这个文件不是合法的 JSON，没法解析。请选扩展导出的那个文件。",
+      );
+    }
+    await saveSchoolProgress(parsed);
   } catch (error) {
     schoolImportMessage.value =
-      error instanceof Error
+      error instanceof Error && error.message
         ? error.message
         : "文件格式不正确，请选择扩展导出的学业进度 JSON。";
   }
   input.value = "";
+}
+
+/**
+ * 能用的培养方案。沿用 domain/planning-request 的同一个判断，不另写一套。
+ *
+ * 这一页原先根本没有选培养方案的地方：没选中时「按年级生成」点了没反应，
+ * 选中的又可能是缺「建议修读学年」的那份旧合成快照，于是不管选哪个年级都是
+ * 0 门。真实快照（CURRICULUM_FILE）排在前面，但不替学生自动挑。
+ */
+const usableCurricula = computed(() =>
+  [...store.curricula]
+    .filter((item) => isCurriculumUsableForMode(item, store.planningMode))
+    .sort((a, b) => {
+      const real = (item: typeof a) =>
+        item.sourceKind === "CURRICULUM_FILE" ? 0 : 1;
+      return real(a) - real(b);
+    }),
+);
+
+/**
+ * 换培养方案。
+ *
+ * store.chooseCurriculum 会 discardRecords()（核对结果绑定方案版本，换了就不适用），
+ * 于是 recordsStatus 退回 idle，而补录表单的 v-if 看的就是这个状态——选完方案整块
+ * 表单连同这个选择框一起消失。必须在换完之后把记录重新读回来。
+ */
+async function pickCurriculum(snapshotId: string) {
+  if (!snapshotId) return;
+  store.chooseCurriculum(snapshotId);
+  yearImportMessage.value = "";
+  await store.loadRecords();
 }
 
 const canLoad = computed(
@@ -541,6 +593,26 @@ async function goToCredits() {
           填写你已修或正在修读的课程，系统会据此核对培养要求。
         </p>
         <div class="year-assist">
+          <label class="field-label" for="records-curriculum">培养方案</label>
+          <select
+            id="records-curriculum"
+            class="select-control"
+            :value="store.selectedCurriculumId ?? ''"
+            @change="
+              pickCurriculum(
+                ($event.target as HTMLSelectElement | null)?.value ?? '',
+              )
+            "
+          >
+            <option value="" disabled>选择培养方案</option>
+            <option
+              v-for="item in usableCurricula"
+              :key="item.snapshotId"
+              :value="item.snapshotId"
+            >
+              {{ item.displayName ?? item.snapshotId }} · {{ item.sourceKind }}
+            </option>
+          </select>
           <label class="field-label" for="study-year">目前年级</label>
           <select id="study-year" v-model="studyYear" class="select-control">
             <option value="">选择年级</option>

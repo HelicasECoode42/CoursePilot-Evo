@@ -59,24 +59,47 @@ export type SchoolProgressImportResult = {
   academicRecord: AcademicRecord;
 };
 
+/**
+ * 顶层字段逐项检查。
+ *
+ * 原先八个不同的原因共用一句「学业资料格式不正确。」，学生和维护者都看不出
+ * 是哪一项不对——2026-10-29 用户把扩展下载的 JSON 传回来被拒，就是卡在这里，
+ * 而那句话没有提供任何可追查的信息。现在每一项单独报，并带上实际读到的值。
+ */
+function describeTopLevelProblem(raw: Record<string, unknown>): string | null {
+  if (raw.format !== "coursepilot-shu-academic-progress")
+    return `这个文件的 format 是 ${JSON.stringify(raw.format)}，不是扩展导出的 "coursepilot-shu-academic-progress"。`;
+  if (raw.version !== 1)
+    return `这个文件的 version 是 ${JSON.stringify(raw.version)}，当前只认 1。扩展版本和页面对不上时会这样。`;
+  if (typeof raw.capturedAt !== "string")
+    return "缺少 capturedAt（抓取时间），这个文件不像是扩展导出的完整文件。";
+  if (typeof raw.source !== "string")
+    return "缺少 source（来源页面），这个文件不像是扩展导出的完整文件。";
+  if (!Array.isArray(raw.nodes))
+    return "缺少 nodes（学校类别树），没有它没法把课程归到类别里。";
+  if (raw.nodes.length === 0)
+    return "nodes（学校类别树）是空的。多半是导出时教务页面的类别树还没加载完，回到那一页等它显示出来再导一次。";
+  if (!Array.isArray(raw.courses))
+    return "缺少 courses（课程明细），没有它没法知道你修过哪些课。";
+  return null;
+}
+
 export function schoolProgressFromBridge(
   value: unknown,
 ): SchoolProgressSnapshot {
-  if (!value || typeof value !== "object")
-    throw new Error("学业资料格式不正确。");
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error(
+      "这个文件的最外层不是一个 JSON 对象，不是扩展导出的学业进度文件。",
+    );
   const raw = value as Record<string, unknown>;
-  if (
-    raw.format !== "coursepilot-shu-academic-progress" ||
-    raw.version !== 1 ||
-    typeof raw.capturedAt !== "string" ||
-    typeof raw.source !== "string" ||
-    !Array.isArray(raw.nodes) ||
-    raw.nodes.length === 0 ||
-    !Array.isArray(raw.courses)
-  )
-    throw new Error("学业资料格式不正确。");
+  const problem = describeTopLevelProblem(raw);
+  if (problem !== null) throw new Error(problem);
+  // describeTopLevelProblem 已经确认过这两个是数组，但检查搬到函数里之后
+  // TypeScript 的收窄跟不过来，这里把类型接回去。
+  const rawNodes = raw.nodes as unknown[];
+  const rawCourses = raw.courses as unknown[];
 
-  const nodes: SchoolProgressNode[] = raw.nodes.map((item) => {
+  const nodes: SchoolProgressNode[] = rawNodes.map((item) => {
     if (!item || typeof item !== "object")
       throw new Error("类别节点格式不正确。");
     const node = item as Record<string, unknown>;
@@ -113,7 +136,7 @@ export function schoolProgressFromBridge(
   )
     throw new Error("类别父子关系不完整。");
 
-  const courses: SchoolProgressCourse[] = raw.courses.map((item) => {
+  const courses: SchoolProgressCourse[] = rawCourses.map((item) => {
     if (!item || typeof item !== "object")
       throw new Error("课程明细格式不正确。");
     const course = item as Record<string, unknown>;
@@ -168,8 +191,8 @@ export function schoolProgressFromBridge(
   return {
     format: "coursepilot-shu-academic-progress",
     version: 1,
-    capturedAt: raw.capturedAt,
-    source: raw.source,
+    capturedAt: raw.capturedAt as string,
+    source: raw.source as string,
     nodes,
     courses,
   };
