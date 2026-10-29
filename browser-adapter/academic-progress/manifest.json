@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "CoursePilot 学业进度导出",
+  "version": "0.1.0",
+  "description": "从上海大学学业情况页面导出类别学分汇总",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["https://jwxt.shu.edu.cn/jwglxt/xsxy/xsxyqk_cxXsxyqkIndex.html*"],
+    "js": ["extract.js", "floating.js"],
+    "run_at": "document_idle"
+  }, {
+    "matches": ["http://127.0.0.1:5173/*", "http://localhost:5173/*"],
+    "js": ["bridge.js"],
+    "run_at": "document_idle"
+  }],
+  "action": { "default_popup": "popup.html" }
+}
