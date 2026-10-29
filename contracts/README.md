@@ -21,6 +21,9 @@ uv run python scripts/self_check.py
 
 ## 变更记录
 
+- `Recommendation` 增加可选 `courseRationales` 和 `explorationDirections`：逐课程理由携带所引用的评价编号，探索方向包含可执行的学习步骤。Python 校验理由所引用的评价来自同一课程的已查询证据；方向内容为模型建议。
+- `GET /api/v1/reviews/search` 增加可选的 `cursor` 和响应 `nextCursor`，按评价 ID 顺序分页；课程维度统计需要读取全部页面。评价记录数不等同于独立评价人数。
+- `ImportWorkbook` 增加可选 `sourceKind`：默认 `SYNTHETIC`；受限本机导入时可显式选择 `CURRICULUM_FILE`，服务端将快照标为 `UNVERIFIED`，不会由上传者指定已核验状态。同一工作簿的真实来源与虚构快照分别保存。`Course` 增加可选 `suggestedTerm`，表示培养文件中的建议修读学期，不代表本学期开课。
 - 新增 `GET /api/v1/offering-snapshots`（Java 侧 `listOfferingSnapshots`，网关侧 `gatewayListOfferingSnapshots`），列出已发布的开课快照（kind=OFFERING, state=PUBLISHED）。响应与 `GET /api/v1/curriculum-snapshots` 同形（`data.items: SnapshotSummary[]`），`SnapshotSummary` 未改动。培养方案列表继续只返回 kind=CURRICULUM，两条路径互不混入。Web 据此在建会话时取开课快照，并由 `isCurriculumUsableForMode` 按模式筛选，不再把 `offeringSnapshotId` 写死为 null。
 - 新增 `GET /api/v1/academic-records`，列出本会话已有的学业记录。此前只有按 ID 读取和创建两个接口，学生无从得知自己的记录编号，`docs/15` 第 2 节「已有本会话记录则读取，缺记录才补充」这一步在契约上无法实现。归属由会话派生，浏览器不提交 owner，与 `docs/17` 的身份边界一致；`items` 为空数组表示尚无记录，属于正常业务状态，不返回 404。同时补上 `AcademicRecord` 的一个正例与两个反例，此前该对象没有任何样例。同一条链路在 `java.openapi.json` 补上对应的 `listAcademicRecords`（`GET /api/v1/academic-records`）：Python 网关需要它才能向 Java 取记录，此前只有 Python 侧声明而 Java 侧缺失，提供者与消费者不同步。
 - `Constraint.kind` 增加 `BLOCK_SLOT`（星期 × 节次的交集），软偏好增加 `schedule.blocked_slot`。同时为三个时间 kind 加条件规则：`BLOCK_DAY` 的 `section` 必须为 null，`BLOCK_SECTION` 的 `dayOfWeek` 必须为 null，`BLOCK_SLOT` 两者都必须非空。在此之前 Schema 并不禁止同时填写两者，语义只靠文档约定，属于已存在的歧义。`schemaVersion` 保持 `1.0`：各模块均未开始实现，无已发布消费者需要兼容。模块开工后再改契约必须升版本。

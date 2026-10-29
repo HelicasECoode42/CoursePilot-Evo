@@ -98,5 +98,15 @@
     "file": "invalid-course-offering-unknown-parse-status.json",
     "definition": "CourseOffering",
     "valid": false
+  },
+  {
+    "file": "session-plan-remove-course-request.json",
+    "definition": "SessionPlanCourseRemovalRequest",
+    "valid": true
+  },
+  {
+    "file": "session-plan-edit-empty-result.json",
+    "definition": "SessionPlanEditResult",
+    "valid": true
   }
 ]

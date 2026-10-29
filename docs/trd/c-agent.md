@@ -92,7 +92,7 @@ PlanningAnswer decision=CLARIFY 必须有 Question 且无 recommendations；每�
 
 `POST /api/v1/planning` 带 `previousPlanId` 时，先确认该方案属于当前会话，不属于就返回 404，文案与其他「不在本会话」一致。确认之后按这次请求里的硬条件重新核验，不把旧 `verifierResultId` 当成新结果，也不因为重规划删掉请求里仍在的必须项。
 
-会话内换班先用已有 Java 工具，不新造字段：`GET /api/v1/session-offerings` 按当前会话里的 `previousPlanId` 和 `courseCode` 调 `listOfferings`；`POST /api/v1/session-plans/replace` 只替换这一门，其余课程和 `hardConstraints` 原样交给 `validatePlan`。旧 `verifierResultId` 不复用。这两条路径已随 #28 写入 `planning.openapi.json`；但 `plans/validate` 在 Java 侧尚未实现，真实环境下换班次会得到「接口不存在」。
+会话内换班使用 `GET /api/v1/session-offerings` 查询当前方案快照中的班次，`POST /api/v1/session-plans/replace` 替换单门课程并由 Java `validatePlan` 核验整份方案。`POST /api/v1/session-plans/remove-course` 从会话拥有的已保存方案确定性移除课程、该课程的 `PIN_COURSE` 与 `PIN_TEACHER_COURSE` 条件，其余课程、班次和硬条件保持原样；模型不参与删除。非空结果调用 Java 核验并保存新 planId。末课删除保存 `items=[]`、`empty=true`、`verification=null`，因为 Java 拒绝空核验输入；网页明确显示空方案且允许返回问卷重新生成。相同幂等键复用结果，旧 planId 保留供对照。当前学期真实班次快照未核验时，不得将编辑结果表述为真实课表已验证。
 
 ### 4. 正常与重规划时序
 
