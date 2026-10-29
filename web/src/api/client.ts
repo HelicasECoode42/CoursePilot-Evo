@@ -7,6 +7,7 @@ import type {
   AcademicRecordInput,
   AcademicRecordList,
   AuditResult,
+  CareerDirection,
   Course,
   Envelope,
   PlanningAnswer,
@@ -178,6 +179,11 @@ export interface CoursePilotApiClient {
     teacherKey: string | null,
     signal?: AbortSignal,
   ): Promise<ReviewNoteSearch>;
+  /**
+   * 职业方向列表。Java 与网关早就实现了，网页此前没用上。
+   * 只读不写；返回空数组是正常业务状态，不是错误。
+   */
+  listCareerDirections(signal?: AbortSignal): Promise<CareerDirection[]>;
   /** E4：受限的老师运行报告。服务端还要求管理密钥，浏览器端拿不到时会得到 403，页面需要照实说明。 */
   getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport>;
   clearSession(): void;
@@ -217,6 +223,9 @@ const validateTeacherCourseOption = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/TeacherCourseOption",
 );
 const validateCourse = ajv.getSchema("coursepilot-domain-v1#/$defs/Course");
+const validateCareerDirection = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/CareerDirection",
+);
 const validateReviewNote = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/ReviewNote",
 );
@@ -909,6 +918,29 @@ export class HttpApiClient implements CoursePilotApiClient {
       "invalid_response",
       502,
     );
+  }
+
+  async listCareerDirections(signal?: AbortSignal): Promise<CareerDirection[]> {
+    const { response, envelope } = await this.request(
+      "/api/v1/career-directions",
+      { method: "GET", sessionToken: this.requireSession(), signal },
+    );
+    if (!isSuccessEnvelope(envelope)) {
+      throw errorForResponse(response.status, envelope);
+    }
+    const data = envelope.data;
+    if (
+      !isObject(data) ||
+      !Array.isArray(data.items) ||
+      !everyValid(data.items, validateCareerDirection)
+    ) {
+      throw new ApiFailure(
+        "服务返回的职业方向列表不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return data.items as CareerDirection[];
   }
 
   async getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport> {

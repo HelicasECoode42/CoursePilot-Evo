@@ -14,11 +14,7 @@ const modeLabel = computed(() =>
 <template>
   <div class="app-shell">
     <header class="topbar">
-      <RouterLink
-        class="brand"
-        to="/plan/questions/goals"
-        aria-label="CoursePilot 首页"
-      >
+      <RouterLink class="brand" to="/" aria-label="CoursePilot 首页">
         <span class="brand-mark" aria-hidden="true"></span>
         <span>CoursePilot</span>
       </RouterLink>

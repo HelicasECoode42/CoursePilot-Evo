@@ -234,6 +234,20 @@ export interface AcademicRecordList {
 
 // --- E4: 换班次、教师与评价、运行报告（字段以 contracts/schemas/domain.schema.json 为准） ---
 
+/**
+ * 职业方向。来自 Java，网页只展示：title 是方向名，description 说明这是什么方向，
+ * courseCodes 是该方向建议的课程号。description 里带「【演示数据】」的条目就是演示数据，
+ * 页面不改写这个标记。
+ */
+export interface CareerDirection {
+  directionId: string;
+  subjectTags: string[];
+  title: string;
+  description: string;
+  courseCodes: string[];
+  sourceRefIds: string[];
+}
+
 export interface Course {
   courseCode: string;
   name: string;

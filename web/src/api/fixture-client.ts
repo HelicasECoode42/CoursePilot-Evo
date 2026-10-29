@@ -3,6 +3,7 @@ import type {
   AcademicRecordInput,
   AcademicRecordList,
   AuditResult,
+  CareerDirection,
   Constraint,
   Course,
   CourseOffering,
@@ -756,6 +757,24 @@ export class FixtureApiClient implements CoursePilotApiClient {
       items: structuredClone(matches.slice(0, 5)),
       status: "OK",
     };
+  }
+
+  /** 演示模式下的职业方向：虚构内容，description 自带标记，页面照原样显示。 */
+  async listCareerDirections(signal?: AbortSignal): Promise<CareerDirection[]> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    return [
+      {
+        directionId: "DIR_DEMO_BACKEND",
+        subjectTags: ["计算机", "后端开发"],
+        title: "后端与业务系统开发",
+        description:
+          "【演示数据】偏向服务端开发，需要扎实的编程和数据结构基础。",
+        courseCodes: ["CS101", "CS102"],
+        sourceRefIds: ["fixture:career:demo"],
+      },
+    ];
   }
 
   async getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport> {

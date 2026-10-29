@@ -38,6 +38,7 @@ function fakeClient(
     mode: "http",
     createSession: vi.fn(async () => session("session-1")),
     listCourses: vi.fn(async () => ({ items: [], nextCursor: null })),
+    listCareerDirections: vi.fn(async () => []),
     listCurricula: vi.fn(async () => ({
       items: [curriculum],
       unknownMessages: [],
