@@ -55,5 +55,5 @@ public final class TeacherReviewDtos {
         String sourceRefId) {}
 
     /** searchReviews 的 data。 */
-    public record ReviewNoteList(List<ReviewNote> items) {}
+    public record ReviewNoteList(List<ReviewNote> items, String nextCursor) {}
 }

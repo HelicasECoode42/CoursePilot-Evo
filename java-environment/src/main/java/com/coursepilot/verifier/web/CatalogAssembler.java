@@ -48,7 +48,8 @@ public class CatalogAssembler {
             membership.getName(),
             membership.getCredits(),
             membership.getCategory(),
-            List.of(membership.getSourceReference().getRefId()));
+            List.of(membership.getSourceReference().getRefId()),
+            membership.getSuggestedTerm());
     }
 
     public CatalogDtos.CourseOffering toOffering(CourseOffering o) {

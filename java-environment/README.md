@@ -35,7 +35,9 @@ $env:COURSEPILOT_SERVICE_KEY = "local-dev-key"
 
 ### 本地 synthetic 培养计划导入
 
-导入接口默认关闭。仅在本机演示时设置独立管理员密钥并显式启用；上传内容一律标记为 `SYNTHETIC`，客户端不能指定 `sourceKind` 或 `sourceValidation`。接口只接受 loopback 调用，同时仍要求 `X-Service-Key` 和 `X-Admin-Key`。上传限制为 10 MiB，仅接受 `.xlsx`；有未解释规则或当前模型无法表示的行会拒绝发布。真实资料的来源核验、独立基线和 VERIFIED 发布流程尚未实现。
+本地导入接口默认关闭，由 `COURSEPILOT_SYNTHETIC_IMPORT_ENABLED=true` 显式启用；接口仅接受 loopback 调用，并要求 `X-Service-Key` 和 `X-Admin-Key`。上传限制为 10 MiB，仅接受 `.xlsx`；有阻断级模板/规则问题的文件会被拒绝。
+
+`sourceKind` 默认为 `SYNTHETIC`。对经授权且具有来源记录的 A1 培养计划工作簿，可显式传 `sourceKind=CURRICULUM_FILE`；Java 会沿用相同的解析、校验与事务发布流程创建独立快照，并标记为 `CURRICULUM_FILE/UNVERIFIED`。该选项不接受客户端设置 `sourceValidation`，也不会把快照提升为 `VERIFIED`。同一工作簿再次导入会复用该来源类型对应的快照；已有 `SYNTHETIC` 快照保留不变。
 
 ```bash
 COURSEPILOT_SERVICE_KEY=local-dev-key \
@@ -44,7 +46,7 @@ COURSEPILOT_SYNTHETIC_IMPORT_ENABLED=true \
 ./mvnw spring-boot:run
 ```
 
-另一终端用本地生成或明确授权的演示工作簿调用：
+另一终端用本机生成的演示工作簿时省略 `sourceKind`；上传有来源记录的授权 A1 工作簿时显式传 `CURRICULUM_FILE`，示例如下：
 
 ```bash
 curl -X POST 'http://127.0.0.1:8081/api/v1/curriculum-snapshots/import' \
@@ -54,10 +56,11 @@ curl -X POST 'http://127.0.0.1:8081/api/v1/curriculum-snapshots/import' \
   -H 'X-Request-Id: curriculum-import-1' \
   -F 'schemaVersion=1.0' \
   -F 'trackId=cs-general' \
-  -F 'file=@./path/to/synthetic-curriculum.xlsx'
+  -F 'sourceKind=CURRICULUM_FILE' \
+  -F 'file=@./path/to/authorized-curriculum.xlsx'
 ```
 
-响应的 `provenance[0].kind` 为 `SYNTHETIC`；响应中的 `snapshotId` 可用于 `GET /api/v1/curriculum-snapshots` 和 `GET /api/v1/courses?curriculumSnapshotId=...`。相同内容的重复导入复用原快照。
+对上例明确指定的 `CURRICULUM_FILE`，快照列表显示 `sourceKind=CURRICULUM_FILE`、`sourceValidation=UNVERIFIED`，响应来源 `provenance[0].kind` 为 `CURRICULUM`。响应中的 `snapshotId` 可用于 `GET /api/v1/curriculum-snapshots` 和 `GET /api/v1/courses?curriculumSnapshotId=...`。如省略 `sourceKind`，响应来源为 `SYNTHETIC`；两类快照使用独立 ID 和幂等回执。
 
 调接口时三个头一起带。`X-Subject-Id` 是调用方代为断言的主体，Java 信任它的前提
 是 `X-Service-Key` 已经证明调用方是已认证的 Python 服务（`../docs/16-engineering-and-debugging.md`）：

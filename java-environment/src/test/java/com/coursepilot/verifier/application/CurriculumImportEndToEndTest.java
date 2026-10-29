@@ -101,6 +101,8 @@ class CurriculumImportEndToEndTest {
             placeholders.stream().map(m -> m.getName()).collect(java.util.stream.Collectors.toSet()));
         assertEquals("体育2", memberships.findBySnapshot_SnapshotIdAndCourse_CourseCodeAndName(
             snapshotId, "008532xx", "体育2").orElseThrow().getName());
+        assertEquals("第一学年 第2学期", memberships.findBySnapshot_SnapshotIdAndCourse_CourseCodeAndName(
+            snapshotId, "008532xx", "体育2").orElseThrow().getSuggestedTerm());
 
         // 连号展开出的两门课学分为未知（null），不是整组 9 学分。
         var range = memberships.findBySnapshot_SnapshotIdAndCourse_CourseCodeIn(

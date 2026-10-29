@@ -76,7 +76,8 @@ public class TeacherReviewController {
         @RequestParam String courseCode,
         @RequestParam(required = false) String teacherKey,
         @RequestParam(required = false) String termId,
-        @RequestParam(required = false) Integer limit) {
+        @RequestParam(required = false) Integer limit,
+        @RequestParam(required = false) String cursor) {
         subjects.require(subjectId);
 
         requireId("courseCode", courseCode);
@@ -84,7 +85,7 @@ public class TeacherReviewController {
         requireOptionalId("termId", termId);
         int size = limitOrDefault("limit", limit, REVIEW_DEFAULT_LIMIT, REVIEW_MAX_LIMIT);
 
-        return Envelope.ok(requestId, assembler.search(courseCode, teacherKey, termId, size));
+        return Envelope.ok(requestId, assembler.search(courseCode, teacherKey, termId, size, offsetOf(cursor)));
     }
 
     private static void requireId(String field, String value) {

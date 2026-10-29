@@ -85,13 +85,20 @@ public class TeacherReviewAssembler {
      * 未给定时返回该课程全部评价，各自带 matchStatus 说明匹配程度。
      */
     public ReviewNoteList search(String courseCode, String teacherKey, String termId, int limit) {
+        return search(courseCode, teacherKey, termId, limit, 0);
+    }
+
+    public ReviewNoteList search(String courseCode, String teacherKey, String termId, int limit, int offset) {
         List<TeacherReviewDtos.ReviewNote> items = reviewRepo.findByCourseCodeOrderByReviewNoteIdAsc(courseCode).stream()
             .filter(n -> teacherKey == null || teacherKey.equals(n.getTeacherKey()))
             .filter(n -> termId == null || termId.equals(n.getTermId()))
-            .limit(limit)
+            .skip(offset)
+            .limit(limit + 1L)
             .map(this::toReview)
             .toList();
-        return new ReviewNoteList(items);
+        boolean hasNext = items.size() > limit;
+        return new ReviewNoteList(hasNext ? items.subList(0, limit) : items,
+            hasNext ? String.valueOf(offset + limit) : null);
     }
 
     private TeacherCourseOption toOption(TeacherCourse t) {

@@ -20,7 +20,7 @@ public class QueryController {
     private static final Pattern ID = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$");
     private static final Pattern OFFSET_CURSOR = Pattern.compile("^[0-9]{1,9}$");
     private static final int DEFAULT_LIMIT = 20;
-    private static final int MAX_LIMIT = 100;
+    private static final int MAX_LIMIT = 200;
 
     private final CurriculumSnapshotRepository snapshotRepo;
     private final CurriculumCourseRepository curriculumCourseRepo;

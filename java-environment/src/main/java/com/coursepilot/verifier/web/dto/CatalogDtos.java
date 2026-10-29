@@ -30,7 +30,13 @@ public final class CatalogDtos {
         String name,
         Double credits,
         String category,
-        List<String> sourceRefIds) {}
+        List<String> sourceRefIds,
+        String suggestedTerm) {
+        public Course(String courseCode, String name, Double credits, String category,
+                      List<String> sourceRefIds) {
+            this(courseCode, name, credits, category, sourceRefIds, null);
+        }
+    }
 
     /**
      * contracts: CourseOffering。

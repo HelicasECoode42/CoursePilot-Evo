@@ -32,6 +32,8 @@ public class CurriculumCourse {
     private Double credits;
     @Column(length = 100)
     private String category;
+    @Column(length = 200)
+    private String suggestedTerm;
 
     @ManyToOne(fetch = FetchType.LAZY, cascade = CascadeType.PERSIST)
     @JoinColumn(name = "source_ref_id")
@@ -62,5 +64,7 @@ public class CurriculumCourse {
     public String getName() { return name; }
     public Double getCredits() { return credits; }
     public String getCategory() { return category; }
+    public String getSuggestedTerm() { return suggestedTerm; }
+    public void setSuggestedTerm(String suggestedTerm) { this.suggestedTerm = suggestedTerm; }
     public SourceReference getSourceReference() { return sourceReference; }
 }

@@ -2,6 +2,7 @@ package com.coursepilot.verifier.web;
 
 import com.coursepilot.verifier.persistence.entity.CurriculumSnapshot;
 import com.coursepilot.verifier.persistence.repo.CurriculumSnapshotRepository;
+import com.coursepilot.verifier.persistence.repo.CurriculumImportReceiptRepository;
 import com.coursepilot.verifier.web.dto.SnapshotDtos;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Sort;
@@ -35,10 +36,13 @@ public class CurriculumController {
 
     private final CurriculumSnapshotRepository snapshotRepo;
     private final SubjectGuard subjects;
+    private final CurriculumImportReceiptRepository receipts;
 
-    public CurriculumController(CurriculumSnapshotRepository snapshotRepo, SubjectGuard subjects) {
+    public CurriculumController(CurriculumSnapshotRepository snapshotRepo, SubjectGuard subjects,
+                                CurriculumImportReceiptRepository receipts) {
         this.snapshotRepo = snapshotRepo;
         this.subjects = subjects;
+        this.receipts = receipts;
     }
 
     @GetMapping("/curriculum-snapshots")
@@ -75,6 +79,23 @@ public class CurriculumController {
     private List<SnapshotDtos.SnapshotSummary> listPublished(CurriculumSnapshot.Kind kind) {
         return snapshotRepo.findByKindAndState(kind, CurriculumSnapshot.State.PUBLISHED,
                 Sort.by(Sort.Direction.DESC, "createdAt"), Limit.of(MAX_ITEMS))
-            .stream().map(SnapshotDtos::of).toList();
+            .stream().map(snapshot -> SnapshotDtos.of(snapshot,
+                kind == CurriculumSnapshot.Kind.CURRICULUM
+                    ? receipts.findBySnapshotId(snapshot.getSnapshotId()).map(r -> trackName(r.getTrackId())).orElse(null)
+                    : null)).toList();
+    }
+
+    private static String trackName(String trackId) {
+        return switch (trackId) {
+            case "cs-direct" -> "计算机科学与技术（直招）";
+            case "cs-general" -> "计算机科学与技术（分流）";
+            case "ai-science-direct" -> "智能科学与技术（直招）";
+            case "ai-science" -> "智能科学与技术（分流）";
+            case "cybersecurity-direct" -> "网络空间安全（直招）";
+            case "cybersecurity" -> "网络空间安全（分流）";
+            case "ai-engineering-direct" -> "人工智能（直招）";
+            case "ai-engineering" -> "人工智能（分流）";
+            default -> null;
+        };
     }
 }

@@ -95,11 +95,21 @@ class TeacherReviewEndpointTest {
     @DisplayName("searchReviews 的 data 是 {items}，每条字段与契约完全一致，没有实体主键或内部字段")
     void reviewItemsHaveExactContractFields() throws Exception {
         JsonNode data = getJson(REVIEWS + "?courseCode=CS101").get("data");
-        assertThat(keys(data)).isEqualTo(Set.of("items"));
+        assertThat(keys(data)).isEqualTo(Set.of("items", "nextCursor"));
         assertThat(data.get("items").size()).isGreaterThan(0);
         for (JsonNode item : data.get("items")) {
             assertThat(keys(item)).isEqualTo(REVIEW_FIELDS);
         }
+    }
+
+    @Test
+    void reviewsCanBeReadAcrossPagesWithoutDuplicates() throws Exception {
+        JsonNode first = getJson(REVIEWS + "?courseCode=CS101&limit=1").get("data");
+        assertThat(first.get("nextCursor").asText()).isEqualTo("1");
+        JsonNode second = getJson(REVIEWS + "?courseCode=CS101&limit=1&cursor=1").get("data");
+        assertThat(second.get("items").size()).isEqualTo(1);
+        assertThat(second.get("items").get(0).get("reviewNoteId").asText())
+            .isNotEqualTo(first.get("items").get(0).get("reviewNoteId").asText());
     }
 
     @Test

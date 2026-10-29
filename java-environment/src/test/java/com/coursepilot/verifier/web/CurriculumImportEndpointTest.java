@@ -85,6 +85,46 @@ class CurriculumImportEndpointTest {
     }
 
     @Test
+    void realSourceIsUnverifiedAndDoesNotReuseSyntheticSnapshot() throws Exception {
+        MockMultipartFile workbook = workbook("SYNSEP01");
+        var synthetic = mvc.perform(upload(workbook, "source-synthetic"))
+            .andExpect(status().isOk()).andReturn();
+        var real = mvc.perform(upload(workbook, "source-unverified").param("sourceKind", "CURRICULUM_FILE"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.provenance[0].kind").value("CURRICULUM"))
+            .andExpect(jsonPath("$.data.reused").value(false)).andReturn();
+        String syntheticId = objectMapper.readTree(synthetic.getResponse().getContentAsString())
+            .path("data").path("snapshotId").asText();
+        String realId = objectMapper.readTree(real.getResponse().getContentAsString())
+            .path("data").path("snapshotId").asText();
+        assertFalse(syntheticId.equals(realId));
+        assertEquals("SYNTHETIC", snapshots.findById(syntheticId).orElseThrow().getSourceKind().name());
+        assertEquals("SYNTHETIC", snapshots.findById(syntheticId).orElseThrow().getSourceValidation().name());
+        assertEquals("CURRICULUM_FILE", snapshots.findById(realId).orElseThrow().getSourceKind().name());
+        assertEquals("UNVERIFIED", snapshots.findById(realId).orElseThrow().getSourceValidation().name());
+        mvc.perform(get("/api/v1/curriculum-snapshots")
+                .header("X-Service-Key", "test-service-key")
+                .header("X-Request-Id", "list-unverified-import")
+                .header("X-Subject-Id", "teacher:demo"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.items[?(@.snapshotId=='" + realId + "')].sourceKind")
+                .value(org.hamcrest.Matchers.hasItem("CURRICULUM_FILE")))
+            .andExpect(jsonPath("$.data.items[?(@.snapshotId=='" + realId + "')].sourceValidation")
+                .value(org.hamcrest.Matchers.hasItem("UNVERIFIED")));
+        mvc.perform(get("/api/v1/courses")
+                .param("curriculumSnapshotId", realId)
+                .header("X-Service-Key", "test-service-key")
+                .header("X-Request-Id", "query-unverified-import")
+                .header("X-Subject-Id", "teacher:demo"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.items[0].courseCode").value("SYNSEP01"))
+            .andExpect(jsonPath("$.provenance[0].kind").value("CURRICULUM"));
+        mvc.perform(upload(workbook, "source-repeat").param("sourceKind", "CURRICULUM_FILE"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.reused").value(true))
+            .andExpect(jsonPath("$.data.snapshotId").value(realId));
+    }
+
+    @Test
     void invalidWorkbookIsRejectedWithoutPublishingAnySnapshot() throws Exception {
         long before = snapshots.count();
         MockMultipartFile invalid = new MockMultipartFile(

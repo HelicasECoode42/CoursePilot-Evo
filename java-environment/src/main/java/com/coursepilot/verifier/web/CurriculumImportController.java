@@ -27,7 +27,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-/** Local-only synthetic curriculum upload. Real-source publishing requires separate review. */
+/** Local-only curriculum import; CURRICULUM_FILE is published as UNVERIFIED. */
 @RestController
 @RequestMapping("/api/v1/curriculum-snapshots")
 public class CurriculumImportController {
@@ -38,7 +38,7 @@ public class CurriculumImportController {
     private final CurriculumCourseRepository curriculumCourses;
     private final SubjectGuard subjects;
     private final String adminKey;
-    private final boolean syntheticImportEnabled;
+    private final boolean localImportEnabled;
 
     public CurriculumImportController(
         A1WorkbookImporter importer,
@@ -46,13 +46,13 @@ public class CurriculumImportController {
         CurriculumCourseRepository curriculumCourses,
         SubjectGuard subjects,
         @Value("${coursepilot.admin-key:}") String adminKey,
-        @Value("${coursepilot.import.synthetic.enabled:false}") boolean syntheticImportEnabled) {
+        @Value("${coursepilot.import.synthetic.enabled:false}") boolean localImportEnabled) {
         this.importer = importer;
         this.publisher = publisher;
         this.curriculumCourses = curriculumCourses;
         this.subjects = subjects;
         this.adminKey = adminKey == null ? "" : adminKey;
-        this.syntheticImportEnabled = syntheticImportEnabled;
+        this.localImportEnabled = localImportEnabled;
     }
 
     @PostMapping(value = "/import", consumes = "multipart/form-data")
@@ -62,17 +62,18 @@ public class CurriculumImportController {
         @RequestHeader(value = "X-Admin-Key", required = false) String presentedAdminKey,
         @RequestParam("schemaVersion") String schemaVersion,
         @RequestParam("trackId") String trackId,
+        @RequestParam(value = "sourceKind", defaultValue = "SYNTHETIC") String sourceKind,
         @RequestParam("file") MultipartFile file,
         jakarta.servlet.http.HttpServletRequest request) {
         subjects.require(subjectId);
         if (!ID.matcher(requestId).matches()) {
             return error(HttpStatus.BAD_REQUEST, requestId, "INVALID_REQUEST_ID", "X-Request-Id 格式不合法", "X-Request-Id");
         }
-        if (!syntheticImportEnabled) {
-            return error(HttpStatus.FORBIDDEN, requestId, "SYNTHETIC_IMPORT_DISABLED", "本地 synthetic 导入未启用", null);
+        if (!localImportEnabled) {
+            return error(HttpStatus.FORBIDDEN, requestId, "SYNTHETIC_IMPORT_DISABLED", "本地培养方案导入未启用", null);
         }
         if (!isLoopback(request.getRemoteAddr())) {
-            return error(HttpStatus.FORBIDDEN, requestId, "LOCAL_IMPORT_ONLY", "培养计划 synthetic 导入仅允许本机调用", null);
+            return error(HttpStatus.FORBIDDEN, requestId, "LOCAL_IMPORT_ONLY", "培养方案导入仅允许本机调用", null);
         }
         if (adminKey.isBlank()) {
             return error(HttpStatus.SERVICE_UNAVAILABLE, requestId, "ADMIN_KEY_NOT_CONFIGURED", "服务端未配置管理员密钥", null);
@@ -84,8 +85,11 @@ public class CurriculumImportController {
             return error(HttpStatus.BAD_REQUEST, requestId, "SCHEMA_VERSION_UNSUPPORTED", "schemaVersion 必须为 1.0", "schemaVersion");
         }
         if (request.getParameterMap().keySet().stream()
-            .anyMatch(name -> !Set.of("schemaVersion", "trackId").contains(name))) {
+            .anyMatch(name -> !Set.of("schemaVersion", "trackId", "sourceKind").contains(name))) {
             return error(HttpStatus.BAD_REQUEST, requestId, "UNSUPPORTED_IMPORT_FIELD", "导入请求包含契约未声明的字段", null);
+        }
+        if (!Set.of("SYNTHETIC", "CURRICULUM_FILE").contains(sourceKind)) {
+            return error(HttpStatus.BAD_REQUEST, requestId, "INVALID_SOURCE_KIND", "不支持的培养资料来源", "sourceKind");
         }
         if (file == null || file.isEmpty()) {
             return error(HttpStatus.BAD_REQUEST, requestId, "IMPORT_FILE_REQUIRED", "必须提供非空 xlsx 文件", "file");
@@ -108,7 +112,8 @@ public class CurriculumImportController {
                 return error(HttpStatus.UNPROCESSABLE_ENTITY, requestId, issue.code().name(),
                     message(issue.code()), "file");
             }
-            var published = importer.publish(draft, publisher);
+            var published = "CURRICULUM_FILE".equals(sourceKind)
+                ? publisher.publishUnverifiedCurriculum(draft) : importer.publish(draft, publisher);
             var membership = curriculumCourses.findBySnapshot_SnapshotIdAndCourse_CourseCodeAndName(
                 published.snapshotId(), draft.entries().getFirst().courseCode(),
                 draft.entries().getFirst().name()).orElseThrow();

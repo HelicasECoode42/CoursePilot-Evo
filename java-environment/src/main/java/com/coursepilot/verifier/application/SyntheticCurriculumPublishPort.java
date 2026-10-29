@@ -19,6 +19,10 @@ import edu.coursepilot.importer.ImportModels.CurriculumEntry;
 import edu.coursepilot.importer.ImportModels.PublishPort;
 import edu.coursepilot.importer.ImportModels.PublishResult;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,10 +60,21 @@ public class SyntheticCurriculumPublishPort implements PublishPort {
     @Override
     @Transactional
     public PublishResult publish(CurriculumDraft draft) {
+        return publishDraft(draft, false);
+    }
+
+    /** Preserve the source as unverified until an independent baseline has been checked. */
+    @Transactional
+    public PublishResult publishUnverifiedCurriculum(CurriculumDraft draft) {
+        return publishDraft(draft, true);
+    }
+
+    private PublishResult publishDraft(CurriculumDraft draft, boolean realSource) {
         if (!draft.publishable()) {
             throw new IllegalStateException("Rejected draft cannot be published");
         }
-        Optional<CurriculumImportReceipt> previous = receipts.findById(draft.idempotencyKey());
+        String key = realSource ? realKey(draft.idempotencyKey()) : draft.idempotencyKey();
+        Optional<CurriculumImportReceipt> previous = receipts.findById(key);
         if (previous.isPresent()) {
             CurriculumImportReceipt receipt = previous.get();
             if (!receipt.getTrackId().equals(draft.trackId())) {
@@ -71,7 +86,7 @@ public class SyntheticCurriculumPublishPort implements PublishPort {
         // Requirement.plan_id is limited to 64 characters. The key is a SHA-256
         // hex digest; retaining 60 hex characters after the namespace prefix gives
         // a 240-bit deterministic identifier within that persistence limit.
-        String snapshotId = SNAPSHOT_PREFIX + draft.idempotencyKey().substring(0, 60);
+        String snapshotId = (realSource ? "SRC_" : SNAPSHOT_PREFIX) + key.substring(0, 60);
         if (snapshots.existsById(snapshotId)) {
             // Do not adopt an existing snapshot that has no importer-owned idempotency receipt.
             throw new IllegalStateException("Snapshot ID already exists without import receipt");
@@ -80,8 +95,8 @@ public class SyntheticCurriculumPublishPort implements PublishPort {
             snapshotId,
             CurriculumSnapshot.Kind.CURRICULUM,
             CurriculumSnapshot.State.PUBLISHED,
-            CurriculumSnapshot.SourceKind.SYNTHETIC,
-            CurriculumSnapshot.SourceValidation.SYNTHETIC,
+            realSource ? CurriculumSnapshot.SourceKind.CURRICULUM_FILE : CurriculumSnapshot.SourceKind.SYNTHETIC,
+            realSource ? CurriculumSnapshot.SourceValidation.UNVERIFIED : CurriculumSnapshot.SourceValidation.SYNTHETIC,
             null,
             Instant.now()));
 
@@ -91,24 +106,26 @@ public class SyntheticCurriculumPublishPort implements PublishPort {
                 // only on CurriculumCourse; do not copy or overwrite imported facts here.
                 courses.save(new Course(entry.courseCode(), entry.courseCode(), null, null)));
             var source = entry.source();
-            memberships.save(new CurriculumCourse(
+            var membership = new CurriculumCourse(
                 snapshot,
                 identity,
                 entry.name(),
                 // 连号课程组展开后的成员学分为未知（null），不能当 0 入库。
                 entry.credits() == null ? null : entry.credits().doubleValue(),
                 entry.category(),
-                "SYNTHETIC",
-                source.refId(),
+                realSource ? "CURRICULUM" : "SYNTHETIC",
+                sourceId(source.refId(), realSource),
                 locator(draft, source.sheet(), source.row(), source.column()),
-                source.capturedAt()));
+                source.capturedAt());
+            membership.setSuggestedTerm(entry.suggestedTerm());
+            memberships.save(membership);
         }
 
         for (CategoryRequirement requirement : draft.requirements()) {
             var source = requirement.source();
             SourceReference reference = new SourceReference(
-                source.refId(),
-                "SYNTHETIC",
+                sourceId(source.refId(), realSource),
+                realSource ? "CURRICULUM" : "SYNTHETIC",
                 snapshotId,
                 locator(draft, source.sheet(), source.row(), source.column()),
                 source.capturedAt());
@@ -133,8 +150,21 @@ public class SyntheticCurriculumPublishPort implements PublishPort {
         }
 
         receipts.save(new CurriculumImportReceipt(
-            draft.idempotencyKey(), snapshotId, draft.trackId(), draft.workbookHash(), Instant.now()));
+            key, snapshotId, draft.trackId(), draft.workbookHash(), Instant.now()));
         return new PublishResult(snapshotId, false);
+    }
+
+    private static String sourceId(String refId, boolean realSource) {
+        return realSource ? "src:" + realKey(refId) : refId;
+    }
+
+    private static String realKey(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(("curriculum-file:" + value).getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(ex);
+        }
     }
 
     private String locator(CurriculumDraft draft, String sheet, int row, int column) {
