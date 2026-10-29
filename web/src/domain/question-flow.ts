@@ -27,6 +27,13 @@ export interface TeacherPick {
 }
 
 export interface PlanningDraft {
+  /**
+   * 学生自己打的问题（控制台的「问一问」）。
+   *
+   * 和 careerText 分开存：careerText 进 promptText 时会被加上「职业方向补充：」
+   * 前缀，拿它装一个通用问题会把问题框成职业方向，模型读到的就是歪的。
+   */
+  questionText: string;
   motives: Motive[];
   classPreferences: ClassPreferenceId[];
   classPreferencesReviewed: boolean;
@@ -46,6 +53,7 @@ export interface PlanningDraft {
 }
 
 export const emptyPlanningDraft = (): PlanningDraft => ({
+  questionText: "",
   motives: [],
   classPreferences: [],
   classPreferencesReviewed: false,

@@ -109,9 +109,19 @@ function schedulePreferences(preferSlots: readonly string[]): SoftPreferences {
   ];
 }
 
+/**
+ * 送进 promptText 的自由文本。
+ *
+ * 两段分开写，不混成一句：学生自己问的问题原样带过去，职业方向那栏仍然带
+ * 「职业方向补充：」前缀。合成一段的话，模型分不清哪句是问题、哪句是背景。
+ */
 function freeText(draft: PlanningDraft): string {
-  if (!draft.careerText.trim()) return "";
-  return `职业方向补充：${draft.careerText.trim()}`;
+  const parts: string[] = [];
+  const question = draft.questionText.trim();
+  if (question) parts.push(`学生的问题：${question}`);
+  const career = draft.careerText.trim();
+  if (career) parts.push(`职业方向补充：${career}`);
+  return parts.join("\n");
 }
 
 function cleanTags(draft: PlanningDraft): string[] {

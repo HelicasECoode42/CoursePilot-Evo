@@ -267,4 +267,47 @@ describe("个人控制台", () => {
     const targets = wrapper.findAll("a").map((a) => a.attributes("href"));
     expect(targets).toContain("/plan/questions/goals");
   });
+
+  it("打字提问会把问题记进 draft 并进规划流程，而不是自己编一个答案", async () => {
+    const { wrapper, store } = await mountDashboard();
+    await wrapper.get("#dash-question").setValue("我这学期应该学什么？");
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("带着这个问题去规划"))!
+      .trigger("click");
+    await flushPromises();
+    expect(store.draft.questionText).toBe("我这学期应该学什么？");
+    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe(
+      "/plan/questions/goals",
+    );
+  });
+
+  it("不替学生把动机和优先级填掉", async () => {
+    // 那几步是「一次一问、每个问题都要问到」的，自动填等于替他声明没说过的偏好。
+    const { wrapper, store } = await mountDashboard();
+    await wrapper.get("#dash-question").setValue("想做后端");
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("带着这个问题去规划"))!
+      .trigger("click");
+    await flushPromises();
+    expect(store.draft.motives).toEqual([]);
+    expect(store.draft.priorityOrder).toEqual([]);
+    expect(store.draft.prioritiesConfirmed).toBe(false);
+  });
+
+  it("空问题不触发跳转", async () => {
+    const { wrapper } = await mountDashboard();
+    const button = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("带着这个问题去规划"))!;
+    expect(button.attributes("disabled")).toBeDefined();
+  });
+
+  it("说明哪些答案经过模型、哪些不经过", async () => {
+    const { wrapper } = await mountDashboard();
+    const text = wrapper.text();
+    expect(text).toContain("打字提问会把问题交给模型");
+    expect(text).toContain("不经过模型");
+  });
 });

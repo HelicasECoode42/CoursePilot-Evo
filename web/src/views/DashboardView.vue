@@ -12,6 +12,7 @@
  *  - 没有评价记录就写「暂无评价记录」，不能留空让人读成「没人吐槽」。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { api } from "../api";
 import type { CareerDirection, Course, ReviewNote } from "../contracts";
 import { groupAuditItems } from "../domain/academic-record";
@@ -19,6 +20,35 @@ import { isCurriculumUsableForMode } from "../domain/planning-request";
 import { usePlanningStore } from "../stores/planning";
 
 const store = usePlanningStore();
+const router = useRouter();
+
+/** 学生打的问题。送进规划请求的 promptText，模型会读到。 */
+const question = ref("");
+
+const SAMPLE_QUESTIONS = [
+  "我这学期应该学什么？",
+  "我想往后端开发方向走，这个方向需要掌握哪些东西？",
+  "专业选修课里哪些和人工智能相关？",
+  "还差哪些学分，优先补哪个类别？",
+];
+
+/**
+ * 带着问题进规划流程。
+ *
+ * 不在这里替学生把动机、优先级这些问题自动填掉：那几步是「一次一问、每个问题
+ * 都要问到」的，自动填等于替他声明了没说过的偏好。这里只把问题记下来，
+ * 向导照常一步步问，问题最终随 promptText 一起送进模型。
+ */
+async function askModel() {
+  const text = question.value.trim();
+  if (!text) return;
+  store.updateDraft("questionText", text);
+  await router.push("/plan/questions/goals");
+}
+
+function useSample(text: string) {
+  question.value = text;
+}
 
 type Load = "idle" | "loading" | "ready" | "error";
 
@@ -340,9 +370,43 @@ onUnmounted(() => controller?.abort());
       <section class="dash-block" aria-labelledby="dash-ask">
         <h2 id="dash-ask">问一问</h2>
         <p class="microcopy">
-          前两个问题的答案是确定的，直接来自学校数据与 Java
-          的核对，<strong>不经过模型</strong>；想让 AI 给成套的选课建议，
-          走下面的「开始选课」。
+          打字提问会把问题交给模型；下面两个按钮的答案是确定的，直接来自学校数据与
+          Java 的核对，<strong>不经过模型</strong>。
+        </p>
+
+        <label class="dash-ask-label" for="dash-question">
+          想问什么
+          <textarea
+            id="dash-question"
+            v-model="question"
+            class="dash-ask-input"
+            rows="2"
+            placeholder="例如：我这学期应该学什么？"
+          ></textarea>
+        </label>
+        <div class="dash-samples">
+          <button
+            v-for="sample in SAMPLE_QUESTIONS"
+            :key="sample"
+            class="dash-sample"
+            type="button"
+            @click="useSample(sample)"
+          >
+            {{ sample }}
+          </button>
+        </div>
+        <button
+          class="button button--primary"
+          type="button"
+          :disabled="question.trim() === ''"
+          @click="askModel"
+        >
+          带着这个问题去规划
+        </button>
+        <p class="microcopy">
+          问题会随规划请求一起送进模型。中间几步（想达成什么、时间安排这些）仍然
+          会一步步问你，不替你填——那几步是你的偏好，模型不能替你声明。
+          回答在规划结果页，包含「方向是什么、需要学什么」和每门课的推荐理由。
         </p>
         <div class="dash-ask-row">
           <button
@@ -623,6 +687,47 @@ onUnmounted(() => controller?.abort());
   font-size: 0.88rem;
   color: var(--soft);
   padding: 2px 0;
+}
+
+.dash-ask-label {
+  display: block;
+  margin: 0.6rem 0 0.5rem;
+  font-size: 0.88rem;
+  font-weight: 550;
+}
+
+.dash-ask-input {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.dash-samples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+}
+
+.dash-sample {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--wash);
+  color: var(--green);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.dash-sample:hover {
+  background: white;
 }
 
 .dash-ask-row {
