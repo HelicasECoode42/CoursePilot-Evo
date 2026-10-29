@@ -24,7 +24,8 @@ public class SeedData {
                            CurriculumCourseRepository curriculumCourseRepo,
                            TranscriptRepository transcriptRepo,
                            TeacherCourseRepository teacherCourseRepo,
-                           ReviewNoteRepository reviewNoteRepo) {
+                           ReviewNoteRepository reviewNoteRepo,
+                           CareerDirectionRepository careerDirectionRepo) {
         return args -> {
             boolean createdSyntheticCurriculumSeed = false;
             // 快照种子用自己的「表为空才写」判断，不能放在课程种子的早退之后：
@@ -118,6 +119,31 @@ public class SeedData {
                     ReviewNote.SourceKind.SYNTHETIC, null, null,
                     "【演示数据】期末展示占比较高，具体授课教师无法从本条评价确认。",
                     List.of(ReviewNote.Dimension.PRESENTATION, ReviewNote.Dimension.EXAM)));
+            }
+
+            // 职业方向的演示种子。全部是 SYNTHETIC 的虚构内容：契约 CareerDirection 没有 sourceKind 字段，
+            // 所以真实性标记靠 title/description 的【演示数据】前缀，以及 sourceRefIds 的 synthetic: 前缀。
+            // 没有真实职业方向资料，因此不编造任何真实来源；courseCodes 只引用本文件里的演示课程号。
+            // 方向与课程号的关联表示「这个方向需要学哪些课」。独立判断自己的表是否为空。
+            if (careerDirectionRepo.count() == 0) {
+                careerDirectionRepo.save(new CareerDirection("DIR_BACKEND_SYSTEMS",
+                    "后端与业务系统开发",
+                    "【演示数据】偏向服务端开发，需要扎实的编程和数据结构基础，常用 Java 语言。",
+                    List.of("计算机", "后端开发"),
+                    List.of("CS101", "CS102"),
+                    List.of("synthetic:career:DIR_BACKEND_SYSTEMS")));
+                careerDirectionRepo.save(new CareerDirection("DIR_SYSTEMS_INFRA",
+                    "系统与基础设施",
+                    "【演示数据】偏向操作系统和底层运行环境，需要理解进程、内存和并发等概念。",
+                    List.of("计算机", "系统"),
+                    List.of("CS103", "CS102"),
+                    List.of("synthetic:career:DIR_SYSTEMS_INFRA")));
+                careerDirectionRepo.save(new CareerDirection("DIR_TECH_WRITING",
+                    "技术写作与表达",
+                    "【演示数据】偏向把技术内容写清楚，需要较强的书面表达能力。",
+                    List.of("通识", "写作"),
+                    List.of("GE101"),
+                    List.of("synthetic:career:DIR_TECH_WRITING")));
             }
 
             // 旧库补齐：文件库（ddl-auto=update）里 course 行已存在、但快照级

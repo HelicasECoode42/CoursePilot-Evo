@@ -1020,6 +1020,7 @@ describe("planning session store", () => {
       requirements: [
         {
           requirementId: "req:major-core",
+          category: "必修",
           courseCodes: ["CS101"],
           requiredCredits: 4,
           earnedCredits: 4,
@@ -1029,6 +1030,7 @@ describe("planning session store", () => {
         },
         {
           requirementId: "req:physics",
+          category: "必修",
           courseCodes: ["PHYS110"],
           requiredCredits: 3,
           earnedCredits: null,

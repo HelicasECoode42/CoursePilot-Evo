@@ -93,6 +93,7 @@ public class AuditResultAssembler {
                 : Math.max(0.0, req.getRequiredCredits() - ledger.earned(req.getCategory()));
             items.add(new AuditDtos.AuditItem(
                 requirementId(req),
+                req.getCategory(),
                 ledger.courseCodes(req.getCategory()),
                 req.getRequiredCredits(),
                 ledger.earned(req.getCategory()),

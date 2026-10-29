@@ -285,7 +285,7 @@ function explainUnknown(code: string, fallback: string): string {
             />
           </div>
           <button
-            class="button button--quiet"
+            class="button button--secondary course-remove"
             type="button"
             @click="removeCourse(index)"
           >
@@ -346,7 +346,7 @@ function explainUnknown(code: string, fallback: string): string {
         <h2 class="sub-label">{{ group.label }}</h2>
         <ul class="audit-list">
           <li v-for="(item, index) in group.items" :key="item.requirementId">
-            培养要求 {{ index + 1 }}
+            {{ item.category ?? `培养要求 ${index + 1}` }}
             <template v-if="item.courseCodes.length">
               · {{ item.courseCodes.join("、") }}
             </template>
@@ -392,6 +392,7 @@ function explainUnknown(code: string, fallback: string): string {
 </template>
 
 <style scoped>
+/* 三个字段共用同一套标签间距和控件高度，删除按钮与控件底边对齐，标签才在同一水平线上。 */
 .course-row {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr) auto;
@@ -404,10 +405,22 @@ function explainUnknown(code: string, fallback: string): string {
   min-width: 0;
 }
 
-.course-field input,
-.course-field select {
+.course-field > .field-label {
+  margin: 0 0 6px;
+}
+
+.course-field .text-control,
+.course-field .select-control {
   width: 100%;
+  height: 46px;
+  min-height: 46px;
+  padding: 0 12px;
   box-sizing: border-box;
+}
+
+.course-remove {
+  min-height: 46px;
+  white-space: nowrap;
 }
 
 @media (max-width: 560px) {

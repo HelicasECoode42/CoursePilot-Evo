@@ -104,6 +104,7 @@ const DEMO_AUDIT: AuditResult = {
   requirements: [
     {
       requirementId: "req:major-core",
+      category: "必修",
       courseCodes: ["CS101"],
       requiredCredits: 4,
       earnedCredits: 4,
@@ -113,6 +114,7 @@ const DEMO_AUDIT: AuditResult = {
     },
     {
       requirementId: "req:math-core",
+      category: "通识",
       courseCodes: ["MATH201"],
       requiredCredits: 3,
       earnedCredits: 0,
@@ -122,6 +124,7 @@ const DEMO_AUDIT: AuditResult = {
     },
     {
       requirementId: "req:physics",
+      category: "专业选修",
       courseCodes: ["PHYS110"],
       requiredCredits: 3,
       earnedCredits: null,

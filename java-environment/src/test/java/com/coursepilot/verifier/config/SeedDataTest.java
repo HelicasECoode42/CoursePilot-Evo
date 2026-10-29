@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.coursepilot.verifier.persistence.entity.CurriculumSnapshot;
 import com.coursepilot.verifier.persistence.repo.CourseOfferingRepository;
+import com.coursepilot.verifier.persistence.repo.CareerDirectionRepository;
 import com.coursepilot.verifier.persistence.repo.CourseRepository;
 import com.coursepilot.verifier.persistence.repo.CurriculumCourseRepository;
 import com.coursepilot.verifier.persistence.repo.CurriculumSnapshotRepository;
@@ -58,10 +59,11 @@ class SeedDataTest {
         final TranscriptRepository transcripts = mock(TranscriptRepository.class);
         final TeacherCourseRepository teacherCourses = mock(TeacherCourseRepository.class);
         final ReviewNoteRepository reviews = mock(ReviewNoteRepository.class);
+        final CareerDirectionRepository careerDirections = mock(CareerDirectionRepository.class);
 
         CommandLineRunner runner() {
             return new SeedData().init(courses, requirements, offerings, snapshots,
-                curriculumCourses, transcripts, teacherCourses, reviews);
+                curriculumCourses, transcripts, teacherCourses, reviews, careerDirections);
         }
     }
 

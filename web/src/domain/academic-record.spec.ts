@@ -10,6 +10,8 @@ import {
 function item(requirementId: string, state: AuditItem["state"]): AuditItem {
   return {
     requirementId,
+    // 这个 helper 测的是分组逻辑，类别名无关；显式给 null 以证明「没有类别时退回序号」也要能跑。
+    category: null,
     courseCodes: [],
     requiredCredits: null,
     earnedCredits: null,

@@ -636,4 +636,62 @@ describe("result page course search and replacement", () => {
     expect(alert.text()).toContain("可以稍后再试一次");
     expect(wrapper.find("li.offering-row").exists()).toBe(false);
   });
+
+  it("draws the planned class on the weekly timetable grid", async () => {
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const monday1 = wrapper
+      .findAll("table.timetable tbody tr")[0]
+      .findAll("td")[0];
+    expect(monday1.text()).toContain("CS102");
+    expect(monday1.text()).toContain("CS102-01");
+    // CS103 尚未选班次：它不进课表，并且页面写明原因。
+    expect(wrapper.find(".timetable-gaps").text()).toContain(
+      "CS103：还没有选定班次，时间未知，未纳入课表。",
+    );
+  });
+
+  it("keeps an unparsed planned class out of the grid on the result page", async () => {
+    vi.spyOn(api, "searchSessionOfferings").mockImplementation(
+      async (previousPlanId, courseCode) => ({
+        previousPlanId,
+        courseCode,
+        items:
+          courseCode === "CS102"
+            ? [offering("CS102", "CS102-01", [MON_1_2], "UNPARSED")]
+            : [],
+        status: "OK",
+      }),
+    );
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.find("table.timetable").exists()).toBe(false);
+    expect(wrapper.find(".timetable-gaps").text()).toContain(
+      "CS102（班次 CS102-01）：这门课的时间无法解析，未纳入课表。",
+    );
+  });
+
+  it("shows the unverified-timetable warning when the plan scope is not REAL_TIMETABLE", async () => {
+    stubOfferings();
+    store.$patch({
+      planningResult: {
+        ...answer(),
+        recommendations: [
+          {
+            ...recommendation(),
+            verification: validation({ scope: "SIMULATION" }),
+          },
+        ],
+      },
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      "此课表来自未经核验的班次资料，不代表真实课表，不构成无冲突证明。",
+    );
+  });
 });

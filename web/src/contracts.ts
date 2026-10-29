@@ -133,6 +133,8 @@ export type AuditState = "SATISFIED" | "UNSATISFIED" | "UNKNOWN";
 
 export interface AuditItem {
   requirementId: string;
+  /** 类别名（必修 / 通识 …）。为 null 时才退回显示序号。 */
+  category: string | null;
   courseCodes: string[];
   requiredCredits: number | null;
   earnedCredits: number | null;

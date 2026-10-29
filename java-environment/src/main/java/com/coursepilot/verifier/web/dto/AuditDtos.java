@@ -25,6 +25,8 @@ public final class AuditDtos {
     /** contracts: AuditItem。gapCredits 在 state=UNKNOWN 时为 null，表示缺口无法确定。 */
     public record AuditItem(
         String requirementId,
+        /** 类别名（必修 / 通识 …）。没有这个字段，前端只能显示「培养要求 1」。 */
+        String category,
         List<String> courseCodes,
         double requiredCredits,
         double earnedCredits,

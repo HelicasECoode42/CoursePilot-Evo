@@ -38,6 +38,7 @@ class FakeToolClient:
                 requirements=[
                     AuditItem(
                         requirementId="req:credits",
+                        category="必修",
                         courseCodes=["CS101"],
                         requiredCredits=Decimal("4.00"),
                         earnedCredits=Decimal("3.00"),

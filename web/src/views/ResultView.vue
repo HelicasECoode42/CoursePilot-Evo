@@ -26,6 +26,12 @@ import {
   describeVerification,
   type VerificationView,
 } from "../domain/answer-display";
+import {
+  resolveTimetableSources,
+  type OfferingListRead,
+  type TimetableSource,
+} from "../domain/timetable";
+import PlanTimetable from "../components/PlanTimetable.vue";
 import { usePlanningStore } from "../stores/planning";
 
 const store = usePlanningStore();
@@ -256,15 +262,83 @@ function resetPlanEdits() {
   resetSearch();
 }
 
+/* ---------- 方案课表 ---------- */
+
+/**
+ * 每份方案的课表来源，按 planId 保存。加载中不画课表（不能把「还没读到」画成「没有课」）。
+ * epoch 每次结果换掉都会增加，迟到的旧请求结果因此被丢弃。
+ */
+type TimetableState =
+  | { status: "loading" }
+  | { status: "ready"; sources: TimetableSource[] };
+const timetables = ref<Record<string, TimetableState>>({});
+let timetableEpoch = 0;
+
+/** 读取一份方案里每门已选班次所在课程的班次资料，用来找出它的上课时段。 */
+async function loadTimetable(plan: PlanView) {
+  const planId = plan.planId;
+  const epoch = timetableEpoch;
+  timetables.value = { ...timetables.value, [planId]: { status: "loading" } };
+  const codes = [
+    ...new Set(
+      plan.items
+        .filter((item) => item.classId !== null)
+        .map((item) => item.courseCode),
+    ),
+  ];
+  const settled = await Promise.all(
+    codes.map(async (code): Promise<[string, OfferingListRead | null]> => {
+      try {
+        const list = await api.searchSessionOfferings(planId, code);
+        return [code, { status: list.status, items: list.items }];
+      } catch {
+        // 读取失败就按「读不到」处理：对应的课不画进课表，并说明原因。
+        return [code, null];
+      }
+    }),
+  );
+  if (epoch !== timetableEpoch) return;
+  const lists: Record<string, OfferingListRead | undefined> = {};
+  for (const [code, list] of settled) {
+    if (list !== null) lists[code] = list;
+  }
+  timetables.value = {
+    ...timetables.value,
+    [planId]: {
+      status: "ready",
+      sources: resolveTimetableSources(plan.items, lists),
+    },
+  };
+}
+
+function ensureTimetables() {
+  for (const entry of planEntries.value) {
+    if (timetables.value[entry.plan.planId] === undefined) {
+      void loadTimetable(entry.plan);
+    }
+  }
+}
+
+function sourcesOf(planId: string): TimetableSource[] | null {
+  const state = timetables.value[planId];
+  return state?.status === "ready" ? state.sources : null;
+}
+
 // 结果换了（重新提交或新答复），之前的替换和搜索都不再适用。
 watch(
   () => store.planningResult,
   () => {
     resetPlanEdits();
+    timetableEpoch += 1;
+    timetables.value = {};
+    ensureTimetables();
     clarificationChoice.value = "";
     clarificationText.value = "";
   },
 );
+
+// 替换班次后出现新的 planId，需要为新版本读取课表。
+watch(planEntries, () => ensureTimetables(), { immediate: true });
 
 onBeforeUnmount(() => {
   searchController?.abort();
@@ -711,6 +785,18 @@ async function goBackToQuestions() {
               <template v-if="item.classId">· 班次 {{ item.classId }}</template>
             </li>
           </ul>
+
+          <div class="timetable-block">
+            <h3 class="sub-label">一周课表</h3>
+            <PlanTimetable
+              v-if="sourcesOf(entry.plan.planId)"
+              :scope="entry.plan.verification.scope"
+              :sources="sourcesOf(entry.plan.planId) ?? []"
+            />
+            <p v-else class="microcopy" role="status" aria-live="polite">
+              正在读取班次时间，请稍候。
+            </p>
+          </div>
           <p v-if="!entry.plan.replacedFrom" class="microcopy">
             {{ entry.recommendation.explanation }}
           </p>
@@ -944,6 +1030,10 @@ async function goBackToQuestions() {
   flex: 1;
   min-width: 0;
   width: auto;
+}
+
+.timetable-block {
+  margin: 14px 0 0;
 }
 
 .offering-list {
