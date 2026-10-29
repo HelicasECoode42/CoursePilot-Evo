@@ -315,7 +315,7 @@ def test_run_persists_sanitized_trace_and_manifest(
     )
     enforced = Budget()
     assert manifest.maxInputTokens == enforced.max_input_tokens == 8000
-    assert manifest.maxOutputTokens == enforced.max_output_tokens == 2000
+    assert manifest.maxOutputTokens == enforced.max_output_tokens == 4000
     assert manifest.maxToolCalls == enforced.max_tool_calls == 6
     assert manifest.maxModelCalls == enforced.max_model_calls == 3
     assert manifest.deadlineMs == enforced.deadline_ms == 45000

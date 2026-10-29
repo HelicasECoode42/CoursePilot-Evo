@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     # Run budget. Defaults are docs/04 section 3. These are deployment settings,
     # not harness files: the evolver must not be able to change the budget.
     max_input_tokens: int = Field(default=8000, ge=1)
-    max_output_tokens: int = Field(default=2000, ge=1)
+    max_output_tokens: int = Field(default=4000, ge=1)
     max_tool_calls: int = Field(default=6, ge=1)
     max_model_calls: int = Field(default=3, ge=1)
     deadline_ms: int = Field(default=45000, ge=1)

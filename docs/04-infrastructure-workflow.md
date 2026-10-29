@@ -36,7 +36,7 @@ X-Request-Id 用于相关请求定位，不等于幂等键。合法 ID 长度/�
 - Python planning 与 academic-record 创建要求 Idempotency-Key。存键=会话+端点+键、规范化请求摘要；相同内容复用原答复，不重复花模型费用；不同内容 409。执行中同键返回 409 REQUEST_IN_PROGRESS，不开启第二次任务。保留到会话过期；过期后 401。
 - 导入自然键=规范化内容 hash+培养路径/学期+importerVersion。重导复用既有结果。错误时不发布半张快照；快照不可覆盖。
 - academicRecordId、recordRevision、curriculumSnapshotId、offeringSnapshotId、schemaVersion、javaToolApiVersion、verifierVersion、harnessVersion 均由对应服务维护。previousPlanId 必须属当前会话，输入变化后重新核验；不得复用旧 verifierResultId 当新方案结果。
-- 初始运行上限：累计 input 8000/output 2000 tokens、6 次 Tool、3 次模型调用、总 45 秒。Java HTTP 单次最多 5 秒，模型单次最多 30 秒且受剩余总截止时间限制。预算不是性能实测，不代表保证在 45 秒成功。
+- 初始运行上限：累计 input 8000/output 4000 tokens、6 次 Tool、3 次模型调用、总 45 秒。（输出上限 2026-10-29 从 2000 调到 4000：实测真实模型两次规划都在 output_tokens=2000 处finish_reason=length，JSON 写到一半被切断，报成 MODEL_OUTPUT_TRUNCATED。会话累计输出上限同步从 10000 调到 20000，保持「一个会话约可跑 5 次规划」。）Java HTTP 单次最多 5 秒，模型单次最多 30 秒且受剩余总截止时间限制。预算不是性能实测，不代表保证在 45 秒成功。
 - 不做隐藏自动重试。只读 Java 查询可对瞬时网络错误重试一次，必须在总 Tool/时间预算内；不得重试 validation/input 错误。模型默认不自动重试，重新执行由用户明确操作并建立新的幂等键。
 
 ## 4. 学业与身份事实

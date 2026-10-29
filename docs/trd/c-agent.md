@@ -1,6 +1,6 @@
 # C 模块：需求理解与智能规划（业务说明与 TRD）
 
-负责人：**goat-yang**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前已有可运行实现：planning 契约的 12 个操作都有路由，81 个测试通过。模型默认走受控假实现（未配 `CP_MODEL_*` 时不调真实模型）。`harness/tool_policy.yaml` 限制每次运行各工具的调用次数，`context_policy.yaml` 限制送进模型的事实条数，`AGENTS.md` 与 `skills/` 进入系统提示；预算不在这份白名单里，默认仍是 8000/2000/6/3/45000，可用 `CP_MAX_*` 覆盖。排期见[本期任务](../19-delivery-plan.md)。
+负责人：**goat-yang**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前已有可运行实现：planning 契约的 12 个操作都有路由，81 个测试通过。模型默认走受控假实现（未配 `CP_MODEL_*` 时不调真实模型）。`harness/tool_policy.yaml` 限制每次运行各工具的调用次数，`context_policy.yaml` 限制送进模型的事实条数，`AGENTS.md` 与 `skills/` 进入系统提示；预算不在这份白名单里，默认是 8000/4000/6/3/45000（输出上限 2026-10-29 从 2000 上调），可用 `CP_MAX_*` 覆盖。排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 
@@ -139,7 +139,7 @@ sequenceDiagram
 
 ModelAdapter 只允许选定模型端点，不接受文件/评价里给的 URL。Runner 读取 `tool_policy.yaml` 的 per-tool `max_calls`，超出则抛 `BudgetExceeded`，整次运行以 503 `BUDGET_EXCEEDED` 结束——**不是只跳过这一次调用**，所以不会把「没查到」当成「没有」；上限只作用于规划运行，会话内换班次的搜索/替换不经过预算计数。`context_policy.yaml` 的 `max_course_facts`、`max_offerings`、`max_review_notes` 裁剪送进模型的事实（**当前裁剪是静默的**，模型看到的是子集但不知道被截断过），不把全库、历史全部聊天塞入模型。`harness/AGENTS.md` 与 `skills/` 作为策略文本放进系统提示，不执行。
 
-默认累计 input8000/output2000 tokens、6 tools、3 model calls、45 秒；各调用按剩余预算设置 timeout。provider 自动重试关闭。无效模型 JSON 最多在模型调用预算内修复一次；超过即 MODEL_INVALID_OUTPUT，不因语言顺畅放行。
+默认累计 input8000/output4000 tokens、6 tools、3 model calls、45 秒；各调用按剩余预算设置 timeout。provider 自动重试关闭。无效模型 JSON 最多在模型调用预算内修复一次；超过即 MODEL_INVALID_OUTPUT，不因语言顺畅放行。
 
 HarnessLoader 只加载已记录 hash 的白名单快照。文件内容是策略文本/受控配置，不能 import/exec 生成代码。运行 root AGENTS.md 与 repo 工程规范不被 Evolver 修改。
 

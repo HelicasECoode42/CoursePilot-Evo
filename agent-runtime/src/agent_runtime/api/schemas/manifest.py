@@ -28,7 +28,7 @@ class RunManifest(DomainModel):
     modelId: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     temperature: Annotated[float, Field(ge=0, le=2)]
     maxInputTokens: Literal[8000]
-    maxOutputTokens: Literal[2000]
+    maxOutputTokens: Literal[4000]
     maxToolCalls: Literal[6]
     maxModelCalls: Literal[3]
     deadlineMs: Literal[45000]

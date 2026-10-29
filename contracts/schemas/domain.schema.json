@@ -2227,7 +2227,7 @@
           "const": 8000
         },
         "maxOutputTokens": {
-          "const": 2000
+          "const": 4000
         },
         "maxToolCalls": {
           "const": 6

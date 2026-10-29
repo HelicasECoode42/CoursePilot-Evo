@@ -16,7 +16,7 @@ class Budget:
     """
 
     max_input_tokens: int = 8000
-    max_output_tokens: int = 2000
+    max_output_tokens: int = 4000
     max_tool_calls: int = 6
     max_model_calls: int = 3
     deadline_ms: int = 45000
@@ -86,13 +86,14 @@ class SessionSpendCap:
     运行结束即丢弃。所以换一个会话、或在同一会话里换一个 Idempotency-Key 再提交，
     预算就从零开始。本类补的是跨请求的那一层：一个会话总共能花多少。
 
-    默认值是单次运行预算（docs/04 第 3 节：input 8000 / output 2000）的 5 倍，
-    即一个会话大约可以完整跑 5 次规划。和 Budget 一样属于部署设置，不是 harness
-    文件，演化器改不到。
+    默认值是单次运行预算（docs/04 第 3 节：input 8000 / output 4000）的 5 倍，
+    即一个会话大约可以完整跑 5 次规划。输出预算 2026-10-29 从 2000 调到 4000，
+    这里的输出上限同步从 10000 调到 20000，否则「跑 5 次」这个说法就不成立了。
+    和 Budget 一样属于部署设置，不是 harness 文件，演化器改不到。
     """
 
     max_input_tokens: int = 40000
-    max_output_tokens: int = 10000
+    max_output_tokens: int = 20000
     max_tracked_sessions: int = 10000
 
 
