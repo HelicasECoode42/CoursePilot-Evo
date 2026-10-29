@@ -36,6 +36,7 @@ export interface PlanningDraft {
   careerReviewed: boolean;
   teacherHandoffAccepted: boolean;
   teacherPicks: TeacherPick[];
+  selectedCourseCodes: string[];
   mustSlots: string[];
   mustReviewed: boolean;
   preferSlots: string[];
@@ -54,6 +55,7 @@ export const emptyPlanningDraft = (): PlanningDraft => ({
   careerReviewed: false,
   teacherHandoffAccepted: false,
   teacherPicks: [],
+  selectedCourseCodes: [],
   mustSlots: [],
   mustReviewed: false,
   preferSlots: [],
@@ -90,7 +92,6 @@ export function questionSequence({
   sequence.push(
     "goals",
     "preferences",
-    "career",
     "interest",
     "teacher",
     "schedule",
@@ -106,8 +107,8 @@ export function firstIncompleteQuestion(context: QuestionContext): QuestionId {
     return "curriculum";
   if (context.draft.motives.length === 0) return "goals";
   if (!context.draft.classPreferencesReviewed) return "preferences";
-  if (!context.draft.careerReviewed) return "career";
-  if (!context.draft.interestReviewed) return "interest";
+  if (!context.draft.careerReviewed || !context.draft.interestReviewed)
+    return "interest";
   if (!context.draft.teacherHandoffAccepted) return "teacher";
   if (!context.draft.mustReviewed || !context.draft.preferReviewed)
     return "schedule";
@@ -127,6 +128,7 @@ export function resolveQuestion(
   requested: string,
   context: QuestionContext,
 ): QuestionId {
+  if (requested === "career") requested = "interest";
   const sequence = questionSequence(context);
   const current = firstIncompleteQuestion(context);
   const targetIndex = sequence.indexOf(requested as QuestionId);

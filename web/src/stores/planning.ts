@@ -11,8 +11,13 @@ import type {
   PlanningAnswer,
   PlanningMode,
   PlanningRequest,
+  SessionPlanEditResult,
   SnapshotSummary,
 } from "../contracts";
+import type {
+  SchoolProgressImportResult,
+  SchoolProgressSnapshot,
+} from "../domain/school-progress";
 import { keyForRequest, type IdempotencyKeyState } from "../domain/idempotency";
 import { buildRecordInput } from "../domain/academic-record";
 import type { ClassPreferenceId } from "../domain/class-preferences";
@@ -68,10 +73,24 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     const errorMessage = ref("");
     const sessionVersion = ref(0);
     const draft = ref<PlanningDraft>(emptyPlanningDraft());
+    /** 仅供界面显示的教师姓名，键为课程号与教师键；不进入规划草稿或请求。 */
+    const teacherPickDisplayNames = ref<Record<string, string>>({});
+    function setTeacherPickDisplayName(
+      courseCode: string,
+      teacherKey: string,
+      displayName: string,
+    ) {
+      teacherPickDisplayNames.value = {
+        ...teacherPickDisplayNames.value,
+        [`${courseCode}::${teacherKey}`]: displayName,
+      };
+    }
     const planningHandoff = ref<PlanningRequest | null>(null);
     const handoffMissing = ref<MissingContextLabel[]>([]);
     const handoffHints = ref<string[]>([]);
     const planningResult = ref<PlanningAnswer | null>(null);
+    /** 当前会话中由服务端确认的方案编辑版本，按原推荐 planId 索引。 */
+    const editedPlans = ref<Record<string, SessionPlanEditResult>>({});
     const clarificationError = ref("");
     const clarificationPriorityOrder = ref<string[] | null>(null);
     const clarificationResponses = ref<
@@ -86,6 +105,9 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     const records = ref<AcademicRecord[]>([]);
     const recordsStatus = ref<LoadStatus>("idle");
     const recordsError = ref("");
+    const schoolProgress = ref<SchoolProgressImportResult | null>(null);
+    const schoolProgressStatus = ref<LoadStatus>("idle");
+    const schoolProgressError = ref("");
     const selectedRecordId = ref<string | null>(null);
     const audit = ref<AuditResult | null>(null);
     const auditStatus = ref<LoadStatus>("idle");
@@ -93,10 +115,13 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     let activeController: AbortController | null = null;
     let recordController: AbortController | null = null;
     let recordVersion = 0;
+    let schoolProgressController: AbortController | null = null;
+    let schoolProgressLoadVersion = 0;
     let submitController: AbortController | null = null;
     let submitVersion = 0;
     let keyState: IdempotencyKeyState | null = null;
     let recordKeyState: IdempotencyKeyState | null = null;
+    let schoolProgressKeyState: IdempotencyKeyState | null = null;
     /** 在途的补录请求令牌；非空时拒绝再次补录（防双击落两条记录）。 */
     let pendingSave: object | null = null;
     let expiryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -111,6 +136,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       submitController = null;
       controller?.abort();
       planningResult.value = null;
+      editedPlans.value = {};
       submitError.value = "";
       if (submitStatus.value !== "idle") submitStatus.value = "idle";
     }
@@ -120,6 +146,11 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
      */
     function discardRecords() {
       recordVersion += 1;
+      schoolProgressLoadVersion += 1;
+      schoolProgressController?.abort();
+      schoolProgressController = null;
+      if (schoolProgressStatus.value === "loading")
+        schoolProgressStatus.value = "idle";
       const controller = recordController;
       recordController = null;
       controller?.abort();
@@ -173,6 +204,14 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       return recordKeyState.key;
     }
 
+    function keyForSchoolProgress(input: unknown): string {
+      const digest = JSON.stringify(input) ?? "";
+      if (schoolProgressKeyState?.digest !== digest) {
+        schoolProgressKeyState = { digest, key: newIdempotencyKey() };
+      }
+      return schoolProgressKeyState.key;
+    }
+
     function clearPlanningHandoff() {
       planningHandoff.value = null;
       handoffMissing.value = [];
@@ -181,6 +220,23 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       clarificationResponses.value = [];
       clarificationError.value = "";
       discardSubmission();
+    }
+
+    function applyPlanEdit(
+      originalPlanId: string,
+      edit: SessionPlanEditResult,
+    ) {
+      if (planningResult.value?.decision !== "RECOMMENDATIONS") return;
+      if (
+        !planningResult.value.recommendations.some(
+          (item) => item.planId === originalPlanId,
+        )
+      )
+        return;
+      editedPlans.value = {
+        ...editedPlans.value,
+        [originalPlanId]: structuredClone(edit),
+      };
     }
 
     function clearExpiryTimer() {
@@ -199,11 +255,15 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       expiresAt.value = null;
       curricula.value = [];
       selectedCurriculumId.value = null;
+      teacherPickDisplayNames.value = {};
       offeringSnapshots.value = [];
       selectedOfferingSnapshotId.value = null;
       sessionStatus.value = "expired";
       errorMessage.value = message;
       clearPlanningHandoff();
+      schoolProgress.value = null;
+      schoolProgressStatus.value = "idle";
+      schoolProgressError.value = "";
       discardRecords();
     }
 
@@ -385,6 +445,8 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       clearPlanningHandoff();
       // 核对绑定培养方案版本，换方案后旧核对结果不再适用。
       discardRecords();
+      if (client.mode !== "fixture" && sessionId.value)
+        void loadSchoolProgress();
     }
 
     function setMotives(motives: Motive[]) {
@@ -642,6 +704,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         );
         if (version !== submitVersion) return;
         planningResult.value = answer;
+        editedPlans.value = {};
         if (answer.decision !== "CLARIFY") clarificationResponses.value = [];
         submitStatus.value = "ready";
       } catch (error) {
@@ -689,6 +752,126 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       }
     }
 
+    async function loadSchoolProgress(): Promise<void> {
+      if (!sessionId.value || client.mode === "fixture") return;
+      const version = ++schoolProgressLoadVersion;
+      const sessionAtStart = sessionId.value;
+      const curriculumAtStart = selectedCurriculumId.value;
+      schoolProgressController?.abort();
+      const controller = new AbortController();
+      schoolProgressController = controller;
+      schoolProgressStatus.value = "loading";
+      schoolProgressError.value = "";
+      try {
+        const result = await client.getSchoolProgress(controller.signal);
+        if (
+          version !== schoolProgressLoadVersion ||
+          sessionId.value !== sessionAtStart ||
+          selectedCurriculumId.value !== curriculumAtStart
+        )
+          return;
+        if (
+          result &&
+          (!curriculumAtStart ||
+            result.academicRecord.curriculumSnapshotId !== curriculumAtStart)
+        ) {
+          schoolProgress.value = null;
+          schoolProgressStatus.value = "idle";
+          schoolProgressError.value =
+            "学校学业进度关联到另一培养方案。请选择当前方案后重新导入，再用于缺口和候选课程。";
+          return;
+        }
+        schoolProgress.value = result;
+        schoolProgressStatus.value = schoolProgress.value ? "ready" : "idle";
+      } catch (error) {
+        if (
+          version !== schoolProgressLoadVersion ||
+          (error instanceof ApiFailure && error.kind === "aborted")
+        )
+          return;
+        if (error instanceof ApiFailure && error.status === 404) {
+          schoolProgress.value = null;
+          schoolProgressStatus.value = "idle";
+          return;
+        }
+        if (error instanceof ApiFailure && error.status === 401) {
+          invalidateSession(error.message);
+          return;
+        }
+        schoolProgressStatus.value = "error";
+        schoolProgressError.value = visibleError(error);
+      } finally {
+        if (schoolProgressController === controller)
+          schoolProgressController = null;
+      }
+    }
+
+    async function importSchoolProgress(
+      snapshot: SchoolProgressSnapshot,
+    ): Promise<boolean> {
+      const curriculumSnapshotId = selectedCurriculumId.value;
+      if (
+        client.mode === "fixture" ||
+        !sessionId.value ||
+        !curriculumSnapshotId
+      ) {
+        schoolProgressStatus.value = "error";
+        schoolProgressError.value = "请先建立真实服务会话并选择培养方案。";
+        return false;
+      }
+      const input = {
+        schemaVersion: "1.0" as const,
+        curriculumSnapshotId,
+        snapshot,
+      };
+      schoolProgressLoadVersion += 1;
+      schoolProgressController?.abort();
+      schoolProgressController = null;
+      schoolProgressStatus.value = "loading";
+      schoolProgressError.value = "";
+      const { version, signal } = beginRecordRequest();
+      try {
+        const result = await client.saveSchoolProgress(
+          input,
+          keyForSchoolProgress(input),
+          signal,
+        );
+        if (!isCurrentRecordRequest(version)) return false;
+        if (
+          result.academicRecord.curriculumSnapshotId !== curriculumSnapshotId
+        ) {
+          schoolProgressStatus.value = "error";
+          schoolProgressError.value =
+            "服务返回的学业记录关联了其他培养方案，未应用到当前核对。";
+          return false;
+        }
+        schoolProgress.value = result;
+        schoolProgressStatus.value = "ready";
+        records.value = [
+          result.academicRecord,
+          ...records.value.filter(
+            (item) =>
+              item.academicRecordId !== result.academicRecord.academicRecordId,
+          ),
+        ];
+        setSelectedRecord(result.academicRecord.academicRecordId);
+        recordsStatus.value = "ready";
+        await runAudit();
+        return true;
+      } catch (error) {
+        if (!isCurrentRecordRequest(version)) return false;
+        if (error instanceof ApiFailure && error.kind === "aborted")
+          return false;
+        if (error instanceof ApiFailure && error.status === 401) {
+          invalidateSession(error.message);
+          return false;
+        }
+        schoolProgressStatus.value = "error";
+        schoolProgressError.value = visibleError(error);
+        return false;
+      }
+    }
+
     /** 切换当前使用的学业记录；在途的核对与记录请求作废，旧结果不得落到新记录上。 */
     function selectRecord(recordId: string) {
       if (!records.value.some((item) => item.academicRecordId === recordId))
@@ -714,7 +897,8 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         courses,
         transcriptComplete,
       );
-      if (client.mode === "simulation") input.sourceKind = "SYNTHETIC";
+      if (client.mode === "simulation" && !schoolProgress.value)
+        input.sourceKind = "SYNTHETIC";
       const token = {};
       pendingSave = token;
       const { version, signal } = beginRecordRequest();
@@ -826,16 +1010,22 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       unknownMessages,
       errorMessage,
       draft,
+      teacherPickDisplayNames,
+      setTeacherPickDisplayName,
       planningHandoff,
       handoffMissing,
       handoffHints,
       planningResult,
+      editedPlans,
       clarificationError,
       submitStatus,
       submitError,
       records,
       recordsStatus,
       recordsError,
+      schoolProgress,
+      schoolProgressStatus,
+      schoolProgressError,
       selectedRecordId,
       selectedRecord,
       audit,
@@ -858,7 +1048,10 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       answerTradeoffClarification,
       answerClarification,
       submitPlan,
+      applyPlanEdit,
       loadRecords,
+      loadSchoolProgress,
+      importSchoolProgress,
       selectRecord,
       saveRecord,
       runAudit,

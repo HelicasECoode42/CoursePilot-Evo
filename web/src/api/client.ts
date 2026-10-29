@@ -15,11 +15,17 @@ import type {
   RunReport,
   SessionOfferingList,
   SessionPlanReplaceInput,
+  SessionPlanEditInput,
+  SessionPlanEditResult,
   SessionPlanReplacement,
   SessionResult,
   SnapshotSummary,
   TeacherCourseOption,
 } from "../contracts";
+import type {
+  SchoolProgressImportRequest,
+  SchoolProgressImportResult,
+} from "../domain/school-progress";
 
 export type ApiFailureKind =
   | "network"
@@ -86,10 +92,15 @@ export interface CoursePilotApiClient {
   listCurricula(signal?: AbortSignal): Promise<CurriculumResult>;
   /** 已发布的开课快照（班次来源）。是否可用于当前模式由调用方用 isCurriculumUsableForMode 判断。 */
   listOfferingSnapshots(signal?: AbortSignal): Promise<OfferingSnapshotResult>;
+  /**
+   * 课程目录分页。query 同时匹配课程号和课程名（后端实现），为空则列全部。
+   * limit 固定 100（契约上限），翻页用 nextCursor。
+   */
   listCourses(
     curriculumSnapshotId: string,
     cursor?: string | null,
     signal?: AbortSignal,
+    query?: string | null,
   ): Promise<CourseSearch>;
   /** E2 / E-F1：列出本会话已有的学业记录。items 为空数组是正常业务状态。 */
   listSessionRecords(signal?: AbortSignal): Promise<AcademicRecordList>;
@@ -129,6 +140,24 @@ export interface CoursePilotApiClient {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<SessionPlanReplacement>;
+  removeSessionPlanCourse(
+    body: SessionPlanEditInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult>;
+  saveSchoolProgress(
+    body: SchoolProgressImportRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult>;
+  importSchoolProgress(
+    body: SchoolProgressImportRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult>;
+  getSchoolProgress(
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult | null>;
   /**
    * E4：查询教师与课程的对应。契约要求 curriculumSnapshotId；courseCode 传 null 表示
    * 不按课程过滤。只返回第一页（契约默认 limit），nextCursor 暂不翻页。
@@ -138,6 +167,7 @@ export interface CoursePilotApiClient {
     curriculumSnapshotId: string,
     courseCode: string | null,
     signal?: AbortSignal,
+    query?: string | null,
   ): Promise<TeacherCourseOptionSearch>;
   /**
    * E4：检索课程（可选教师）的评价证据。teacherKey 传 null 表示不按教师过滤。
@@ -401,8 +431,10 @@ export class HttpApiClient implements CoursePilotApiClient {
     );
     const items = publishedCurricula.filter((item) =>
       this.mode === "simulation"
-        ? item.sourceKind === "SYNTHETIC" &&
-          item.sourceValidation === "SYNTHETIC"
+        ? (item.sourceKind === "SYNTHETIC" &&
+            item.sourceValidation === "SYNTHETIC") ||
+          (item.sourceKind === "CURRICULUM_FILE" &&
+            item.sourceValidation === "UNVERIFIED")
         : item.sourceKind !== "SYNTHETIC" &&
           item.sourceValidation !== "SYNTHETIC",
     );
@@ -412,7 +444,7 @@ export class HttpApiClient implements CoursePilotApiClient {
         ...(envelope.status === "UNKNOWN"
           ? ["部分培养方案资料暂不可用，当前只列出可用资料。"]
           : []),
-        ...(containsSynthetic && this.mode === "http"
+        ...(containsSynthetic && this.mode === "http" && items.length === 0
           ? ["演示培养方案不会用于真实服务模式。"]
           : []),
       ],
@@ -475,10 +507,13 @@ export class HttpApiClient implements CoursePilotApiClient {
     curriculumSnapshotId: string,
     cursor: string | null = null,
     signal?: AbortSignal,
+    query: string | null = null,
   ): Promise<CourseSearch> {
+    const trimmed = query?.trim() ?? "";
     const { response, envelope } = await this.request(
       withQuery("/api/v1/courses", {
         curriculumSnapshotId,
+        query: trimmed === "" ? null : trimmed,
         limit: "100",
         cursor,
       }),
@@ -695,15 +730,123 @@ export class HttpApiClient implements CoursePilotApiClient {
     return envelope.data as SessionPlanReplacement;
   }
 
+  async removeSessionPlanCourse(
+    body: SessionPlanEditInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult> {
+    const { response, envelope } = await this.request(
+      "/api/v1/session-plans/remove-course",
+      {
+        method: "POST",
+        sessionToken: this.requireSession(),
+        signal,
+        body,
+        idempotencyKey,
+      },
+    );
+    if (!isSuccessEnvelope(envelope))
+      throw errorForResponse(response.status, envelope);
+    const data = envelope.data;
+    if (
+      !isObject(data) ||
+      data.previousPlanId !== body.previousPlanId ||
+      typeof data.planId !== "string" ||
+      !Array.isArray(data.items) ||
+      !everyValid(data.items, validatePlanItem) ||
+      !Array.isArray(data.hardConstraints) ||
+      !everyValid(data.hardConstraints, validateConstraint) ||
+      typeof data.empty !== "boolean" ||
+      data.empty !== (data.items.length === 0) ||
+      (data.verification !== null &&
+        !validatePlanValidation?.(data.verification))
+    ) {
+      throw new ApiFailure(
+        "服务返回的方案编辑结果不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return data as unknown as SessionPlanEditResult;
+  }
+
+  async saveSchoolProgress(
+    body: SchoolProgressImportRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult> {
+    const { response, envelope } = await this.request(
+      "/api/v1/school-progress",
+      {
+        method: "PUT",
+        sessionToken: this.requireSession(),
+        signal,
+        body,
+        idempotencyKey,
+      },
+    );
+    if (!isSuccessEnvelope(envelope))
+      throw errorForResponse(response.status, envelope);
+    if (
+      !isObject(envelope.data) ||
+      !isObject(envelope.data.receipt) ||
+      !isObject(envelope.data.academicRecord)
+    ) {
+      throw new ApiFailure(
+        "服务返回的学业进度保存结果不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as unknown as SchoolProgressImportResult;
+  }
+
+  async importSchoolProgress(
+    body: SchoolProgressImportRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult> {
+    return this.saveSchoolProgress(body, idempotencyKey, signal);
+  }
+
+  async getSchoolProgress(
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult | null> {
+    const { response, envelope } = await this.request(
+      "/api/v1/school-progress",
+      { method: "GET", sessionToken: this.requireSession(), signal },
+    );
+    if (!isSuccessEnvelope(envelope)) {
+      if (response.status === 404) return null;
+      throw errorForResponse(response.status, envelope);
+    }
+    if (
+      !isObject(envelope.data) ||
+      !isObject(envelope.data.receipt) ||
+      !isObject(envelope.data.snapshot) ||
+      !Array.isArray(envelope.data.snapshot.nodes) ||
+      !Array.isArray(envelope.data.snapshot.courses)
+    ) {
+      throw new ApiFailure(
+        "服务返回的学业进度不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as unknown as SchoolProgressImportResult;
+  }
+
   async listTeacherCourseOptions(
     curriculumSnapshotId: string,
     courseCode: string | null,
     signal?: AbortSignal,
+    query?: string | null,
   ): Promise<TeacherCourseOptionSearch> {
     const { response, envelope } = await this.request(
       withQuery("/api/v1/teacher-course-options", {
         curriculumSnapshotId,
         courseCode,
+        query: query?.trim() || null,
       }),
       { method: "GET", sessionToken: this.requireSession(), signal },
     );
@@ -733,29 +876,39 @@ export class HttpApiClient implements CoursePilotApiClient {
     teacherKey: string | null,
     signal?: AbortSignal,
   ): Promise<ReviewNoteSearch> {
-    const { response, envelope } = await this.request(
-      withQuery("/api/v1/reviews/search", { courseCode, teacherKey }),
-      { method: "GET", sessionToken: this.requireSession(), signal },
-    );
-    if (!isSuccessEnvelope(envelope)) {
-      throw errorForResponse(response.status, envelope);
-    }
-    const data = envelope.data;
-    if (
-      !isObject(data) ||
-      !Array.isArray(data.items) ||
-      !everyValid(data.items, validateReviewNote)
-    ) {
-      throw new ApiFailure(
-        "服务返回的评价证据不符合当前接口约定。",
-        "invalid_response",
-        response.status,
+    const items: ReviewNote[] = [];
+    let cursor: string | null = null;
+    let status: BusinessStatus = "OK";
+    for (let page = 0; page < 200; page += 1) {
+      const { response, envelope } = await this.request(
+        withQuery("/api/v1/reviews/search", { courseCode, teacherKey, cursor }),
+        { method: "GET", sessionToken: this.requireSession(), signal },
       );
+      if (!isSuccessEnvelope(envelope))
+        throw errorForResponse(response.status, envelope);
+      const data = envelope.data;
+      if (
+        !isObject(data) ||
+        !Array.isArray(data.items) ||
+        !everyValid(data.items, validateReviewNote) ||
+        (data.nextCursor != null && typeof data.nextCursor !== "string")
+      ) {
+        throw new ApiFailure(
+          "服务返回的评价证据不符合当前接口约定。",
+          "invalid_response",
+          response.status,
+        );
+      }
+      items.push(...(data.items as ReviewNote[]));
+      if (businessStatus(envelope) === "UNKNOWN") status = "UNKNOWN";
+      cursor = (data.nextCursor as string | null | undefined) ?? null;
+      if (cursor === null) return { items, status };
     }
-    return {
-      items: data.items as ReviewNote[],
-      status: businessStatus(envelope),
-    };
+    throw new ApiFailure(
+      "评价数量超过读取上限，无法统计完整结果。",
+      "invalid_response",
+      502,
+    );
   }
 
   async getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport> {
@@ -779,7 +932,7 @@ export class HttpApiClient implements CoursePilotApiClient {
   private async request(
     path: string,
     options: {
-      method: "GET" | "POST";
+      method: "GET" | "POST" | "PUT";
       sessionToken?: string;
       signal?: AbortSignal;
       body?: unknown;

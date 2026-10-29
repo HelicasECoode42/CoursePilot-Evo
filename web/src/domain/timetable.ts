@@ -10,7 +10,7 @@
  */
 
 import type { CourseOffering, Meeting, PlanItem } from "../contracts";
-import { SCHEDULE_DAYS, slotKey } from "./schedule-grid";
+import { SCHEDULE_DAYS, WEEKDAY_NAMES, slotKey } from "./schedule-grid";
 
 /** 一门方案课程在课表上的来源。offering 为 null 时 missing 说明为什么画不出来。 */
 export interface TimetableSource {
@@ -131,6 +131,31 @@ export function weeksText(weeks: readonly number[]): string {
       run.length >= 2 ? `${run[0]}–${run[run.length - 1]}` : `${run[0]}`,
     )
     .join("、")}周`;
+}
+
+/**
+ * 把上课时段写成人话，如「周一 第1-2节 · 第1–16周」，多段用「；」连接。
+ * 不直接输出 meetingTextRaw（里面是 {第1-16周} 之类的原始写法）。
+ * 有时段无法确认时明确补一句，不能只显示能读懂的那几段。
+ */
+export function meetingsText(meetings: readonly Meeting[]): string {
+  const readable = meetings
+    .filter((meeting) => meetingProblem(meeting) === null)
+    .map((meeting) => {
+      const day = WEEKDAY_NAMES[meeting.dayOfWeek - 1];
+      const sections =
+        meeting.sectionStart === meeting.sectionEnd
+          ? `第${meeting.sectionStart}节`
+          : `第${meeting.sectionStart}-${meeting.sectionEnd}节`;
+      return `${day} ${sections} · ${weeksText(meeting.weeks)}`;
+    });
+  const hasUnreadable = meetings.some(
+    (meeting) => meetingProblem(meeting) !== null,
+  );
+  if (readable.length === 0) return "上课时间未能确认";
+  return hasUnreadable
+    ? `${readable.join("；")}；另有一段时间无法确认`
+    : readable.join("；");
 }
 
 export function buildTimetable(

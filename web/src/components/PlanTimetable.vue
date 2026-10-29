@@ -7,19 +7,46 @@
  */
 import { computed } from "vue";
 import type { PlanScope } from "../contracts";
-import { buildTimetable, type TimetableSource } from "../domain/timetable";
+import {
+  buildTimetable,
+  meetingsText,
+  type TimetableSource,
+} from "../domain/timetable";
 import {
   SCHEDULE_DAYS,
   SCHEDULE_SECTIONS,
   WEEKDAY_NAMES,
 } from "../domain/schedule-grid";
 
-const props = defineProps<{
-  scope: PlanScope;
-  sources: TimetableSource[];
-}>();
+const props = withDefaults(
+  defineProps<{
+    scope: PlanScope;
+    sources: TimetableSource[];
+    /** 课程号 → 课程名。读不到时明细里只显示课程号。 */
+    courseNames?: Record<string, string>;
+  }>(),
+  { courseNames: () => ({}) },
+);
 
 const view = computed(() => buildTimetable(props.sources));
+
+/** 明细卡片：课程名、真实教师、人话时间。班次号只作小字辅助信息。 */
+const detailCards = computed(() =>
+  view.value.placed.map((course) => {
+    const source = props.sources.find(
+      (candidate) =>
+        candidate.courseCode === course.courseCode &&
+        candidate.classId === course.classId,
+    );
+    return {
+      courseCode: course.courseCode,
+      classId: course.classId,
+      name: props.courseNames[course.courseCode] ?? null,
+      teacherText: course.teacherText.trim(),
+      timeText: meetingsText(source?.offering?.meetings ?? []),
+    };
+  }),
+);
 const isReal = computed(() => props.scope === "REAL_TIMETABLE");
 const hasAnything = computed(
   () => view.value.placed.length > 0 || view.value.gaps.length > 0,
@@ -99,15 +126,36 @@ function dayLabel(day: number): string {
       </table>
     </div>
 
-    <ul v-if="view.placed.length" class="summary-list timetable-detail">
+    <ul
+      v-if="detailCards.length"
+      class="timetable-cards"
+      aria-label="已排入课表的班次明细"
+    >
       <li
-        v-for="course in view.placed"
+        v-for="course in detailCards"
         :key="course.courseCode + course.classId"
+        class="timetable-card"
       >
-        {{ course.courseCode }} · 班次 {{ course.classId }} ·
-        {{ course.teacherText || "教师未填写" }} ·
-        {{ course.meetingTextRaw.trim() || "时间未填写" }} ·
-        {{ course.weeksText }}
+        <div class="timetable-card__title">
+          <strong>{{ course.name ?? course.courseCode }}</strong>
+          <span v-if="course.name" class="timetable-card__code">{{
+            course.courseCode
+          }}</span>
+        </div>
+        <dl class="timetable-card__facts">
+          <div>
+            <dt>教师</dt>
+            <dd>{{ course.teacherText || "教师未填写" }}</dd>
+          </div>
+          <div>
+            <dt>上课时间</dt>
+            <dd>{{ course.timeText }}</dd>
+          </div>
+          <div>
+            <dt>班次</dt>
+            <dd class="timetable-card__small">{{ course.classId }}</dd>
+          </div>
+        </dl>
       </li>
     </ul>
   </div>
@@ -171,7 +219,64 @@ function dayLabel(day: number): string {
   overflow-wrap: anywhere;
 }
 
-.timetable-detail {
+/* 明细卡片：浅绿色圆角，沿用全局 --wash / --line 变量。 */
+.timetable-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timetable-card {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--wash);
+}
+
+.timetable-card__title strong {
+  display: block;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.timetable-card__code {
+  display: block;
+  color: var(--soft);
+  font-size: 12px;
+}
+
+.timetable-card__facts {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+.timetable-card__facts div {
+  display: grid;
+  grid-template-columns: 4.5em minmax(0, 1fr);
+  gap: 8px;
+}
+
+.timetable-card__facts dt {
+  color: var(--soft);
+  font-size: 12px;
+}
+
+.timetable-card__facts dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.timetable-card__facts .timetable-card__small {
+  color: var(--soft);
   font-size: 12px;
 }
 

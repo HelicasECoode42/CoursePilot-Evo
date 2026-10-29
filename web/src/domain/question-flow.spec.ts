@@ -20,7 +20,6 @@ const curriculum: SnapshotSummary = {
 const fixedSequence = [
   "goals",
   "preferences",
-  "career",
   "interest",
   "teacher",
   "schedule",
@@ -48,7 +47,7 @@ describe("guided question flow", () => {
 
     expect(firstIncompleteQuestion(context)).toBe("preferences");
     draft.classPreferencesReviewed = true;
-    expect(firstIncompleteQuestion(context)).toBe("career");
+    expect(firstIncompleteQuestion(context)).toBe("interest");
     draft.careerReviewed = true;
     expect(firstIncompleteQuestion(context)).toBe("interest");
     draft.interestReviewed = true;
@@ -107,7 +106,7 @@ describe("guided question flow", () => {
 
     expect(resolveQuestion("schedule", context)).toBe("preferences");
     draft.classPreferencesReviewed = true;
-    expect(resolveQuestion("schedule", context)).toBe("career");
+    expect(resolveQuestion("schedule", context)).toBe("interest");
     draft.careerReviewed = true;
     expect(resolveQuestion("schedule", context)).toBe("interest");
     draft.interestReviewed = true;

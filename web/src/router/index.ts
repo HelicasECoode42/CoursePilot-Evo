@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import QuestionView from "../views/QuestionView.vue";
 import RecordsView from "../views/RecordsView.vue";
+import CreditPlanView from "../views/CreditPlanView.vue";
 import ResultView from "../views/ResultView.vue";
 import TeacherView from "../views/TeacherView.vue";
 import ReportView from "../views/ReportView.vue";
@@ -13,6 +14,7 @@ export const router = createRouter({
     { path: "/", redirect: "/plan/questions/goals" },
     { path: "/plan/questions/:questionId", component: QuestionView },
     { path: "/records", component: RecordsView },
+    { path: "/plan/credits", component: CreditPlanView },
     { path: "/plan/result", component: ResultView },
     // 这两条路由在守卫之外：守卫只管 /plan/questions/，新页面不会被它重定向。
     { path: "/plan/teachers", component: TeacherView },

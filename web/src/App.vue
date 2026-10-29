@@ -6,7 +6,7 @@ const modeLabel = computed(() =>
   api.mode === "fixture"
     ? "页面演示 · 虚构内容"
     : api.mode === "simulation"
-      ? "服务联调 · 虚构内容"
+      ? "本地测试服务"
       : "真实服务模式",
 );
 </script>

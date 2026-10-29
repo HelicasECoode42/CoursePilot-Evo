@@ -13,10 +13,16 @@ import type {
   ReviewNote,
   RunReport,
   SessionPlanReplaceInput,
+  SessionPlanEditInput,
+  SessionPlanEditResult,
   SessionPlanReplacement,
   SnapshotSummary,
   TeacherCourseOption,
 } from "../contracts";
+import type {
+  SchoolProgressImportRequest,
+  SchoolProgressImportResult,
+} from "../domain/school-progress";
 import {
   ApiFailure,
   type CoursePilotApiClient,
@@ -501,6 +507,7 @@ export class FixtureApiClient implements CoursePilotApiClient {
     curriculumSnapshotId: string,
     cursor: string | null = null,
     signal?: AbortSignal,
+    query: string | null = null,
   ): Promise<CourseSearch> {
     void cursor;
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -509,7 +516,14 @@ export class FixtureApiClient implements CoursePilotApiClient {
     if (curriculumSnapshotId !== DEMO_CURRICULUM_ID) {
       return { items: [], nextCursor: null };
     }
-    return { items: structuredClone(DEMO_COURSES), nextCursor: null };
+    const needle = query?.trim().toLowerCase() ?? "";
+    const items = DEMO_COURSES.filter(
+      (course) =>
+        needle === "" ||
+        course.courseCode.toLowerCase().includes(needle) ||
+        course.name.toLowerCase().includes(needle),
+    );
+    return { items: structuredClone(items), nextCursor: null };
   }
 
   async listSessionRecords(signal?: AbortSignal): Promise<AcademicRecordList> {
@@ -627,10 +641,80 @@ export class FixtureApiClient implements CoursePilotApiClient {
     };
   }
 
+  async removeSessionPlanCourse(
+    body: SessionPlanEditInput,
+    _idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    const items = FIXTURE_PLAN_BASE_ITEMS.filter(
+      (item) => item.courseCode !== body.courseCode,
+    ).map((item) => ({ ...item }));
+    const hardConstraints = FIXTURE_HARD_CONSTRAINTS.filter(
+      (constraint) =>
+        !(
+          (constraint.kind === "PIN_COURSE" ||
+            constraint.kind === "PIN_TEACHER_COURSE") &&
+          constraint.courseCode === body.courseCode
+        ),
+    ).map((constraint) => ({ ...constraint }));
+    const remainingOffering =
+      items.length > 0
+        ? FIXTURE_OFFERINGS.get(items[0].courseCode)?.[0]
+        : undefined;
+    return {
+      previousPlanId: body.previousPlanId,
+      planId: `${body.previousPlanId}-without-${body.courseCode}`,
+      items,
+      hardConstraints,
+      empty: items.length === 0,
+      verification:
+        items.length === 0 || !remainingOffering
+          ? null
+          : fixtureVerification(remainingOffering, "VALID"),
+    };
+  }
+
+  async saveSchoolProgress(
+    _body: SchoolProgressImportRequest,
+    _idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    throw new ApiFailure(
+      "fixture 模式不支持导入学业进度",
+      "http",
+      501,
+      "NOT_IMPLEMENTED",
+    );
+  }
+
+  async importSchoolProgress(
+    body: SchoolProgressImportRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult> {
+    return this.saveSchoolProgress(body, idempotencyKey, signal);
+  }
+
+  async getSchoolProgress(
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult | null> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    return null;
+  }
+
   async listTeacherCourseOptions(
     _curriculumSnapshotId: string,
     courseCode: string | null,
     signal?: AbortSignal,
+    query?: string | null,
   ): Promise<TeacherCourseOptionSearch> {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (!this.sessionToken)
@@ -639,7 +723,12 @@ export class FixtureApiClient implements CoursePilotApiClient {
     return {
       items: structuredClone(
         FIXTURE_TEACHER_OPTIONS.filter(
-          (option) => courseCode === null || option.courseCode === courseCode,
+          (option) =>
+            (courseCode === null || option.courseCode === courseCode) &&
+            (!query?.trim() ||
+              option.teacherDisplayName
+                .toLowerCase()
+                .includes(query.trim().toLowerCase())),
         ),
       ),
       status: "OK",

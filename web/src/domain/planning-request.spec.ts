@@ -473,7 +473,7 @@ describe("PlanningRequest handoff", () => {
     expect(result).toEqual({ ok: false, missing: ["真实培养方案"] });
   });
 
-  it("requires a verified curriculum source before creating a REAL request", () => {
+  it("allows an imported curriculum file to provide course suggestions while keeping its unverified source", () => {
     const result = buildPlanningRequest(readyDraft(), {
       ...verifiedContext,
       curriculumSnapshotId: "curriculum-unverified",
@@ -481,7 +481,7 @@ describe("PlanningRequest handoff", () => {
       academicRecordId: "record-123",
     });
 
-    expect(result).toEqual({ ok: false, missing: ["已核验培养方案"] });
+    expect(result.ok).toBe(true);
   });
 
   it("rejects a synthetic source kind even when the source is labelled verified", () => {
@@ -497,6 +497,20 @@ describe("PlanningRequest handoff", () => {
 });
 
 describe("课程与教师的选择", () => {
+  it("将学生加入规划的课程作为必选约束提交", () => {
+    const built = buildPlanningRequest(
+      readyDraft({ selectedCourseCodes: ["CS102", "CS103"] }),
+      verifiedContext,
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(
+      built.request.intent.hardConstraints
+        .filter((item) => item.kind === "PIN_COURSE")
+        .map((item) => item.courseCode),
+    ).toEqual(["CS102", "CS103"]);
+    expect(validatePlanningRequest!(built.request)).toBe(true);
+  });
   it("把比较页选的课程+教师交给 pinnedTeacherCoursePairs", () => {
     // 契约的 GoalIntent 早就留好了这个字段（元素是 TeacherPreference）。
     // 之前这里恒为空数组，学生在比较页标的「必须保留」永远到不了后端。
@@ -544,16 +558,13 @@ describe("课程与教师的选择", () => {
 });
 
 describe("isCurriculumUsableForMode", () => {
-  // 这条 bug 的本质是规则漂移：列表过滤只查了「不是 SYNTHETIC」，而提交前的
-  // buildPlanningRequest 还要求 VERIFIED。于是一个 UNVERIFIED、既无课程也无类别
-  // 要求的快照成了唯一可选项并被自动选中，用户走完 8 步才看到它不能用。
-  // 下面两组断言必须一起成立，否则两处规则又分家了。
+  // 自动选择与提交请求共用来源规则。
   const cases = [
     { sourceKind: "CURRICULUM_FILE", sourceValidation: "VERIFIED", real: true },
     {
       sourceKind: "CURRICULUM_FILE",
       sourceValidation: "UNVERIFIED",
-      real: false,
+      real: true,
     },
     {
       sourceKind: "BROWSER_SNAPSHOT",
@@ -590,6 +601,19 @@ describe("isCurriculumUsableForMode", () => {
     }
   });
 
+  it("a pending curriculum file cannot qualify an offering snapshot for real timetable checks", () => {
+    expect(
+      isCurriculumUsableForMode(
+        {
+          kind: "OFFERING",
+          sourceKind: "CURRICULUM_FILE",
+          sourceValidation: "UNVERIFIED",
+        },
+        "REAL",
+      ),
+    ).toBe(false);
+  });
+
   it("演示模式只接受虚构资料", () => {
     expect(
       isCurriculumUsableForMode(
@@ -602,6 +626,22 @@ describe("isCurriculumUsableForMode", () => {
         { sourceKind: "CURRICULUM_FILE", sourceValidation: "VERIFIED" },
         "SIMULATION",
       ),
+    ).toBe(false);
+  });
+
+  it("演示模式接受未核验的培养文件，但不接受未核验的开课快照", () => {
+    const source = {
+      sourceKind: "CURRICULUM_FILE",
+      sourceValidation: "UNVERIFIED",
+    } as const;
+    expect(
+      isCurriculumUsableForMode(
+        { ...source, kind: "CURRICULUM" },
+        "SIMULATION",
+      ),
+    ).toBe(true);
+    expect(
+      isCurriculumUsableForMode({ ...source, kind: "OFFERING" }, "SIMULATION"),
     ).toBe(false);
   });
 });

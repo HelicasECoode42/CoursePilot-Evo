@@ -16,10 +16,10 @@ import type {
   Issue,
   Meeting,
   PlanItem,
-  PlanValidation,
   PlanningAnswer,
+  PlanValidation,
   Recommendation,
-  SessionPlanReplacement,
+  ReviewNote,
 } from "../contracts";
 import {
   collectUnknowns,
@@ -27,11 +27,14 @@ import {
   type VerificationView,
 } from "../domain/answer-display";
 import {
+  meetingsText,
   resolveTimetableSources,
   type OfferingListRead,
   type TimetableSource,
 } from "../domain/timetable";
 import PlanTimetable from "../components/PlanTimetable.vue";
+import CourseReviewBasis from "../components/CourseReviewBasis.vue";
+import ReviewSummary from "../components/ReviewSummary.vue";
 import { usePlanningStore } from "../stores/planning";
 
 const store = usePlanningStore();
@@ -106,7 +109,8 @@ const headline = computed(() => {
 interface PlanView {
   planId: string;
   items: PlanItem[];
-  verification: PlanValidation;
+  verification: PlanValidation | null;
+  empty: boolean;
   /** 替换前的推荐 planId；未替换时为 null。 */
   replacedFrom: string | null;
 }
@@ -115,11 +119,21 @@ interface PlanEntry {
   index: number;
   recommendation: Recommendation;
   plan: PlanView;
-  view: VerificationView;
+  view: VerificationView | null;
 }
 
-/** 替换结果按「原推荐的 planId」保存，结果页重新提交时整体清空。 */
-const replacements = ref<Record<string, SessionPlanReplacement>>({});
+/** 替换或删除课程后的新版本：只保存页面要显示的三项。 */
+interface ReplacedPlan {
+  planId: string;
+  items: PlanItem[];
+  verification: PlanValidation | null;
+  empty: boolean;
+}
+
+/** 服务端确认的编辑版本存放在 planning store，页面重建后继续展示当前选择。 */
+const replacements = computed<Record<string, ReplacedPlan>>(
+  () => store.editedPlans,
+);
 
 function currentPlan(recommendation: Recommendation): PlanView {
   const replaced = replacements.value[recommendation.planId];
@@ -128,6 +142,7 @@ function currentPlan(recommendation: Recommendation): PlanView {
       planId: recommendation.planId,
       items: recommendation.items,
       verification: recommendation.verification,
+      empty: false,
       replacedFrom: null,
     };
   }
@@ -135,6 +150,7 @@ function currentPlan(recommendation: Recommendation): PlanView {
     planId: replaced.planId,
     items: replaced.items,
     verification: replaced.verification,
+    empty: replaced.empty,
     replacedFrom: recommendation.planId,
   };
 }
@@ -149,13 +165,58 @@ const unknowns = computed<Issue[]>(() =>
     ? []
     : collectUnknowns(
         result.value.unknowns,
-        recommendations.value.map((item) => currentPlan(item).verification),
+        recommendations.value
+          .map((item) => currentPlan(item).verification)
+          .filter((item): item is PlanValidation => item !== null),
       ),
 );
 
+const UNKNOWN_EXPLANATIONS: Record<string, string> = {
+  FAKE_MODEL: "当前建议由演示模型生成。",
+  FAKE_TOOL: "当前核验使用演示数据，无法确认真实课程与班次。",
+  OFFERING_UNAVAILABLE: "未取得目标学期班次，无法确认上课时间是否冲突。",
+  OFFERING_SNAPSHOT_MISSING: "方案没有可用的班次资料，无法确认上课时间。",
+  TIMETABLE_UNVERIFIED: "班次来源尚未核验，无法确认实际上课时间。",
+  TIME_UNPARSEABLE: "部分班次的上课时间无法识别，无法确认是否冲突。",
+  TIME_UNPARSED: "部分班次的上课时间无法识别，无法确认是否冲突。",
+  CLASS_NOT_FOUND: "方案中的班次不在当前开课资料中，无法完成核验。",
+  PIN_TEACHER_UNKNOWN: "指定教师无法从当前资料中确认。",
+  CONSTRAINT_UNVERIFIABLE: "部分限制条件缺少核验所需资料。",
+  COURSE_FACTS_UNKNOWN: "部分课程信息无法确认。",
+  CREDITS_UNKNOWN: "部分课程学分未知，无法完成学分相关核对。",
+  CREDITS_SCOPE_UNSUPPORTED: "当前核验范围无法确认学分要求。",
+  CURRICULUM_NOT_FOUND: "所选培养方案资料无法读取。",
+  ACADEMIC_RECORD_EMPTY: "尚无可用于核对的学业记录。",
+  TRANSCRIPT_COMPLETENESS_UNKNOWN: "已修课程可能未填全，暂时无法确定剩余要求。",
+  REQUIREMENT_SOURCE_REFS_MISSING: "部分培养要求缺少可核对的来源。",
+  UNMODELED_RULE: "部分培养要求尚未纳入可自动核验的规则。",
+};
+
+/** 显示不确定事实的用户文案；原始服务诊断只放在折叠的排查详情中。 */
+function explainUnknown(issue: Issue): string {
+  return (
+    UNKNOWN_EXPLANATIONS[issue.code] ??
+    "有一项课程或班次信息无法确认，具体原因见排查详情。"
+  );
+}
+
+const studentUnknowns = computed(() => [
+  ...new Set(unknowns.value.map(explainUnknown)),
+]);
+
 /** 展示门禁：统一交给 describeVerification，带受控缺口标记时降级。 */
 function verificationView(validation: PlanValidation): VerificationView {
-  return describeVerification(validation, unknowns.value);
+  let view = describeVerification(validation, unknowns.value);
+  if (validation.scope === "SIMULATION") {
+    view = { ...view, detail: "模拟班次不代表下学期开课情况。" };
+  }
+  if (validation.unknownChecks.length === 0) return view;
+  return {
+    ...view,
+    detail: [...new Set(validation.unknownChecks.map(explainUnknown))].join(
+      "；",
+    ),
+  };
 }
 
 const planEntries = computed<PlanEntry[]>(() =>
@@ -165,7 +226,8 @@ const planEntries = computed<PlanEntry[]>(() =>
       index,
       recommendation,
       plan,
-      view: verificationView(plan.verification),
+      view:
+        plan.verification === null ? null : verificationView(plan.verification),
     };
   }),
 );
@@ -178,6 +240,228 @@ function verdictClass(view: VerificationView): string {
 
 function issuesOf(validation: PlanValidation): Issue[] {
   return [...validation.violations, ...validation.unknownChecks];
+}
+
+function planIssueText(
+  validation: PlanValidation | null,
+  issue: Issue,
+): string {
+  if (validation === null) return explainUnknown(issue);
+  const isUnknown = validation.unknownChecks.some(
+    (candidate) =>
+      candidate.code === issue.code && candidate.message === issue.message,
+  );
+  return isUnknown ? explainUnknown(issue) : issue.message;
+}
+
+function diagnosticsOf(entry: PlanEntry): Issue[] {
+  return collectUnknowns(
+    result.value?.unknowns ?? [],
+    entry.plan.verification === null ? [] : [entry.plan.verification],
+  );
+}
+
+function courseCodesOf(entry: PlanEntry): string {
+  return entry.plan.items.map((item) => item.courseCode).join("、") || "无";
+}
+
+/* ---------- 课程名与删除课程 ---------- */
+
+/** 课程号 → 课程名，来自培养方案的课程目录。读不到时页面只显示课程号，并说明。 */
+const courseNames = ref<Record<string, string>>({});
+const courseCredits = ref<Record<string, number | null>>({});
+const courseReviews = ref<
+  Record<
+    string,
+    {
+      status: "loading" | "ready" | "error";
+      notes: ReviewNote[];
+      unknown: boolean;
+    }
+  >
+>({});
+const courseNamesStatus = ref<"idle" | "loading" | "ready" | "error">("idle");
+let courseNamesVersion = 0;
+const MAX_COURSE_PAGES = 20;
+
+async function loadCourseNames(curriculumSnapshotId: string) {
+  const version = ++courseNamesVersion;
+  courseNamesStatus.value = "loading";
+  const names: Record<string, string> = {};
+  const credits: Record<string, number | null> = {};
+  try {
+    let cursor: string | null = null;
+    for (let page = 0; page < MAX_COURSE_PAGES; page += 1) {
+      const list = await api.listCourses(curriculumSnapshotId, cursor);
+      if (version !== courseNamesVersion) return;
+      for (const course of list.items) {
+        names[course.courseCode] = course.name;
+        credits[course.courseCode] = course.credits;
+      }
+      if (list.nextCursor === null) break;
+      cursor = list.nextCursor;
+    }
+    courseNames.value = names;
+    courseCredits.value = credits;
+    courseNamesStatus.value = "ready";
+  } catch {
+    if (version !== courseNamesVersion) return;
+    courseNames.value = {};
+    courseCredits.value = {};
+    courseNamesStatus.value = "error";
+  }
+}
+
+async function loadCourseEvidence(courseCode: string) {
+  if (courseReviews.value[courseCode]?.status === "loading") return;
+  courseReviews.value = {
+    ...courseReviews.value,
+    [courseCode]: { status: "loading", notes: [], unknown: false },
+  };
+  try {
+    const result = await api.searchReviews(courseCode, null);
+    courseReviews.value = {
+      ...courseReviews.value,
+      [courseCode]: {
+        status: "ready",
+        notes: result.items.filter((note) => note.courseCode === courseCode),
+        unknown: result.status === "UNKNOWN",
+      },
+    };
+  } catch {
+    courseReviews.value = {
+      ...courseReviews.value,
+      [courseCode]: { status: "error", notes: [], unknown: false },
+    };
+  }
+}
+
+/** 删除课程正在请求的那一门；同一时间只允许一个删除请求。 */
+const deleting = ref<{ planId: string; courseCode: string } | null>(null);
+/** 删除失败的提示，按「原推荐的 planId」保存；原方案保留，不清空。 */
+const deleteErrors = ref<Record<string, string>>({});
+/** 删除后仍在新方案里的课程提示，按「原推荐的 planId」保存。 */
+const deleteNotes = ref<Record<string, string>>({});
+let deleteController: AbortController | null = null;
+let deleteVersion = 0;
+let deleteKey: string | null = null;
+let deleteKeyFor: string | null = null;
+
+/** 课程卡片的展示数据。教师与时间只取班次资料里的真实字段，不显示内部标识。 */
+interface PlanCourseCard {
+  courseCode: string;
+  name: string | null;
+  classId: string | null;
+  teacher: string;
+  time: string;
+  rationale: NonNullable<Recommendation["courseRationales"]>[number] | null;
+  rationaleWasReused: boolean;
+  rationaleWasChanged: boolean;
+}
+
+function cardsOf(entry: PlanEntry): PlanCourseCard[] {
+  const sources = sourcesOf(entry.plan.planId);
+  return entry.plan.items.map((item) => {
+    const source =
+      sources?.find((candidate) => candidate.courseCode === item.courseCode) ??
+      null;
+    const offering = source?.offering ?? null;
+    const originalItem = entry.recommendation.items.find(
+      (candidate) => candidate.courseCode === item.courseCode,
+    );
+    const rationaleWasChanged =
+      originalItem !== undefined &&
+      (originalItem.classId !== item.classId ||
+        originalItem.teacherKey !== item.teacherKey);
+    const rationale = rationaleWasChanged
+      ? null
+      : (entry.recommendation.courseRationales?.find(
+          (candidate) => candidate.courseCode === item.courseCode,
+        ) ?? null);
+    let teacher: string;
+    let time: string;
+    if (item.classId === null) {
+      teacher = "尚未选定班次";
+      time = "尚未选定班次，时间未定";
+    } else if (sources === null) {
+      teacher = "正在读取…";
+      time = "正在读取上课时间…";
+    } else if (offering === null) {
+      teacher = "班次资料没读到，无法显示";
+      time = "班次资料没读到，时间未知";
+    } else {
+      teacher = offering.teacherText.trim() || "教师未填写";
+      time =
+        offering.parseStatus === "PARSED"
+          ? meetingsText(offering.meetings)
+          : "上课时间未能解析，无法确认";
+    }
+    return {
+      courseCode: item.courseCode,
+      name: courseNames.value[item.courseCode] ?? null,
+      classId: item.classId,
+      teacher,
+      time,
+      rationale,
+      rationaleWasReused:
+        entry.plan.replacedFrom !== null && rationale !== null,
+      rationaleWasChanged,
+    };
+  });
+}
+
+function isDeletingPlan(entry: PlanEntry): boolean {
+  return deleting.value?.planId === entry.plan.planId;
+}
+
+async function deleteCourse(entry: PlanEntry, courseCode: string) {
+  if (deleting.value !== null) return;
+  const recommendationId = entry.recommendation.planId;
+  const planId = entry.plan.planId;
+  const name = courseNames.value[courseCode] ?? courseCode;
+  const version = ++deleteVersion;
+  deleteController?.abort();
+  const controller = new AbortController();
+  deleteController = controller;
+  // 同一门课、同一份方案的重试复用幂等键；换了就换新键。
+  const requestKey = `${planId}|${courseCode}`;
+  if (deleteKeyFor !== requestKey) {
+    deleteKey = newIdempotencyKey();
+    deleteKeyFor = requestKey;
+  }
+  const key = deleteKey ?? newIdempotencyKey();
+  deleting.value = { planId, courseCode };
+  deleteErrors.value = { ...deleteErrors.value, [recommendationId]: "" };
+  deleteNotes.value = { ...deleteNotes.value, [recommendationId]: "" };
+
+  try {
+    const answer = await api.removeSessionPlanCourse(
+      { previousPlanId: planId, courseCode },
+      key,
+      controller.signal,
+    );
+    if (version !== deleteVersion) return;
+
+    store.applyPlanEdit(recommendationId, answer);
+    deleteKeyFor = null;
+    deleteErrors.value = { ...deleteErrors.value, [recommendationId]: "" };
+    if (answer.empty)
+      deleteNotes.value = {
+        ...deleteNotes.value,
+        [recommendationId]:
+          "课程已移除。当前方案为空，尚无核验结果；你可以返回问卷重新生成方案。",
+      };
+    openKey.value = null;
+    resetSearch();
+  } catch (error) {
+    if (version !== deleteVersion || isAborted(error)) return;
+    deleteErrors.value = {
+      ...deleteErrors.value,
+      [recommendationId]: `${visibleError(error)} 删除${name}没有生效，原方案保留，可以再试一次。`,
+    };
+  } finally {
+    if (version === deleteVersion) deleting.value = null;
+  }
 }
 
 /* ---------- 搜索班次与替换 ---------- */
@@ -258,7 +542,6 @@ function resetSearch() {
 
 function resetPlanEdits() {
   openKey.value = null;
-  replacements.value = {};
   resetSearch();
 }
 
@@ -329,6 +612,15 @@ watch(
   () => store.planningResult,
   () => {
     resetPlanEdits();
+    deleteVersion += 1;
+    deleteController?.abort();
+    deleteController = null;
+    deleteKey = null;
+    deleteKeyFor = null;
+    deleting.value = null;
+    deleteErrors.value = {};
+    deleteNotes.value = {};
+    courseReviews.value = {};
     timetableEpoch += 1;
     timetables.value = {};
     ensureTimetables();
@@ -340,9 +632,20 @@ watch(
 // 替换班次后出现新的 planId，需要为新版本读取课表。
 watch(planEntries, () => ensureTimetables(), { immediate: true });
 
+// 课程名按方案所用的培养方案读取；同一方案不重复读。
+watch(
+  () => result.value?.academicAudit.curriculumSnapshotId ?? null,
+  (curriculumSnapshotId) => {
+    if (curriculumSnapshotId !== null)
+      void loadCourseNames(curriculumSnapshotId);
+  },
+  { immediate: true },
+);
+
 onBeforeUnmount(() => {
   searchController?.abort();
   replaceController?.abort();
+  deleteController?.abort();
 });
 
 function entryButtonId(index: number): string {
@@ -590,10 +893,10 @@ async function recheck(entry: PlanEntry) {
       controller.signal,
     );
     if (version !== replaceVersion) return;
-    replacements.value = {
-      ...replacements.value,
-      [entry.recommendation.planId]: replaced,
-    };
+    store.applyPlanEdit(entry.recommendation.planId, {
+      ...replaced,
+      empty: false,
+    });
     openKey.value = null;
     resetSearch();
     focusById(entryButtonId(entry.index));
@@ -611,7 +914,7 @@ async function goBackToQuestions() {
 
 <template>
   <section class="question-card" aria-labelledby="result-title">
-    <p class="eyebrow">规划结果</p>
+    <p class="eyebrow">下学期选课规划</p>
     <h1 id="result-title" tabindex="-1">{{ headline }}</h1>
 
     <p v-if="api.mode === 'fixture'" class="notice notice--demo" role="note">
@@ -622,7 +925,7 @@ async function goBackToQuestions() {
       class="notice notice--demo"
       role="note"
     >
-      服务联调模式 · 虚构数据，结果不代表真实课程或本学期课表。
+      本地测试服务 · 模拟班次不代表下学期开课情况，培养资料来源见所选方案。
     </p>
 
     <p
@@ -756,42 +1059,192 @@ async function goBackToQuestions() {
           v-for="entry in planEntries"
           :key="entry.recommendation.planId"
         >
-          <h2 class="sub-label">方案 {{ entry.plan.planId }}</h2>
+          <h2 class="sub-label" :title="entry.plan.planId">
+            方案 {{ entry.index + 1 }}
+          </h2>
           <p v-if="entry.plan.replacedFrom" class="microcopy">
-            这是替换后的新版本（替换前为
-            {{ entry.plan.replacedFrom }}）。下面的核验结论只针对这一版。
+            这是调整后重新核验的新版本。下面的核验结论只针对这一版。
           </p>
-          <div class="notice" :class="verdictClass(entry.view)" role="status">
+          <div
+            v-if="entry.plan.empty"
+            class="notice notice--warning"
+            role="status"
+          >
+            <strong>空方案，尚无核验结果</strong>
+            <p class="microcopy">
+              课程已从方案中移除。返回问卷后可以重新生成方案。
+            </p>
+          </div>
+          <div
+            v-else-if="entry.view"
+            class="notice"
+            :class="verdictClass(entry.view)"
+            role="status"
+          >
             <strong>{{ entry.view.label }}</strong>
             <ul
-              v-if="issuesOf(entry.plan.verification).length"
+              v-if="
+                entry.plan.verification &&
+                issuesOf(entry.plan.verification).length
+              "
               class="summary-list"
             >
               <li
-                v-for="issue in issuesOf(entry.plan.verification)"
+                v-for="issue in entry.plan.verification
+                  ? issuesOf(entry.plan.verification)
+                  : []"
                 :key="issue.code + issue.message"
               >
-                {{ issue.message }}
+                {{ planIssueText(entry.plan.verification, issue) }}
               </li>
             </ul>
             <p v-else class="microcopy">{{ entry.view.detail }}</p>
           </div>
-          <ul class="summary-list">
-            <li v-for="item in entry.plan.items" :key="item.courseCode">
-              {{ item.courseCode }}
-              <template v-if="item.teacherKey">
-                · 教师 {{ item.teacherKey }}
-              </template>
-              <template v-if="item.classId">· 班次 {{ item.classId }}</template>
+          <ul class="course-cards" aria-label="方案中的课程">
+            <li
+              v-for="(card, cardIndex) in cardsOf(entry)"
+              :key="`${card.courseCode}-${cardIndex}`"
+              class="course-card"
+            >
+              <div class="course-card__head">
+                <div class="course-card__title">
+                  <strong>{{ card.name ?? card.courseCode }}</strong>
+                  <span v-if="card.name !== null" class="course-card__code">{{
+                    card.courseCode
+                  }}</span>
+                </div>
+                <button
+                  v-if="entry.plan.items.length > 0"
+                  class="button button--quiet course-card__delete"
+                  type="button"
+                  :disabled="deleting !== null"
+                  @click="deleteCourse(entry, card.courseCode)"
+                >
+                  删除这门课
+                  <span class="visually-hidden">
+                    （{{ card.name ?? card.courseCode }}）
+                  </span>
+                </button>
+              </div>
+              <dl class="course-card__facts">
+                <div>
+                  <dt>学分</dt>
+                  <dd>
+                    {{
+                      courseCredits[card.courseCode] == null
+                        ? "待确认"
+                        : courseCredits[card.courseCode]
+                    }}
+                  </dd>
+                </div>
+                <div>
+                  <dt>教师</dt>
+                  <dd>{{ card.teacher }}</dd>
+                </div>
+                <div>
+                  <dt>上课时间</dt>
+                  <dd>{{ card.time }}</dd>
+                </div>
+                <div v-if="card.classId !== null">
+                  <dt>班次</dt>
+                  <dd class="course-card__small">{{ card.classId }}</dd>
+                </div>
+              </dl>
+              <p v-if="card.rationaleWasReused" class="microcopy">
+                以下理由来自原推荐；方案调整后未重新生成。
+              </p>
+              <CourseReviewBasis
+                :course-code="card.courseCode"
+                :reason="
+                  card.rationale?.reason ??
+                  (card.rationaleWasChanged
+                    ? '班次已调整，此版本未生成新的推荐理由。'
+                    : '暂无具体理由。')
+                "
+                :course-source-ref-ids="
+                  card.rationale?.courseSourceRefIds ?? []
+                "
+                :review-basis-status="card.rationale?.reviewBasisStatus ?? null"
+                :rationale-source="card.rationale?.rationaleSource ?? null"
+                :review-note-ids="card.rationale?.reviewNoteIds ?? []"
+                :review-evidence-refs="card.rationale?.reviewEvidenceRefs ?? []"
+                :review-notes="courseReviews[card.courseCode]?.notes ?? []"
+              />
+              <details
+                @toggle="
+                  ($event.target as HTMLDetailsElement).open &&
+                  loadCourseEvidence(card.courseCode)
+                "
+              >
+                <summary>查看评价维度汇总与资料</summary>
+                <p
+                  v-if="
+                    !courseReviews[card.courseCode] ||
+                    courseReviews[card.courseCode].status === 'loading'
+                  "
+                >
+                  正在读取评价…
+                </p>
+                <p
+                  v-else-if="courseReviews[card.courseCode].status === 'error'"
+                >
+                  评价读取失败，请重新展开重试。
+                </p>
+                <ReviewSummary
+                  v-if="
+                    courseReviews[card.courseCode]?.status === 'ready' &&
+                    !courseReviews[card.courseCode].unknown &&
+                    courseReviews[card.courseCode].notes.length > 0
+                  "
+                  :course-code="card.courseCode"
+                  :notes="courseReviews[card.courseCode].notes"
+                  :unconfirmed="courseReviews[card.courseCode].unknown"
+                />
+                <p
+                  v-else-if="
+                    courseReviews[card.courseCode]?.status === 'ready' &&
+                    !courseReviews[card.courseCode].unknown
+                  "
+                  class="microcopy"
+                >
+                  暂无评价记录。
+                </p>
+              </details>
             </li>
           </ul>
+          <p v-if="courseNamesStatus === 'error'" class="microcopy" role="note">
+            课程名称暂时读不到，上面显示的是课程号。
+          </p>
+          <p
+            v-if="isDeletingPlan(entry)"
+            class="notice"
+            role="status"
+            aria-live="polite"
+          >
+            正在重新核验整份方案，请稍候。这一步不会重复提交。
+          </p>
+          <p
+            v-else-if="deleteErrors[entry.recommendation.planId]"
+            class="notice notice--error"
+            role="alert"
+          >
+            {{ deleteErrors[entry.recommendation.planId] }}
+          </p>
+          <p
+            v-if="deleteNotes[entry.recommendation.planId]"
+            class="notice notice--warning"
+            role="note"
+          >
+            {{ deleteNotes[entry.recommendation.planId] }}
+          </p>
 
           <div class="timetable-block">
             <h3 class="sub-label">一周课表</h3>
             <PlanTimetable
-              v-if="sourcesOf(entry.plan.planId)"
+              v-if="entry.plan.verification && sourcesOf(entry.plan.planId)"
               :scope="entry.plan.verification.scope"
               :sources="sourcesOf(entry.plan.planId) ?? []"
+              :course-names="courseNames"
             />
             <p v-else class="microcopy" role="status" aria-live="polite">
               正在读取班次时间，请稍候。
@@ -800,6 +1253,23 @@ async function goBackToQuestions() {
           <p v-if="!entry.plan.replacedFrom" class="microcopy">
             {{ entry.recommendation.explanation }}
           </p>
+          <section
+            v-if="entry.recommendation.explorationDirections?.length"
+            aria-label="发展方向探索"
+          >
+            <h3>职业与科研方向探索</h3>
+            <p class="microcopy">以下是 AI 生成的探索建议。</p>
+            <article
+              v-for="direction in entry.recommendation.explorationDirections"
+              :key="direction.title"
+            >
+              <h4>{{ direction.title }}</h4>
+              <p>{{ direction.description }}</p>
+              <ol>
+                <li v-for="step in direction.steps" :key="step">{{ step }}</li>
+              </ol>
+            </article>
+          </section>
 
           <button
             :id="entryButtonId(entry.index)"
@@ -812,6 +1282,45 @@ async function goBackToQuestions() {
           >
             搜课程，调整这份方案
           </button>
+
+          <details class="debug-id">
+            <summary>排查编号与详情</summary>
+            <p>
+              方案编号：<code>{{ entry.plan.planId }}</code>
+            </p>
+            <p v-if="store.planningHandoff">
+              核验模式：<code>{{ store.planningHandoff.mode }}</code>
+            </p>
+            <p v-if="entry.plan.verification">
+              判决范围：<code>{{ entry.plan.verification.scope }}</code> ·
+              判决：<code>{{ entry.plan.verification.verdict }}</code> ·
+              核验编号：<code>{{
+                entry.plan.verification.verifierResultId
+              }}</code>
+            </p>
+            <p>
+              课程编号：<code>{{ courseCodesOf(entry) }}</code>
+            </p>
+            <ul v-if="entry.plan.verification?.sourceRefIds.length">
+              <li
+                v-for="sourceRef in entry.plan.verification.sourceRefIds"
+                :key="sourceRef"
+              >
+                来源编号：<code>{{ sourceRef }}</code>
+              </li>
+            </ul>
+            <ul v-if="diagnosticsOf(entry).length">
+              <li
+                v-for="issue in diagnosticsOf(entry)"
+                :key="issue.code + issue.message"
+              >
+                <strong>{{ issue.code }}</strong>
+                <span v-if="issue.field"> · 字段：{{ issue.field }}</span>
+                <span> · 可重试：{{ issue.retryable ? "是" : "否" }}</span>
+                <p>{{ issue.message }}</p>
+              </li>
+            </ul>
+          </details>
 
           <section
             v-if="isOpen(entry)"
@@ -978,11 +1487,16 @@ async function goBackToQuestions() {
         </article>
       </div>
 
-      <div v-if="unknowns.length" class="notice notice--warning" role="note">
+      <div
+        v-if="studentUnknowns.length"
+        class="notice notice--warning"
+        role="note"
+        aria-label="无法确认的项目"
+      >
         <p>以下内容目前无法确认，不能算通过：</p>
         <ul class="summary-list">
-          <li v-for="issue in unknowns" :key="issue.code + issue.message">
-            {{ issue.message }}
+          <li v-for="message in studentUnknowns" :key="message">
+            {{ message }}
           </li>
         </ul>
       </div>
@@ -1090,6 +1604,107 @@ async function goBackToQuestions() {
   color: #875817;
   background: #fff8ed;
   border-color: #ecd6b0;
+}
+
+/* 课程卡片：浅绿色圆角，沿用全局 --wash / --line；手机一列，宽屏自动多列。 */
+.course-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.course-card {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--wash);
+}
+
+.course-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.course-card__title {
+  min-width: 0;
+}
+
+.course-card__title strong {
+  display: block;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.course-card__code {
+  display: block;
+  color: var(--soft);
+  font-size: 12px;
+}
+
+.course-card__delete {
+  min-height: 36px;
+  padding: 6px 10px;
+  color: #8b3c31;
+  font-size: 13px;
+}
+
+.course-card__delete:hover:not(:disabled) {
+  color: #6e2e25;
+}
+
+.course-card__facts {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+.course-card__facts div {
+  display: grid;
+  grid-template-columns: 4.5em minmax(0, 1fr);
+  gap: 8px;
+}
+
+.course-card__facts dt {
+  color: var(--soft);
+  font-size: 12px;
+}
+
+.course-card__facts dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.course-card__facts .course-card__small {
+  color: var(--soft);
+  font-size: 12px;
+}
+
+.debug-id {
+  margin: 10px 0 0;
+  color: var(--soft);
+  font-size: 12px;
+}
+
+.debug-id summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.debug-id code {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 540px) {

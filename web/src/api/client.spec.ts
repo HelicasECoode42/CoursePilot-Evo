@@ -40,7 +40,7 @@ function response(status: number, body: unknown): Response {
 }
 
 describe("HTTP API client", () => {
-  it("simulation connects to the service but only exposes explicitly synthetic curricula", async () => {
+  it("simulation accepts synthetic and unverified curriculum files", async () => {
     const synthetic = {
       ...curriculum,
       snapshotId: "demo",
@@ -52,13 +52,20 @@ describe("HTTP API client", () => {
       snapshotId: "mismatch",
       sourceValidation: "VERIFIED",
     };
+    const unverified = {
+      ...curriculum,
+      snapshotId: "imported",
+      sourceValidation: "UNVERIFIED",
+    };
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(sessionResponse())
       .mockResolvedValueOnce(
         response(
           200,
-          envelope("OK", { items: [curriculum, synthetic, mismatched] }),
+          envelope("OK", {
+            items: [curriculum, synthetic, mismatched, unverified],
+          }),
         ),
       );
     const client = createApiClient("simulation", {
@@ -68,7 +75,7 @@ describe("HTTP API client", () => {
     await client.createSession();
     expect(
       (await client.listCurricula()).items.map((item) => item.snapshotId),
-    ).toEqual(["demo"]);
+    ).toEqual(["demo", "imported"]);
     expect(client.mode).toBe("simulation");
   });
   it("creates an anonymous session from the documented envelope and keeps bearer out of URLs", async () => {
@@ -134,7 +141,7 @@ describe("HTTP API client", () => {
     expect(JSON.stringify(created)).not.toContain(session.sessionToken);
     await expect(client.listCurricula()).resolves.toEqual({
       items: [curriculum],
-      unknownMessages: ["演示培养方案不会用于真实服务模式。"],
+      unknownMessages: [],
     });
     const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
     expect(url).toContain("/api/v1/curriculum-snapshots");
@@ -843,6 +850,37 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     expect(result.verification.unknownChecks).toHaveLength(1);
   });
 
+  it("accepts an explicit empty-plan result from deterministic course removal", async () => {
+    const edit = {
+      previousPlanId: "plan-before",
+      planId: "plan-empty",
+      items: [],
+      hardConstraints: [],
+      verification: null,
+      empty: true,
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(200, envelope("OK", edit)));
+    const client = await authedClient(fetcher);
+    await expect(
+      client.removeSessionPlanCourse(
+        { previousPlanId: edit.previousPlanId, courseCode: "CS101" },
+        "key-remove-1",
+      ),
+    ).resolves.toEqual(edit);
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe(
+      "http://127.0.0.1:8000/api/v1/session-plans/remove-course",
+    );
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body as string)).toEqual({
+      previousPlanId: "plan-before",
+      courseCode: "CS101",
+    });
+  });
+
   it("lists teacher options by snapshot and leaves courseCode out of the query when it is null", async () => {
     const fetcher = vi
       .fn()
@@ -893,6 +931,42 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     expect(options.method).toBe("GET");
   });
 
+  it("sends the course search query and cursor, and omits an empty query", async () => {
+    const course = {
+      courseCode: "08305009",
+      name: "数据结构",
+      credits: 3,
+      category: "学科基础课",
+      sourceRefIds: ["source:curriculum-08305009"],
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(200, envelope("OK", { items: [course], nextCursor: null })),
+      )
+      .mockResolvedValueOnce(
+        response(200, envelope("OK", { items: [], nextCursor: null })),
+      );
+    const client = await authedClient(fetcher);
+
+    await client.listCourses(
+      "curriculum-2026",
+      "page-2",
+      undefined,
+      " 数据结构 ",
+    );
+    const [searchUrl] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(searchUrl).toContain("query=%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84");
+    expect(searchUrl).toContain("cursor=page-2");
+    expect(searchUrl).not.toContain("+");
+
+    await client.listCourses("curriculum-2026", null, undefined, "   ");
+    const [plainUrl] = fetcher.mock.calls[2] as [string, RequestInit];
+    expect(plainUrl).not.toContain("query");
+    expect(plainUrl).not.toContain("null");
+  });
+
   it("keeps an UNKNOWN teacher list as status UNKNOWN, not as a confirmed empty list", async () => {
     const fetcher = vi
       .fn()
@@ -928,6 +1002,28 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
       "http://127.0.0.1:8000/api/v1/reviews/search?courseCode=CS103",
     );
     expect(options.method).toBe("GET");
+  });
+
+  it("loads all review pages before returning results", async () => {
+    const second = { ...reviewNote, reviewNoteId: "review-second" };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(200, envelope("OK", { items: [reviewNote], nextCursor: "5" })),
+      )
+      .mockResolvedValueOnce(
+        response(200, envelope("OK", { items: [second], nextCursor: null })),
+      );
+    const client = await authedClient(fetcher);
+    const result = await client.searchReviews("CS103", null);
+    expect(result.items.map((note) => note.reviewNoteId)).toEqual([
+      reviewNote.reviewNoteId,
+      "review-second",
+    ]);
+    expect((fetcher.mock.calls[2] as [string, RequestInit])[0]).toContain(
+      "cursor=5",
+    );
   });
 
   it("keeps an UNKNOWN review search as status UNKNOWN, not as a failure or a confirmed empty list", async () => {

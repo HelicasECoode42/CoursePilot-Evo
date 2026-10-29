@@ -10,6 +10,10 @@ import type {
   SnapshotSummary,
 } from "../contracts";
 import { ApiFailure, type CoursePilotApiClient } from "../api/client";
+import type {
+  SchoolProgressImportResult,
+  SchoolProgressSnapshot,
+} from "../domain/school-progress";
 import { createPlanningStore } from "./planning";
 
 const curriculum: SnapshotSummary = {
@@ -45,6 +49,21 @@ function fakeClient(
     clearSession: vi.fn(),
     fixtureAcademicRecordId: vi.fn(() => null),
     listSessionRecords: vi.fn(async () => ({ items: [] })),
+    removeSessionPlanCourse: vi.fn(async (body) => ({
+      previousPlanId: body.previousPlanId,
+      planId: "plan-empty",
+      items: [],
+      hardConstraints: [],
+      verification: null,
+      empty: true,
+    })),
+    saveSchoolProgress: vi.fn(async () => {
+      throw new Error("not used in this test");
+    }),
+    importSchoolProgress: vi.fn(async () => {
+      throw new Error("not used in this test");
+    }),
+    getSchoolProgress: vi.fn(async () => null),
     saveSessionRecord: vi.fn(async (input) => ({
       academicRecordId: "record-1",
       revision: 1,
@@ -523,6 +542,26 @@ describe("planning session store", () => {
       missing: ["学业记录"],
     });
     expect(realStore.planningHandoff).toBeNull();
+  });
+
+  it("keeps teacher display names out of the draft and clears them with the session", () => {
+    const store = createPlanningStore(fakeClient())();
+    store.$patch({
+      sessionStatus: "ready",
+      sessionId: "session-display-name",
+    });
+    store.setTeacherPickDisplayName("CS101", "T_ZHANG", "张老师");
+    store.updateDraft("teacherPicks", [
+      { courseCode: "CS101", teacherKey: "T_ZHANG", mode: "MUST" },
+    ]);
+
+    expect(store.teacherPickDisplayNames["CS101::T_ZHANG"]).toBe("张老师");
+    expect(store.draft.teacherPicks).toEqual([
+      { courseCode: "CS101", teacherKey: "T_ZHANG", mode: "MUST" },
+    ]);
+
+    store.invalidateSession("会话已过期。");
+    expect(store.teacherPickDisplayNames).toEqual({});
   });
 
   it("clears stale handoff missing labels when planning inputs or the session change", () => {
@@ -1051,6 +1090,52 @@ describe("planning session store", () => {
       unknowns: [],
     };
 
+    const schoolSnapshot: SchoolProgressSnapshot = {
+      format: "coursepilot-shu-academic-progress",
+      version: 1,
+      capturedAt: "2026-10-29T00:00:00Z",
+      source: "fictional fixture",
+      nodes: [
+        {
+          nodeId: "school-node-1",
+          parentId: null,
+          schoolNodeId: "98",
+          leaf: true,
+          name: "公共基础课",
+          requiredCredits: 4,
+          earnedCredits: 2,
+          remainingCredits: 2,
+        },
+      ],
+      courses: [
+        {
+          nodeId: "school-node-1",
+          courseCode: "CP001",
+          name: "虚构课程",
+          credits: 2,
+          outcome: "UNKNOWN",
+          completedYear: null,
+          completedTerm: null,
+          grade: null,
+          makeup: null,
+          retake: null,
+          suggestedYear: null,
+          suggestedTerm: null,
+        },
+      ],
+    };
+
+    const schoolResult: SchoolProgressImportResult = {
+      receipt: {
+        schoolProgressId: "school-progress-1",
+        contentHash: "a".repeat(64),
+        importedAt: "2026-10-29T00:00:00Z",
+        reused: false,
+      },
+      snapshot: schoolSnapshot,
+      academicRecord: savedRecord,
+    };
+
     function readyStore(overrides: Partial<CoursePilotApiClient> = {}) {
       const client = fakeClient(overrides);
       const store = createPlanningStore(client)();
@@ -1063,6 +1148,56 @@ describe("planning session store", () => {
       });
       return { client, store };
     }
+
+    it("accepts USER_IMPORT through simulation HTTP while keeping planning mode SIMULATION", async () => {
+      const saveSchoolProgress = vi.fn(async () => schoolResult);
+      const { store } = readyStore({ mode: "simulation", saveSchoolProgress });
+
+      const imported = await store.importSchoolProgress(schoolSnapshot);
+
+      expect(imported).toBe(true);
+      expect(saveSchoolProgress).toHaveBeenCalledOnce();
+      expect(store.schoolProgress?.academicRecord.sourceKind).toBe(
+        "USER_IMPORT",
+      );
+      expect(store.selectedRecord?.sourceKind).toBe("USER_IMPORT");
+      expect(store.planningMode).toBe("SIMULATION");
+    });
+
+    it("does not send school data through the fixture client", async () => {
+      const saveSchoolProgress = vi.fn(async () => schoolResult);
+      const { store } = readyStore({ mode: "fixture", saveSchoolProgress });
+
+      const imported = await store.importSchoolProgress(schoolSnapshot);
+
+      expect(imported).toBe(false);
+      expect(saveSchoolProgress).not.toHaveBeenCalled();
+      expect(store.schoolProgressStatus).toBe("error");
+    });
+
+    it("drops a delayed school progress response after the selected curriculum changes", async () => {
+      const delayed = deferred<SchoolProgressImportResult | null>();
+      const getSchoolProgress = vi
+        .fn()
+        .mockImplementationOnce(() => delayed.promise)
+        .mockResolvedValueOnce(null);
+      const { store } = readyStore({ getSchoolProgress });
+      const secondCurriculum = {
+        ...curriculum,
+        snapshotId: "curriculum-other",
+      };
+      store.$patch({ curricula: [curriculum, secondCurriculum] });
+
+      const oldLoad = store.loadSchoolProgress();
+      store.chooseCurriculum(secondCurriculum.snapshotId);
+      delayed.resolve(schoolResult);
+      await oldLoad;
+      await Promise.resolve();
+
+      expect(getSchoolProgress).toHaveBeenCalledTimes(2);
+      expect(store.selectedCurriculumId).toBe(secondCurriculum.snapshotId);
+      expect(store.schoolProgress).toBeNull();
+    });
 
     /** 一份答完的问卷，用来让 preparePlanningHandoff 真的能产出请求。 */
     function answerEveryQuestion(

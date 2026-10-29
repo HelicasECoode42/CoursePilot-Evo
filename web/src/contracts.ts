@@ -50,6 +50,7 @@ export interface SnapshotSummary {
   termId: string | null;
   createdAt: string;
   sourceValidation: "VERIFIED" | "UNVERIFIED" | "SYNTHETIC";
+  displayName?: string | null;
 }
 
 export interface PlanningRequest {
@@ -62,15 +63,7 @@ export interface PlanningRequest {
   intent: {
     motives: Motive[];
     priorityOrder: string[];
-    hardConstraints: Array<{
-      kind: "BLOCK_DAY" | "BLOCK_SECTION" | "BLOCK_SLOT";
-      courseCode: null;
-      teacherKey: null;
-      dayOfWeek: number | null;
-      section: number | null;
-      value: number | null;
-      sourceText: string;
-    }>;
+    hardConstraints: Constraint[];
     softPreferences: Array<{
       dimension: string;
       value: string;
@@ -194,6 +187,20 @@ export interface Recommendation {
   items: PlanItem[];
   explanation: string;
   reviewNoteIds: string[];
+  courseRationales?: {
+    courseCode: string;
+    reason: string;
+    reviewNoteIds: string[];
+    courseSourceRefIds?: string[];
+    reviewBasisStatus?: "HAS_EVIDENCE" | "NO_RECORDS" | "NOT_QUERIED" | null;
+    rationaleSource?: "MODEL" | "COURSE_FACTS" | null;
+    reviewEvidenceRefs?: Array<{ reviewNoteId: string; sourceRefId: string }>;
+  }[];
+  explorationDirections?: {
+    title: string;
+    description: string;
+    steps: string[];
+  }[];
   verification: PlanValidation;
 }
 
@@ -233,6 +240,7 @@ export interface Course {
   credits: number | null;
   category: string;
   sourceRefIds: string[];
+  suggestedTerm?: string | null;
 }
 
 /** 一次上课时段。weeks 是教学周号，去重后不超过 60 个。 */
@@ -361,4 +369,18 @@ export interface SessionPlanReplacement {
   items: PlanItem[];
   hardConstraints: Constraint[];
   verification: PlanValidation;
+}
+
+export interface SessionPlanEditInput {
+  previousPlanId: string;
+  courseCode: string;
+}
+
+export interface SessionPlanEditResult {
+  previousPlanId: string;
+  planId: string;
+  items: PlanItem[];
+  hardConstraints: Constraint[];
+  verification: PlanValidation | null;
+  empty: boolean;
 }

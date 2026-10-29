@@ -625,6 +625,32 @@ fieldset {
   padding-top: 20px;
 }
 
+/* 操作按钮组：统一的横向/纵向间距，窄屏自动换行。 */
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+/* 教师比较页：课程下拉框与「查找教师」按钮之间留出间距。 */
+.teacher-search {
+  display: grid;
+  gap: 12px;
+}
+
+.teacher-search > .button {
+  justify-self: start;
+}
+
+.teacher-search-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .page-footer {
   width: min(640px, calc(100% - 40px));
   margin: 25px auto 30px;
