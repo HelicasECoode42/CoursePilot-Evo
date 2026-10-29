@@ -1,6 +1,20 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted } from "vue";
+import { useRouter } from "vue-router";
 import { api } from "./api";
+import { startSchoolProgressBridge } from "./school-progress-wiring";
+
+// 学业进度的接收挂在应用级：原先只在 /records 里监听，学生停在别的页面时
+// 扩展送过来没人接，bridge.js 要干等 60 秒超时才回失败。
+const router = useRouter();
+let stopBridge: (() => void) | null = null;
+onMounted(() => {
+  stopBridge = startSchoolProgressBridge(router);
+});
+onUnmounted(() => {
+  stopBridge?.();
+  stopBridge = null;
+});
 
 const modeLabel = computed(() =>
   api.mode === "fixture"

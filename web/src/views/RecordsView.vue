@@ -6,7 +6,7 @@
  * 再按培养方案核对，把「已满足 / 还差 / 无法确认」分开显示。
  * 这一页不计算学分，也不判断要求是否满足——那是模块 B 的职责。
  */
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "../api";
 import CourseSearchPicker from "../components/CourseSearchPicker.vue";
@@ -23,7 +23,12 @@ import {
   groupAuditItems,
 } from "../domain/academic-record";
 import { usePlanningStore } from "../stores/planning";
-import { schoolProgressFromBridge } from "../domain/school-progress";
+import {
+  requestSchoolImport,
+  saveSchoolProgressPayload,
+  schoolImportMessage,
+  schoolImporting,
+} from "../school-progress-wiring";
 
 const store = usePlanningStore();
 const router = useRouter();
@@ -38,91 +43,15 @@ const studyYear = ref("");
 const yearImportStatus = ref<"idle" | "loading" | "error">("idle");
 const yearImportMessage = ref("");
 const showSchoolImport = ref(route.query.import === "school");
-const schoolImportMessage = ref("");
-const schoolImporting = ref(false);
-
-let schoolImportRequestId = "";
 
 /** 学业进度 JSON 的大小上限。105 门课的导出按 2 空格缩进就有几十 KB，原来的 100KB 太紧。 */
 const MAX_SCHOOL_PROGRESS_BYTES = 2_000_000;
 
 function startSchoolImport() {
-  schoolImportRequestId = crypto.randomUUID();
-  schoolImportMessage.value =
-    "正在连接扩展；若没有响应，请确认扩展已加载并刷新本页。";
-  globalThis.window.postMessage(
-    { type: "CP_START_IMPORT", requestId: schoolImportRequestId },
-    globalThis.location.origin,
-  );
+  // 登记与接收都在应用级（src/school-progress-wiring.ts）：这一页只负责按钮，
+  // 这样学生停在别的路由时扩展送过来也有人接，不会干等 bridge.js 的 60 秒超时。
+  requestSchoolImport();
 }
-
-async function saveSchoolProgress(data: unknown): Promise<void> {
-  const snapshot = schoolProgressFromBridge(data);
-  if (api.mode === "fixture")
-    throw new Error("学校学业进度导入需要真实服务模式。");
-  if (!store.selectedCurriculumId)
-    throw new Error("请先选择培养方案，再导入学校学业进度。");
-  schoolImporting.value = true;
-  schoolImportMessage.value = "正在保存学校学业进度并更新学业核对。";
-  try {
-    const saved = await store.importSchoolProgress(snapshot);
-    if (!saved)
-      throw new Error(store.schoolProgressError || "保存失败，请重试。");
-    schoolImportMessage.value =
-      "学校学业进度已保存，课程明细已更新到学业记录。";
-  } finally {
-    schoolImporting.value = false;
-  }
-}
-
-// eslint-disable-next-line no-undef
-async function receiveSchoolProgress(event: MessageEvent) {
-  if (
-    event.source !== globalThis.window ||
-    event.origin !== globalThis.location.origin
-  )
-    return;
-  if (event.data?.type === "CP_IMPORT_READY" && event.data.ok) {
-    schoolImportMessage.value =
-      "扩展已连接。请打开学校学业情况，在浮窗点击导入并返回。";
-    return;
-  }
-  if (
-    event.data?.type !== "CP_DELIVER_PROGRESS" ||
-    !schoolImportRequestId ||
-    event.data.requestId !== schoolImportRequestId
-  )
-    return;
-  try {
-    await saveSchoolProgress(event.data.payload);
-    showSchoolImport.value = false;
-    globalThis.window.postMessage(
-      {
-        type: "CP_IMPORT_ACCEPTED",
-        requestId: schoolImportRequestId,
-        ok: true,
-      },
-      globalThis.location.origin,
-    );
-  } catch (error) {
-    schoolImportMessage.value =
-      error instanceof Error ? error.message : "未能保存学校学业进度，请重试。";
-    globalThis.window.postMessage(
-      {
-        type: "CP_IMPORT_ACCEPTED",
-        requestId: schoolImportRequestId,
-        ok: false,
-      },
-      globalThis.location.origin,
-    );
-  }
-}
-onMounted(() =>
-  globalThis.window.addEventListener("message", receiveSchoolProgress),
-);
-onUnmounted(() =>
-  globalThis.window.removeEventListener("message", receiveSchoolProgress),
-);
 
 // eslint-disable-next-line no-undef
 async function readSchoolProgress(event: Event) {
@@ -149,7 +78,7 @@ async function readSchoolProgress(event: Event) {
         "这个文件不是合法的 JSON，没法解析。请选扩展导出的那个文件。",
       );
     }
-    await saveSchoolProgress(parsed);
+    await saveSchoolProgressPayload(parsed);
   } catch (error) {
     schoolImportMessage.value =
       error instanceof Error && error.message
