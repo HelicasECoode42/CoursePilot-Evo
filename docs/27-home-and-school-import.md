@@ -4,18 +4,49 @@
 > 不决定样式、组件名、文案措辞。
 > 日期：2026-10-29
 
-## 路由
+## 改动清单：什么都不丢
+
+这次只在现有东西**前面**加一层入口，不替换、不重做、不删。
+
+| 动作 | 文件 | 说明 |
+|---|---|---|
+| **新增** | `views/HomeView.vue` | 欢迎页 |
+| **新增** | `views/SetupView.vue` | 配置三步（装插件 / 登录教务 / 导入） |
+| **新增** | `views/DashboardView.vue` | 个人控制台 |
+| **改 3 行** | `router/index.ts` | `/` 从 redirect 改成 HomeView，加 `/setup`、`/me` 两条路由 |
+| **删除** | — | **0 个文件，0 个页面，0 个组件** |
+
+现有页面一个都不动，照旧能用：
+
+| 现有页面 | 路由 | 这次改不改 |
+|---|---|---|
+| 规划问答 | `/plan/questions/:id` | 不改 |
+| 学分凑数 | `/plan/credits` | 不改 |
+| 规划结果（含课表） | `/plan/result` | 不改 |
+| 教师与评价 | `/plan/teachers` | 不改 |
+| 学业资料 | `/records` | 不改，`/setup` 第 3 步链到它 |
+| 工程报告 | `/report/runs/:runId` | 不改 |
+| 独立演示 HTML | `demo/*.html` | 不改，也不并进 Vue |
+
+路由全貌（上面三条是新的，下面六条原样）：
 
 ```
-/        欢迎页：项目介绍 →「开始配置」
-/setup   配置：三步，装插件 → 登录教务 → 导入
-/me      个人控制台：问 AI · 看开什么课 · 开始选课
+/        欢迎页（新）
+/setup   配置三步（新）
+/me      个人控制台（新）
+/plan/questions/:id   /plan/credits   /plan/result
+/plan/teachers        /records        /report/runs/:runId
 ```
 
-现有的 `/plan/questions/:id`、`/plan/credits`、`/plan/result`、
-`/plan/teachers` 全部保留不动，从 `/me` 的「开始选课」进去。
-`/records` 收进 `/setup` 第三步。
-`/` 不再 redirect 到问答向导。
+### 「开始选课」点下去进哪里
+
+进现有的 Vue 流程 `/plan/questions/goals` —— 它是真连网关的那条，
+问答 → 学分 → 结果（含课表）一路都在。
+
+`demo/coursepilot-guided-demo.html`（520 行）和
+`demo/e2-replan-flow-preview.html`（153 行）是独立的静态演示页，
+不连后端。它们保留原样，不动也不接进来；
+如果你要的「已经有的 html」指的是这两个，说一声，入口改成链到它们就行。
 
 ---
 
