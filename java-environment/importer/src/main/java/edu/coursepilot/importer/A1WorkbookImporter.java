@@ -7,6 +7,7 @@ import edu.coursepilot.importer.ImportModels.CurriculumDraft;
 import edu.coursepilot.importer.ImportModels.CurriculumEntry;
 import edu.coursepilot.importer.ImportModels.ImportIssue;
 import edu.coursepilot.importer.ImportModels.SourceRef;
+import edu.coursepilot.importer.ImportModels.UnmodeledRule;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -17,8 +18,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import org.apache.poi.ooxml.POIXMLException;
 import org.apache.poi.ss.usermodel.Cell;
@@ -43,6 +46,31 @@ public final class A1WorkbookImporter {
           "ai-engineering", "人智能");
   /** contracts/schemas/domain.schema.json Course.courseCode pattern. */
   private static final Pattern COURSE_CODE = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$");
+  /**
+   * 连号课程组的逐门学分拆分。来源：用户 2026-10-29 确认（工作簿只给整组学分）。
+   * 键是工作簿原文课程号，值是按连号顺序各门的学分，总和必须等于工作簿整组学分。
+   * 注意：这不是「总分÷门数」的推导规则，微积分(1-3) 按 6+6+4 拆是用户明确纠正的例外。
+   * 表外的连号课程仍记为学分未知（null），并记 CREDITS_UNSPLIT，不要自行推算。
+   */
+  static final Map<String, List<BigDecimal>> CONFIRMED_RANGE_CREDITS =
+      Map.ofEntries(
+          Map.entry("01014125~127", List.of(bd("6"), bd("6"), bd("4"))),
+          Map.entry("01034117~118", List.of(bd("4"), bd("4"))),
+          Map.entry("08305009~010", List.of(bd("4"), bd("4"))),
+          Map.entry("08305011~012", List.of(bd("4"), bd("4"))),
+          Map.entry("08305140~141", List.of(bd("3"), bd("3"))),
+          Map.entry("08305073~074", List.of(bd("3"), bd("3"))),
+          Map.entry("0869A002~003", List.of(bd("2"), bd("2"))),
+          Map.entry("08A6A001~002", List.of(bd("2"), bd("2"))),
+          Map.entry("08B2A002~003", List.of(bd("2"), bd("2"))),
+          Map.entry("0830A030~031", List.of(bd("2"), bd("2"))),
+          Map.entry("01034120~121", List.of(bd("1"), bd("1"))),
+          Map.entry("08305075~076", List.of(bd("1"), bd("1"))));
+
+  private static BigDecimal bd(String value) {
+    return new BigDecimal(value);
+  }
+
   private final XlsxInputGuard inputGuard = new XlsxInputGuard();
 
   public CurriculumDraft prepare(Path file, String trackId) {
@@ -58,18 +86,19 @@ public final class A1WorkbookImporter {
     List<ImportIssue> issues = new ArrayList<>();
     List<CategoryRequirement> requirements = new ArrayList<>();
     List<CurriculumEntry> entries = new ArrayList<>();
+    List<UnmodeledRule> unmodeled = new ArrayList<>();
     try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
       var sheet = workbook.getSheet(trackSheet);
       if (sheet == null
           || !cellText(sheet.getRow(0), 0).startsWith("CoursePilot｜2024级培养计划课程清单｜" + trackSheet)) {
         issues.add(new ImportIssue(TEMPLATE_MISMATCH, trackSheet, 1, 1));
       } else {
-        readSelectedSheet(sheet, trackSheet, hash, requirements, entries, issues);
+        readSelectedSheet(sheet, trackSheet, hash, requirements, entries, issues, unmodeled);
       }
     } catch (IOException | POIXMLException e) {
       issues.add(new ImportIssue(INVALID_OOXML, trackSheet, 1, 1));
     }
-    String naturalKey = normalizedKey(trackId, requirements, entries, issues);
+    String naturalKey = normalizedKey(trackId, requirements, entries, issues, unmodeled);
     if (requirements.isEmpty() || entries.isEmpty()) {
       issues.add(new ImportIssue(INVALID_ROW, trackSheet, 1, 1));
     }
@@ -80,7 +109,8 @@ public final class A1WorkbookImporter {
         naturalKey,
         List.copyOf(requirements),
         List.copyOf(entries),
-        List.copyOf(issues));
+        List.copyOf(issues),
+        List.copyOf(unmodeled));
   }
 
   public ImportModels.PublishResult publish(CurriculumDraft draft, ImportModels.PublishPort port) {
@@ -96,7 +126,8 @@ public final class A1WorkbookImporter {
       String hash,
       List<CategoryRequirement> requirements,
       List<CurriculumEntry> entries,
-      List<ImportIssue> issues) {
+      List<ImportIssue> issues,
+      List<UnmodeledRule> unmodeled) {
     int requirementHeader = findRow(sheet, "课程类别", "要求学分", "原表学分文本");
     int detailHeader = findRow(sheet, "课程名称/课程组", "课程编号（原文或规则）", "记录性质");
     int ruleHeader = findRow(sheet, "涉及对象/规则", "原表说明或待核问题", "当前解释与处理状态");
@@ -152,7 +183,7 @@ public final class A1WorkbookImporter {
                 category,
                 credits,
                 text(row, 3, formatter),
-                    source(hash, trackId(track), track, r, 2, text(row, 4, formatter))));
+                source(hash, trackId(track), track, r, 2, text(row, 4, formatter), 0)));
       }
     }
     if (statedTotal == null || statedTotal.compareTo(categoryTotal) != 0) {
@@ -160,6 +191,8 @@ public final class A1WorkbookImporter {
     }
 
     Map<String, CurriculumEntry> byCode = new HashMap<>();
+    // 占位课程号下的去重键：编号+名称+建议学期。占位编号不全局唯一，只拦截完全相同的行。
+    Set<String> placeholderKeys = new HashSet<>();
     for (int r = detailHeader + 1; r < ruleHeader - 1; r++) {
       Row row = sheet.getRow(r);
       if (isEmpty(row, 1)) continue;
@@ -173,60 +206,117 @@ public final class A1WorkbookImporter {
       BigDecimal credits = decimal(text(row, 4, formatter));
       String term = text(row, 5, formatter);
       String kind = text(row, 8, formatter);
-      if (name.isBlank() || category.isBlank() || credits == null || kind.isBlank()) {
+      if (name.isBlank() || category.isBlank() || kind.isBlank()) {
         issues.add(new ImportIssue(INVALID_ROW, track, r + 1, 2));
         continue;
       }
-      CurriculumEntry entry =
-          new CurriculumEntry(
-              name,
-              code,
-              category,
-              credits,
-              term,
-              kind,
-              source(hash, trackId(track), track, r, 1, text(row, 6, formatter)));
+      if (credits == null) {
+        issues.add(new ImportIssue(INVALID_CREDITS, track, r + 1, 5));
+        continue;
+      }
+      if (kind.startsWith("课程组/要求行")) {
+        // 课程组要求行（如“通识课课程组”）不是单门课程；其类别学分已在类别要求表中，
+        // 这里不入库，只记录下来，不丢任何单门必修课。
+        issues.add(new ImportIssue(GROUP_REQUIREMENT_ROW, track, r + 1, 3));
+        continue;
+      }
       if (!"课程明细".equals(kind)) {
         // Java currently stores only concrete courses, not choice groups or rule expressions.
         // Refuse to publish those rows until a typed persistence model exists.
         issues.add(new ImportIssue(UNSUPPORTED_ENTRY, track, r + 1, 3));
-      } else if (!COURSE_CODE.matcher(code).matches()) {
-        issues.add(new ImportIssue(INVALID_COURSE_CODE, track, r + 1, 3));
-      } else if (code.length() > 32) {
-        // The persisted Course primary key is narrower than the public DTO contract.
-        issues.add(new ImportIssue(COURSE_CODE_TOO_LONG, track, r + 1, 3));
+        continue;
       }
       if (name.length() > 200 || category.length() > 100) {
         issues.add(new ImportIssue(INVALID_ROW, track, r + 1, 2));
+        continue;
       }
-      if (!code.isBlank()) {
-        CurriculumEntry previous = byCode.putIfAbsent(code, entry);
-        if (previous != null) {
-          boolean conflicting =
-              !previous.name().equals(name)
-                  || previous.credits().compareTo(credits) != 0
-                  || !previous.category().equals(category)
-                  || !previous.suggestedTerm().equals(term);
-          issues.add(
-              new ImportIssue(
-                  conflicting ? DUPLICATE_COURSE_CONFLICT : DUPLICATE_COURSE, track, r + 1, 3));
+      // 连号课程号（如 01014125~127）按工作簿原文展开；展开失败视为非法课程号，阻断。
+      boolean range = code.contains("~");
+      List<String> codes = range ? expandRange(code) : List.of(code);
+      if (codes == null) {
+        issues.add(new ImportIssue(INVALID_COURSE_CODE, track, r + 1, 3));
+        continue;
+      }
+      // 连号课程组：工作簿只给整组学分。已确认的拆分表逐门拆；表外的记为未知（null）。
+      List<BigDecimal> confirmed = range ? CONFIRMED_RANGE_CREDITS.get(code) : null;
+      if (range) {
+        issues.add(new ImportIssue(COURSE_CODE_RANGE_EXPANDED, track, r + 1, 3));
+        if (confirmed == null) {
+          issues.add(new ImportIssue(CREDITS_UNSPLIT, track, r + 1, 5));
+        } else if (confirmed.size() != codes.size()
+            || confirmed.stream().reduce(BigDecimal.ZERO, BigDecimal::add).compareTo(credits) != 0) {
+          // 已确认的拆分与工作簿整组学分或门数对不上，视为结构冲突，阻断。
+          issues.add(new ImportIssue(INVALID_CREDITS, track, r + 1, 5));
+          continue;
         }
       }
-      entries.add(entry);
+      for (int m = 0; m < codes.size(); m++) {
+        String memberCode = codes.get(m);
+        if (!COURSE_CODE.matcher(memberCode).matches()) {
+          issues.add(new ImportIssue(INVALID_COURSE_CODE, track, r + 1, 3));
+          continue;
+        }
+        // The persisted Course primary key is narrower than the public DTO contract.
+        if (memberCode.length() > 32) {
+          issues.add(new ImportIssue(COURSE_CODE_TOO_LONG, track, r + 1, 3));
+          continue;
+        }
+        BigDecimal memberCredits = range ? (confirmed == null ? null : confirmed.get(m)) : credits;
+        CurriculumEntry entry =
+            new CurriculumEntry(
+                name,
+                memberCode,
+                category,
+                memberCredits,
+                term,
+                kind,
+                source(hash, trackId(track), track, r, 1, text(row, 6, formatter), m));
+        if (isPlaceholder(memberCode)) {
+          // 占位编号（如 008532xx）：工作簿说明编号待确认，这里保留每门课，只记录待确认。
+          issues.add(new ImportIssue(COURSE_CODE_PENDING, track, r + 1, 3));
+          if (!placeholderKeys.add(memberCode + "\n" + name + "\n" + term)) {
+            issues.add(new ImportIssue(DUPLICATE_COURSE, track, r + 1, 3));
+          }
+        } else {
+          CurriculumEntry previous = byCode.putIfAbsent(memberCode, entry);
+          if (previous != null) {
+            boolean conflicting =
+                !previous.name().equals(name)
+                    || !sameCredits(previous.credits(), memberCredits)
+                    || !previous.category().equals(category)
+                    || !previous.suggestedTerm().equals(term);
+            issues.add(
+                new ImportIssue(
+                    conflicting ? DUPLICATE_COURSE_CONFLICT : DUPLICATE_COURSE, track, r + 1, 3));
+          }
+        }
+        entries.add(entry);
+      }
     }
 
+    // 「三、备注」区段：表头之后的每一行都是独立的规则/待核问题记录，不是课程数据。
+    // 按表头位置而不是行号识别，并保留原文，不会因为行号不同而漏掉。
     for (int r = ruleHeader + 1; r <= sheet.getLastRowNum(); r++) {
       Row row = sheet.getRow(r);
-      if (isEmpty(row, 1)) continue;
-      String rowTrack = text(row, 0, formatter);
-      if (!track.equals(rowTrack)) continue;
-      String status = text(row, 4, formatter);
-      String kind = text(row, 5, formatter);
-      if (kind.contains("规则")
-          || kind.contains("课程行")
-          || status.contains("待")
-          || status.contains("冲突")) {
-        issues.add(new ImportIssue(UNKNOWN_RULE, track, r + 1, 5));
+      if (isEmpty(row, 2)) continue;
+      if (!track.equals(text(row, 0, formatter))) continue;
+      String sourceType = text(row, 5, formatter);
+      // 原表课程行（如 Java EE 开发技术）已由负责人要求从有效清单删除，按排除记录。
+      boolean excluded = "原表课程行".equals(sourceType);
+      unmodeled.add(
+          new UnmodeledRule(
+              track,
+              r + 1,
+              text(row, 1, formatter),
+              text(row, 2, formatter),
+              text(row, 3, formatter),
+              text(row, 4, formatter),
+              sourceType,
+              excluded
+                  ? UnmodeledRule.Disposition.EXCLUDED
+                  : UnmodeledRule.Disposition.UNMODELED));
+      if (!excluded) {
+        issues.add(new ImportIssue(UNKNOWN_RULE, track, r + 1, 3));
       }
     }
   }
@@ -282,17 +372,23 @@ public final class A1WorkbookImporter {
     return -1;
   }
 
+  /**
+   * memberIndex 区分同一工作簿行展开出来的多门课：第 0 门保持原 refId，之后追加 :mN，
+   * 保证 SourceReference 主键唯一。
+   */
   private SourceRef source(
       String hash,
       String trackId,
       String sheet,
       int zeroBasedRow,
       int zeroBasedColumn,
-      String originalLocator) {
+      String originalLocator,
+      int memberIndex) {
     int row = zeroBasedRow + 1;
     int column = zeroBasedColumn + 1;
+    String suffix = memberIndex == 0 ? "" : ":m" + (memberIndex + 1);
     return new SourceRef(
-        hash + ":" + trackId + ":" + row + ":" + column,
+        hash + ":" + trackId + ":" + row + ":" + column + suffix,
         "A1_CURRICULUM_XLSX",
         null,
         hash,
@@ -309,6 +405,40 @@ public final class A1WorkbookImporter {
         .map(Map.Entry::getKey)
         .findFirst()
         .orElseThrow(() -> new IllegalArgumentException("Unknown import sheet"));
+  }
+
+  /**
+   * 把 "01014125~127" 展开为 01014125、01014126、01014127。
+   * 写法：~ 左边是完整课程号，右边是末尾同宽的数字，表示连号的终点。
+   * 不是合法连号（右边过宽、终点小于起点、跨度超过 10 门）时返回 null。
+   */
+  static List<String> expandRange(String raw) {
+    int tilde = raw.indexOf('~');
+    if (tilde < 1) return null;
+    String start = raw.substring(0, tilde);
+    String endSuffix = raw.substring(tilde + 1);
+    if (!endSuffix.matches("[0-9]{1,3}") || start.length() < endSuffix.length()) return null;
+    int width = endSuffix.length();
+    String head = start.substring(0, start.length() - width);
+    String tail = start.substring(start.length() - width);
+    if (!tail.matches("[0-9]+")) return null;
+    int from = Integer.parseInt(tail);
+    int to = Integer.parseInt(endSuffix);
+    if (to < from || to - from > 9) return null;
+    List<String> codes = new ArrayList<>();
+    for (int n = from; n <= to; n++) {
+      codes.add(head + String.format(java.util.Locale.ROOT, "%0" + width + "d", n));
+    }
+    return codes;
+  }
+
+  /** 工作簿用 x 代表待确认的数字，例如 008532xx、00304xxx。 */
+  static boolean isPlaceholder(String code) {
+    return code.matches("[0-9]+[xX]+");
+  }
+
+  private static boolean sameCredits(BigDecimal a, BigDecimal b) {
+    return a == null ? b == null : b != null && a.compareTo(b) == 0;
   }
 
   private BigDecimal decimal(String value) {
@@ -336,7 +466,8 @@ public final class A1WorkbookImporter {
       String trackId,
       List<CategoryRequirement> requirements,
       List<CurriculumEntry> entries,
-      List<ImportIssue> issues) {
+      List<ImportIssue> issues,
+      List<UnmodeledRule> unmodeled) {
     StringBuilder canonical = new StringBuilder();
     append(canonical, VERSION);
     append(canonical, trackId);
@@ -352,10 +483,19 @@ public final class A1WorkbookImporter {
       append(canonical, entry.name());
       append(canonical, entry.courseCode());
       append(canonical, entry.category());
-      append(canonical, entry.credits().toPlainString());
+      append(canonical, entry.credits() == null ? "" : entry.credits().toPlainString());
       append(canonical, entry.suggestedTerm());
       append(canonical, entry.recordKind());
       append(canonical, entry.source().originalLocator());
+    }
+    for (UnmodeledRule rule : unmodeled) {
+      append(canonical, "rule");
+      append(canonical, rule.sourceLocator());
+      append(canonical, rule.subject());
+      append(canonical, rule.originalNote());
+      append(canonical, rule.currentStatus());
+      append(canonical, rule.sourceType());
+      append(canonical, rule.disposition().name());
     }
     for (ImportIssue issue : issues) {
       append(canonical, issue.code().name());

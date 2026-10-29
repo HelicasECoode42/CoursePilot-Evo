@@ -36,6 +36,11 @@ public interface CurriculumCourseRepository extends JpaRepository<CurriculumCour
     java.util.Optional<CurriculumCourse> findBySnapshot_SnapshotIdAndCourse_CourseCode(
         String snapshotId, String courseCode);
 
+    /** 占位编号可能对应多门课，导入回执查找必须同时给出名称。 */
+    @EntityGraph(attributePaths = {"course", "sourceReference"})
+    java.util.Optional<CurriculumCourse> findBySnapshot_SnapshotIdAndCourse_CourseCodeAndName(
+        String snapshotId, String courseCode, String name);
+
     @EntityGraph(attributePaths = {"course", "sourceReference"})
     java.util.List<CurriculumCourse> findBySnapshot_SnapshotIdAndCourse_CourseCodeIn(
         String snapshotId, java.util.Collection<String> courseCodes);

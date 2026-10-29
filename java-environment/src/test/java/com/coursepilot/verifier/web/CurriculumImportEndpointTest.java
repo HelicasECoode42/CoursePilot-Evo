@@ -95,11 +95,13 @@ class CurriculumImportEndpointTest {
             .andExpect(jsonPath("$.status").value("ERROR"))
             .andExpect(jsonPath("$.issues[0].code").value("INVALID_OOXML"));
 
+        // 未建模规则不再阻断发布：快照照常发布，规则作为快照级记录保存，并以 UNKNOWN_RULE 回执告知。
         mvc.perform(upload(workbook("SYNBAD001", true), "unknown-rule-upload"))
-            .andExpect(status().isUnprocessableEntity())
-            .andExpect(jsonPath("$.issues[0].code").value("UNKNOWN_RULE"));
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.state").value("PUBLISHED"))
+            .andExpect(jsonPath("$.data.issues[0].code").value("UNKNOWN_RULE"));
 
-        assertEquals(before, snapshots.count());
+        assertEquals(before + 1, snapshots.count());
     }
 
     @Test

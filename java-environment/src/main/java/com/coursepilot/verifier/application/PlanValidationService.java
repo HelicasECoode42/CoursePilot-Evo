@@ -4,6 +4,8 @@ import com.coursepilot.verifier.domain.MeetingTime;
 import com.coursepilot.verifier.persistence.entity.CourseOffering;
 import com.coursepilot.verifier.persistence.entity.CurriculumSnapshot;
 import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
+import com.coursepilot.verifier.persistence.entity.CurriculumUnmodeledRule;
+import com.coursepilot.verifier.persistence.repo.CurriculumUnmodeledRuleRepository;
 import com.coursepilot.verifier.persistence.entity.Transcript;
 import com.coursepilot.verifier.persistence.repo.CurriculumCourseRepository;
 import com.coursepilot.verifier.persistence.repo.CurriculumSnapshotRepository;
@@ -70,12 +72,15 @@ public class PlanValidationService {
     private final CurriculumSnapshotRepository snapshots;
     private final CurriculumCourseRepository curriculumCourses;
     private final ConflictChecker conflictChecker;
+    private final CurriculumUnmodeledRuleRepository unmodeledRules;
 
     public PlanValidationService(SubjectGuard subjects,
                                  TranscriptRepository transcripts,
                                  CurriculumSnapshotRepository snapshots,
                                  CurriculumCourseRepository curriculumCourses,
-                                 ConflictChecker conflictChecker) {
+                                 ConflictChecker conflictChecker,
+                                 CurriculumUnmodeledRuleRepository unmodeledRules) {
+        this.unmodeledRules = unmodeledRules;
         this.subjects = subjects;
         this.transcripts = transcripts;
         this.snapshots = snapshots;
@@ -109,10 +114,13 @@ public class PlanValidationService {
             .distinct().toList();
         ConflictChecker.Analysis analysis = conflictChecker.analyze(classIds);
         Map<String, CourseOffering> offerings = analysis.offeringsById();
+        // 占位编号（如 008532xx）可能对应同一快照下的多门课：编号不唯一就无法据此定位，排除后按未知处理。
         Map<String, CurriculumCourse> catalog = curriculumCourses
             .findBySnapshot_SnapshotIdAndCourse_CourseCodeIn(req.curriculumSnapshotId(),
                 items.stream().map(PlanItem::courseCode).distinct().toList())
-            .stream().collect(Collectors.toMap(cc -> cc.getCourse().getCourseCode(), Function.identity()));
+            .stream().collect(Collectors.groupingBy(cc -> cc.getCourse().getCourseCode()))
+            .values().stream().filter(group -> group.size() == 1).map(group -> group.getFirst())
+            .collect(Collectors.toMap(cc -> cc.getCourse().getCourseCode(), Function.identity()));
 
         // 只有模拟模式、带快照、且每个方案项都落到一个存在的 SYNTHETIC 班次，才是 SIMULATION。
         boolean simulation = "SIMULATION".equals(req.mode())
@@ -123,6 +131,13 @@ public class PlanValidationService {
         String scope = simulation ? "SIMULATION" : "COURSE_ONLY";
 
         Findings f = new Findings();
+        // 未建模规则不参与核验，但必须显式带出：快照里有几条未建模规则，就带出一条说明。
+        var unmodeled = unmodeledRules.findBySnapshot_SnapshotIdAndDispositionOrderBySourceRowAsc(
+            req.curriculumSnapshotId(), CurriculumUnmodeledRule.Disposition.UNMODELED);
+        if (!unmodeled.isEmpty()) {
+            f.unknown(UnmodeledRuleNotice.CODE, UnmodeledRuleNotice.message(unmodeled),
+                "curriculumSnapshotId");
+        }
         checkClassAssignments(items, offerings, f);
         checkTime(items, classIds, analysis, simulation, f);
         for (int i = 0; i < req.hardConstraints().size(); i++) {

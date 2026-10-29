@@ -6,9 +6,11 @@ import java.time.Instant;
 
 /** Explicit membership of a catalog course in a curriculum snapshot. */
 @Entity
+// 唯一键包含 name：占位课程号（如 008532xx）在工作簿里对应体育1..6 等多门课，
+// 同一快照下编号可以重复，名称不同即是不同的课。
 @Table(name = "curriculum_course", uniqueConstraints = @UniqueConstraint(
-    name = "uk_curriculum_course_snapshot_course",
-    columnNames = {"curriculum_snapshot_id", "course_code"}))
+    name = "uk_curriculum_course_snapshot_code_name",
+    columnNames = {"curriculum_snapshot_id", "course_code", "name"}))
 public class CurriculumCourse {
 
     @Id

@@ -4,6 +4,8 @@ import com.coursepilot.verifier.persistence.entity.Requirement;
 import com.coursepilot.verifier.persistence.entity.Transcript;
 import com.coursepilot.verifier.persistence.entity.Course;
 import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
+import com.coursepilot.verifier.persistence.entity.CurriculumUnmodeledRule;
+import com.coursepilot.verifier.persistence.repo.CurriculumUnmodeledRuleRepository;
 import com.coursepilot.verifier.persistence.repo.CurriculumCourseRepository;
 import com.coursepilot.verifier.persistence.repo.RequirementRepository;
 import com.coursepilot.verifier.persistence.repo.TranscriptRepository;
@@ -35,13 +37,16 @@ public class AuditResultAssembler {
     private final RequirementRepository requirementRepo;
     private final TranscriptRepository transcriptRepo;
     private final CurriculumCourseRepository curriculumCourses;
+    private final CurriculumUnmodeledRuleRepository unmodeledRules;
 
     public AuditResultAssembler(RequirementRepository requirementRepo,
                                 TranscriptRepository transcriptRepo,
-                                CurriculumCourseRepository curriculumCourses) {
+                                CurriculumCourseRepository curriculumCourses,
+                                CurriculumUnmodeledRuleRepository unmodeledRules) {
         this.requirementRepo = requirementRepo;
         this.transcriptRepo = transcriptRepo;
         this.curriculumCourses = curriculumCourses;
+        this.unmodeledRules = unmodeledRules;
     }
 
     public AuditDtos.AuditResult assemble(String curriculumSnapshotId, String academicRecordId) {
@@ -69,13 +74,24 @@ public class AuditResultAssembler {
             : curriculumCourses.findBySnapshot_SnapshotIdAndCourse_CourseCodeIn(
                     curriculumSnapshotId, transcript.getCompletedCourses().stream()
                         .map(c -> c.getCourseCode()).distinct().toList())
-                .stream().filter(cc -> hasUsableFacts(cc, curriculumSnapshotId))
+                .stream()
+                // 同一编号对应多门课（占位编号）时无法认定，整组排除，按未知处理。
+                .collect(java.util.stream.Collectors.groupingBy(cc -> cc.getCourse().getCourseCode()))
+                .values().stream().filter(group -> group.size() == 1).map(group -> group.getFirst())
+                .filter(cc -> hasUsableFacts(cc, curriculumSnapshotId))
                 .collect(java.util.stream.Collectors.toMap(
                     cc -> cc.getCourse().getCourseCode(),
                     cc -> new Course(cc.getCourse().getCourseCode(), cc.getName(), cc.getCredits(), cc.getCategory())));
         AcademicLedger ledger = AcademicLedger.of(transcript,
             code -> java.util.Optional.ofNullable(snapshotCatalog.get(code)));
         unknowns.addAll(ledger.issues());
+        // 未建模规则不参与核验，但显式带出，让人看见哪些规则没有被算进去。
+        var unmodeled = unmodeledRules.findBySnapshot_SnapshotIdAndDispositionOrderBySourceRowAsc(
+            curriculumSnapshotId, CurriculumUnmodeledRule.Disposition.UNMODELED);
+        if (!unmodeled.isEmpty()) {
+            unknowns.add(new AuditDtos.Issue(UnmodeledRuleNotice.CODE,
+                UnmodeledRuleNotice.message(unmodeled), "curriculumSnapshotId", false));
+        }
 
         if (transcript == null) {
             unknowns.add(new AuditDtos.Issue("ACADEMIC_RECORD_EMPTY",

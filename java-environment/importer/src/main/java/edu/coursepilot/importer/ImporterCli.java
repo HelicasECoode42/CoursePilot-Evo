@@ -14,12 +14,14 @@ public final class ImporterCli {
     try {
       var draft = new A1WorkbookImporter().prepare(Path.of(args[0]), args[1]);
       System.out.printf(
-          "track=%s publishable=%s requirements=%d entries=%d issues=%d key=%s%n",
+          "track=%s publishable=%s requirements=%d entries=%d issues=%d blocking=%d recorded=%d key=%s%n",
           draft.trackId(),
           draft.publishable(),
           draft.requirements().size(),
           draft.entries().size(),
           draft.issues().size(),
+          draft.blockingIssues().size(),
+          draft.recordedIssues().size(),
           draft.idempotencyKey());
       draft
           .issues()
@@ -27,7 +29,8 @@ public final class ImporterCli {
               issue ->
                   System.out.printf(
                       "issue=%s sheet=%s row=%d column=%d%n",
-                      issue.code(), issue.sheet(), issue.row(), issue.column()));
+                      (issue.code().blocking() ? "BLOCK " : "RECORD ") + issue.code(),
+                      issue.sheet(), issue.row(), issue.column()));
       if (!draft.publishable()) System.exit(1);
     } catch (XlsxInputGuard.ImportRejectedException e) {
       System.err.println("rejected=" + e.code());

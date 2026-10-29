@@ -4,6 +4,8 @@ import com.coursepilot.verifier.persistence.entity.Course;
 import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
 import com.coursepilot.verifier.persistence.entity.CurriculumImportReceipt;
 import com.coursepilot.verifier.persistence.entity.CurriculumSnapshot;
+import com.coursepilot.verifier.persistence.entity.CurriculumUnmodeledRule;
+import com.coursepilot.verifier.persistence.repo.CurriculumUnmodeledRuleRepository;
 import com.coursepilot.verifier.persistence.entity.Requirement;
 import com.coursepilot.verifier.persistence.entity.SourceReference;
 import com.coursepilot.verifier.persistence.repo.CourseRepository;
@@ -34,13 +36,16 @@ public class SyntheticCurriculumPublishPort implements PublishPort {
     private final CourseRepository courses;
     private final CurriculumCourseRepository memberships;
     private final RequirementRepository requirements;
+    private final CurriculumUnmodeledRuleRepository unmodeledRules;
 
     public SyntheticCurriculumPublishPort(
         CurriculumImportReceiptRepository receipts,
         CurriculumSnapshotRepository snapshots,
         CourseRepository courses,
         CurriculumCourseRepository memberships,
-        RequirementRepository requirements) {
+        RequirementRepository requirements,
+        CurriculumUnmodeledRuleRepository unmodeledRules) {
+        this.unmodeledRules = unmodeledRules;
         this.receipts = receipts;
         this.snapshots = snapshots;
         this.courses = courses;
@@ -90,7 +95,8 @@ public class SyntheticCurriculumPublishPort implements PublishPort {
                 snapshot,
                 identity,
                 entry.name(),
-                entry.credits().doubleValue(),
+                // 连号课程组展开后的成员学分为未知（null），不能当 0 入库。
+                entry.credits() == null ? null : entry.credits().doubleValue(),
                 entry.category(),
                 "SYNTHETIC",
                 source.refId(),
@@ -111,6 +117,19 @@ public class SyntheticCurriculumPublishPort implements PublishPort {
                 requirement.category(),
                 requirement.requiredCredits().doubleValue(),
                 reference));
+        }
+
+        for (var rule : draft.unmodeledRules()) {
+            unmodeledRules.save(new CurriculumUnmodeledRule(
+                snapshot,
+                rule.sheet(),
+                rule.row(),
+                rule.sourceLocator(),
+                rule.subject(),
+                rule.originalNote(),
+                rule.currentStatus(),
+                rule.sourceType(),
+                CurriculumUnmodeledRule.Disposition.valueOf(rule.disposition().name())));
         }
 
         receipts.save(new CurriculumImportReceipt(

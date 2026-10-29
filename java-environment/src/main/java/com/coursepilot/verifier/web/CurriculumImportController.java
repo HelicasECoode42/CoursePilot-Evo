@@ -104,18 +104,25 @@ public class CurriculumImportController {
             file.transferTo(temporaryFile);
             CurriculumDraft draft = importer.prepare(temporaryFile, trackId);
             if (!draft.publishable()) {
-                ImportIssue issue = draft.issues().getFirst();
+                ImportIssue issue = draft.blockingIssues().getFirst();
                 return error(HttpStatus.UNPROCESSABLE_ENTITY, requestId, issue.code().name(),
                     message(issue.code()), "file");
             }
             var published = importer.publish(draft, publisher);
-            var membership = curriculumCourses.findBySnapshot_SnapshotIdAndCourse_CourseCode(
-                published.snapshotId(), draft.entries().getFirst().courseCode()).orElseThrow();
+            var membership = curriculumCourses.findBySnapshot_SnapshotIdAndCourse_CourseCodeAndName(
+                published.snapshotId(), draft.entries().getFirst().courseCode(),
+                draft.entries().getFirst().name()).orElseThrow();
             var source = membership.getSourceReference();
             var responseSource = new Envelope.SourceRef(
                 source.getKind(), source.getRefId(), source.getSnapshotId(),
                 source.getLocator(), source.getCapturedAt());
-            var result = new ImportDtos.ImportResult(published.snapshotId(), "PUBLISHED", published.reused(), List.of());
+            // 可记录问题（如待确认的占位课程号）随成功结果返回，让人看见哪些行待确认。
+            var recorded = draft.recordedIssues().stream()
+                .map(i -> new Envelope.Issue(i.code().name(),
+                    message(i.code()) + "（" + i.sheet() + " 第" + i.row() + "行）",
+                    "file", false))
+                .toList();
+            var result = new ImportDtos.ImportResult(published.snapshotId(), "PUBLISHED", published.reused(), recorded);
             return ResponseEntity.ok(Envelope.ok(requestId, result).withProvenance(List.of(responseSource)));
         } catch (XlsxInputGuard.ImportRejectedException ex) {
             HttpStatus status = ex.code() == IssueCode.FILE_TOO_LARGE
@@ -144,6 +151,10 @@ public class CurriculumImportController {
             case COURSE_CODE_TOO_LONG -> "课程编号超过当前数据库支持的 32 个字符";
             case UNKNOWN_RULE -> "工作簿包含尚未解释的培养规则";
             case UNSUPPORTED_ENTRY -> "工作簿包含当前系统无法表示的课程组或规则行";
+            case COURSE_CODE_PENDING -> "课程编号为占位值，真实编号待确认";
+            case COURSE_CODE_RANGE_EXPANDED -> "连号课程编号已按工作簿展开为多门课";
+            case CREDITS_UNSPLIT -> "连号课程组只有整组学分，成员学分未拆分，记为未知";
+            case GROUP_REQUIREMENT_ROW -> "课程组要求行不是单门课程，未作为课程入库，其学分要求见类别表";
             default -> "工作簿内容不符合导入要求";
         };
     }

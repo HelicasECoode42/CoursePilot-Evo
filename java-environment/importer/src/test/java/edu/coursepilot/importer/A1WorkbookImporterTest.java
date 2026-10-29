@@ -7,11 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -79,22 +81,81 @@ class A1WorkbookImporterTest {
   }
 
   @Test
-  void blocksUnknownRuleAndNeverCallsPublishPort() throws Exception {
+  void unmodeledRuleIsCarriedAsSnapshotRuleAndNoLongerBlocksPublication() throws Exception {
     var draft = new A1WorkbookImporter().prepare(workbook(true), "cs-general");
+
+    assertTrue(draft.publishable(), draft.blockingIssues().toString());
+    assertTrue(
+        draft.recordedIssues().stream()
+            .anyMatch(issue -> issue.code() == ImportModels.IssueCode.UNKNOWN_RULE));
+    assertEquals(1, draft.unmodeledRules().size());
+    var rule = draft.unmodeledRules().getFirst();
+    assertEquals(ImportModels.UnmodeledRule.Disposition.UNMODELED, rule.disposition());
+    assertEquals("source!A3", rule.sourceLocator());
+    assertEquals("Synthetic unresolved rule", rule.subject());
+    assertEquals("raw note", rule.originalNote());
+    assertEquals("原表注释/规则", rule.sourceType());
+    // 发布路径仍然可用：未建模规则不再被当作阻断。
+    var published = new A1WorkbookImporter().publish(draft, ignored -> new ImportModels.PublishResult("SNAP", false));
+    assertEquals("SNAP", published.snapshotId());
+  }
+
+  @Test
+  void excludedSourceRowIsKeptWithDispositionExcluded() throws Exception {
+    var draft = new A1WorkbookImporter().prepare(workbookWithRule("原表课程行", "Java EE开发技术"), "cs-general");
+
+    assertTrue(draft.publishable(), draft.blockingIssues().toString());
+    assertEquals(1, draft.unmodeledRules().size());
+    assertEquals(
+        ImportModels.UnmodeledRule.Disposition.EXCLUDED,
+        draft.unmodeledRules().getFirst().disposition());
+    assertTrue(
+        draft.recordedIssues().stream()
+            .noneMatch(issue -> issue.code() == ImportModels.IssueCode.UNKNOWN_RULE));
+  }
+
+  @Test
+  void confirmedRangeCreditsSplitExactlyAsUserConfirmed() throws Exception {
+    var draft =
+        new A1WorkbookImporter()
+            .prepare(
+                detailWorkbook(new String[][] {{"微积分(1-3)", "01014125~127", "核心课程", "16", "第一学年", "课程明细"}}),
+                "cs-general");
+
+    assertEquals(
+        List.of(new BigDecimal("6"), new BigDecimal("6"), new BigDecimal("4")),
+        draft.entries().stream().map(ImportModels.CurriculumEntry::credits).toList());
+    assertTrue(
+        draft.recordedIssues().stream()
+            .noneMatch(issue -> issue.code() == ImportModels.IssueCode.CREDITS_UNSPLIT));
+  }
+
+  @Test
+  void confirmedRangeCreditsThatDoNotMatchWorkbookTotalBlock() throws Exception {
+    var draft =
+        new A1WorkbookImporter()
+            .prepare(
+                detailWorkbook(new String[][] {{"大学物理(1-2)", "01034117~118", "核心课程", "9", "第一学年", "课程明细"}}),
+                "cs-general");
 
     assertFalse(draft.publishable());
     assertTrue(
-        draft.issues().stream()
-            .anyMatch(issue -> issue.code() == ImportModels.IssueCode.UNKNOWN_RULE));
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            new A1WorkbookImporter()
-                .publish(
-                    draft,
-                    ignored -> {
-                      throw new AssertionError("publish must not be called");
-                    }));
+        draft.blockingIssues().stream()
+            .anyMatch(issue -> issue.code() == ImportModels.IssueCode.INVALID_CREDITS));
+  }
+
+  @Test
+  void unconfirmedRangeStaysUnknownCredits() throws Exception {
+    var draft =
+        new A1WorkbookImporter()
+            .prepare(
+                detailWorkbook(new String[][] {{"未知连号课", "01014100~101", "核心课程", "4", "第一学年", "课程明细"}}),
+                "cs-general");
+
+    assertTrue(draft.entries().stream().allMatch(e -> e.credits() == null));
+    assertTrue(
+        draft.recordedIssues().stream()
+            .anyMatch(issue -> issue.code() == ImportModels.IssueCode.CREDITS_UNSPLIT));
   }
 
   @Test
@@ -196,6 +257,216 @@ class A1WorkbookImporterTest {
         draft.issues().stream()
             .anyMatch(issue -> issue.code() == ImportModels.IssueCode.DUPLICATE_COURSE));
     assertFalse(draft.publishable());
+  }
+
+  @Test
+  void expandsRangeCodeIntoMembersWithUnknownCredits() throws Exception {
+    var draft =
+        new A1WorkbookImporter()
+            .prepare(
+                detailWorkbook(new String[][] {{"微积分(1-3)", "01014125~127", "核心课程", "16", "第一学年", "课程明细"}}),
+                "cs-general");
+
+    assertEquals(
+        List.of("01014125", "01014126", "01014127"),
+        draft.entries().stream().map(ImportModels.CurriculumEntry::courseCode).toList());
+    // 已确认的逐门拆分：微积分(1-3) 按用户确认为 6+6+4，不能每门都记 16。
+    assertEquals(
+        List.of(new BigDecimal("6"), new BigDecimal("6"), new BigDecimal("4")),
+        draft.entries().stream().map(ImportModels.CurriculumEntry::credits).toList());
+    // 同一工作簿行展开出的多门课必须有各自的 SourceReference 主键。
+    assertEquals(3, draft.entries().stream().map(e -> e.source().refId()).distinct().count());
+    assertTrue(draft.publishable(), draft.blockingIssues().toString());
+    assertTrue(
+        draft.recordedIssues().stream()
+            .anyMatch(i -> i.code() == ImportModels.IssueCode.COURSE_CODE_RANGE_EXPANDED));
+    assertTrue(
+        draft.recordedIssues().stream()
+            .noneMatch(i -> i.code() == ImportModels.IssueCode.CREDITS_UNSPLIT));
+  }
+
+  @Test
+  void rejectsMalformedRangeSpans() {
+    assertEquals(List.of("08305140", "08305141"), A1WorkbookImporter.expandRange("08305140~141"));
+    assertEquals(
+        List.of("0830A030", "0830A031"), A1WorkbookImporter.expandRange("0830A030~031"));
+    assertNull(A1WorkbookImporter.expandRange("01014127~125"));
+    assertNull(A1WorkbookImporter.expandRange("01014125~1270"));
+    assertNull(A1WorkbookImporter.expandRange("01014100~199"));
+    assertNull(A1WorkbookImporter.expandRange("~127"));
+  }
+
+  @Test
+  void keepsEveryPlaceholderCourseAndMarksCodesPending() throws Exception {
+    var draft =
+        new A1WorkbookImporter()
+            .prepare(
+                detailWorkbook(new String[][] {
+                  {"体育1", "008532xx", "公共基础课", "1", "第一学年 第1学期", "课程明细"},
+                  {"体育2", "008532xx", "公共基础课", "1", "第一学年 第2学期", "课程明细"},
+                  {"体育3", "008532xx", "公共基础课", "1", "第一学年 第3学期", "课程明细"}
+                }),
+                "cs-general");
+
+    assertEquals(
+        List.of("体育1", "体育2", "体育3"),
+        draft.entries().stream().map(ImportModels.CurriculumEntry::name).toList());
+    assertTrue(draft.entries().stream().allMatch(e -> "008532xx".equals(e.courseCode())));
+    assertTrue(draft.publishable(), draft.blockingIssues().toString());
+    assertEquals(
+        3,
+        draft.recordedIssues().stream()
+            .filter(i -> i.code() == ImportModels.IssueCode.COURSE_CODE_PENDING)
+            .count());
+  }
+
+  @Test
+  void exactDuplicatePlaceholderRowIsStillBlocked() throws Exception {
+    var draft =
+        new A1WorkbookImporter()
+            .prepare(
+                detailWorkbook(new String[][] {
+                  {"体育1", "008532xx", "公共基础课", "1", "第一学年 第1学期", "课程明细"},
+                  {"体育1", "008532xx", "公共基础课", "1", "第一学年 第1学期", "课程明细"}
+                }),
+                "cs-general");
+
+    assertFalse(draft.publishable());
+    assertTrue(
+        draft.blockingIssues().stream()
+            .anyMatch(i -> i.code() == ImportModels.IssueCode.DUPLICATE_COURSE));
+  }
+
+  @Test
+  void structuralErrorsStillBlockWhenCodesArePlaceholders() throws Exception {
+    var badCredits =
+        new A1WorkbookImporter()
+            .prepare(
+                detailWorkbook(new String[][] {
+                  {"体育1", "008532xx", "公共基础课", "一", "第一学年 第1学期", "课程明细"}
+                }),
+                "cs-general");
+    assertFalse(badCredits.publishable());
+    assertTrue(
+        badCredits.blockingIssues().stream()
+            .anyMatch(i -> i.code() == ImportModels.IssueCode.INVALID_CREDITS));
+
+    var missingCategory =
+        new A1WorkbookImporter()
+            .prepare(
+                detailWorkbook(new String[][] {
+                  {"体育2", "008532xx", "", "1", "第一学年 第2学期", "课程明细"}
+                }),
+                "cs-general");
+    assertFalse(missingCategory.publishable());
+    assertTrue(
+        missingCategory.blockingIssues().stream()
+            .anyMatch(i -> i.code() == ImportModels.IssueCode.INVALID_ROW));
+  }
+
+  @Test
+  void groupRequirementRowIsRecordedAndNotStoredAsCourse() throws Exception {
+    var draft =
+        new A1WorkbookImporter()
+            .prepare(
+                detailWorkbook(new String[][] {
+                  {"通识课课程组（具体选修课见附表）", "", "通识课", "12", "", "课程组/要求行（非单门课程）"},
+                  {"形势与政策", "16583109", "公共基础课", "1", "", "课程明细"}
+                }),
+                "cs-general");
+
+    assertEquals(1, draft.entries().size());
+    assertEquals("16583109", draft.entries().getFirst().courseCode());
+    assertTrue(draft.publishable(), draft.blockingIssues().toString());
+    assertTrue(
+        draft.recordedIssues().stream()
+            .anyMatch(i -> i.code() == ImportModels.IssueCode.GROUP_REQUIREMENT_ROW));
+  }
+
+  /**
+   * 合成一个只含一段课程明细的工作簿（计科学页签）。每个课程行为
+   * {名称, 课程号, 类别, 学分文本, 建议学期, 记录性质}。
+   */
+  private Path detailWorkbook(String[][] courseRows) throws Exception {
+    Path path = tempDir.resolve("detail-" + System.nanoTime() + ".xlsx");
+    try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+      var sheet = workbook.createSheet("计科学");
+      sheet.createRow(0).createCell(0).setCellValue("CoursePilot｜2024级培养计划课程清单｜计科学");
+      sheet.createRow(4).createCell(0).setCellValue("一、各专业课程类别学分要求");
+      var requirementHeader = sheet.createRow(5);
+      requirementHeader.createCell(0).setCellValue("专业路径");
+      requirementHeader.createCell(1).setCellValue("课程类别");
+      requirementHeader.createCell(2).setCellValue("要求学分");
+      requirementHeader.createCell(3).setCellValue("原表学分文本");
+      requirementHeader.createCell(4).setCellValue("原表位置");
+      var category = sheet.createRow(6);
+      category.createCell(0).setCellValue("计科学");
+      category.createCell(1).setCellValue("核心课程");
+      category.createCell(2).setCellValue(3);
+      category.createCell(3).setCellValue("3");
+      category.createCell(4).setCellValue("source!A1");
+      var total = sheet.createRow(7);
+      total.createCell(0).setCellValue("计科学");
+      total.createCell(1).setCellValue("总计");
+      total.createCell(2).setCellValue(3);
+      total.createCell(3).setCellValue("3");
+      total.createCell(4).setCellValue("source!A1");
+
+      sheet.createRow(15).createCell(0).setCellValue("二、总体课程与课程组明细");
+      var detailHeader = sheet.createRow(16);
+      detailHeader.createCell(0).setCellValue("专业路径");
+      detailHeader.createCell(1).setCellValue("课程名称/课程组");
+      detailHeader.createCell(2).setCellValue("课程编号（原文或规则）");
+      detailHeader.createCell(3).setCellValue("课程类别");
+      detailHeader.createCell(4).setCellValue("学分");
+      detailHeader.createCell(5).setCellValue("建议修读学期");
+      detailHeader.createCell(6).setCellValue("原表位置");
+      detailHeader.createCell(8).setCellValue("记录性质");
+      for (int i = 0; i < courseRows.length; i++) {
+        String[] values = courseRows[i];
+        var row = sheet.createRow(17 + i);
+        row.createCell(0).setCellValue("计科学");
+        row.createCell(1).setCellValue(values[0]);
+        row.createCell(2).setCellValue(values[1]);
+        row.createCell(3).setCellValue(values[2]);
+        row.createCell(4).setCellValue(values[3]);
+        row.createCell(5).setCellValue(values[4]);
+        row.createCell(6).setCellValue("source!B" + (i + 2));
+        row.createCell(8).setCellValue(values[5]);
+      }
+      int ruleHeaderRow = 17 + courseRows.length + 1;
+      sheet.createRow(ruleHeaderRow - 1).createCell(0).setCellValue("三、备注：无法解释或需确认的规则");
+      var ruleHeader = sheet.createRow(ruleHeaderRow);
+      ruleHeader.createCell(1).setCellValue("原表位置");
+      ruleHeader.createCell(2).setCellValue("涉及对象/规则");
+      ruleHeader.createCell(3).setCellValue("原表说明或待核问题");
+      ruleHeader.createCell(4).setCellValue("当前解释与处理状态");
+      ruleHeader.createCell(5).setCellValue("来源类型");
+      try (OutputStream out = Files.newOutputStream(path)) {
+        workbook.write(out);
+      }
+    }
+    return path;
+  }
+
+  private Path workbookWithRule(String sourceType, String subject) throws Exception {
+    Path path = workbook(false);
+    try (var input = Files.newInputStream(path);
+        XSSFWorkbook workbook = new XSSFWorkbook(input)) {
+      var sheet = workbook.getSheet("计科学");
+      var rule = sheet.createRow(21);
+      rule.createCell(0).setCellValue("计科学");
+      rule.createCell(1).setCellValue("source!A3");
+      rule.createCell(2).setCellValue(subject);
+      rule.createCell(3).setCellValue("按负责人要求删除");
+      rule.createCell(4).setCellValue("冲突待确认");
+      rule.createCell(5).setCellValue(sourceType);
+      Path modified = tempDir.resolve("rule-" + System.nanoTime() + ".xlsx");
+      try (OutputStream output = Files.newOutputStream(modified)) {
+        workbook.write(output);
+      }
+      return modified;
+    }
   }
 
   private Path workbook(boolean withUnknownRule) throws Exception {
