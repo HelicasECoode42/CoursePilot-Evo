@@ -12,16 +12,17 @@ Java 21、Spring Boot（已引入 Web、Spring Data JPA、Validation；源码中
 
 ## 本地启动
 
-需要 JDK 21 或更高。先设服务密钥，再起服务：
+需要 JDK 21 或更高。先设服务密钥，再起服务。密钥不写进仓库，取仓库外的本地配置（与网关 `CP_SERVICE_KEY` 同值）：
 
 ```bash
-# macOS / Linux（zsh、bash）
-COURSEPILOT_SERVICE_KEY=local-dev-key ./mvnw spring-boot:run
+# macOS / Linux（zsh、bash）：只读取，不打印
+export COURSEPILOT_SERVICE_KEY="$(sed -n 's/^CP_SERVICE_KEY=//p' ../data/private/stack.env)"
+./mvnw spring-boot:run
 ```
 
 ```powershell
 # Windows PowerShell —— 上面那种「变量=值 命令」的写法在 PowerShell 里不认
-$env:COURSEPILOT_SERVICE_KEY = "local-dev-key"
+$env:COURSEPILOT_SERVICE_KEY = "<从 data/private/stack.env 复制 CP_SERVICE_KEY 的值>"
 .\mvnw.cmd spring-boot:run
 ```
 
@@ -31,7 +32,7 @@ $env:COURSEPILOT_SERVICE_KEY = "local-dev-key"
 与它一致（契约 `java.openapi.json` 的 `security: serviceKey`），**没配时整个
 `/api/v1` 一律返回 503 而不是放行**——没有密钥就分辨不出调用方，放行等于默认开放。
 密钥只从环境变量读，仓库里不放默认值（`../docs/04-infrastructure-workflow.md`）。
-`local-dev-key` 只是本地占位，别写进代码、配置文件或提交信息。
+旧的公开示例值 `local-dev-key` 已出现在 git 历史中，已作废，不要再用；也不要把任何真实密钥写进代码、配置文件或提交信息。
 
 ### 本地 synthetic 培养计划导入
 
@@ -40,7 +41,6 @@ $env:COURSEPILOT_SERVICE_KEY = "local-dev-key"
 `sourceKind` 默认为 `SYNTHETIC`。对经授权且具有来源记录的 A1 培养计划工作簿，可显式传 `sourceKind=CURRICULUM_FILE`；Java 会沿用相同的解析、校验与事务发布流程创建独立快照，并标记为 `CURRICULUM_FILE/UNVERIFIED`。该选项不接受客户端设置 `sourceValidation`，也不会把快照提升为 `VERIFIED`。同一工作簿再次导入会复用该来源类型对应的快照；已有 `SYNTHETIC` 快照保留不变。
 
 ```bash
-COURSEPILOT_SERVICE_KEY=local-dev-key \
 COURSEPILOT_ADMIN_KEY=local-admin-key \
 COURSEPILOT_SYNTHETIC_IMPORT_ENABLED=true \
 ./mvnw spring-boot:run
@@ -50,7 +50,7 @@ COURSEPILOT_SYNTHETIC_IMPORT_ENABLED=true \
 
 ```bash
 curl -X POST 'http://127.0.0.1:8081/api/v1/curriculum-snapshots/import' \
-  -H 'X-Service-Key: local-dev-key' \
+  -H "X-Service-Key: $COURSEPILOT_SERVICE_KEY" \
   -H 'X-Admin-Key: local-admin-key' \
   -H 'X-Subject-Id: teacher:demo' \
   -H 'X-Request-Id: curriculum-import-1' \
@@ -66,7 +66,7 @@ curl -X POST 'http://127.0.0.1:8081/api/v1/curriculum-snapshots/import' \
 是 `X-Service-Key` 已经证明调用方是已认证的 Python 服务（`../docs/16-engineering-and-debugging.md`）：
 
 ```bash
-curl -H 'X-Service-Key: local-dev-key' \
+curl -H "X-Service-Key: $COURSEPILOT_SERVICE_KEY" \
      -H 'X-Subject-Id: S001' \
      -H 'X-Request-Id: req-1' \
      http://127.0.0.1:8081/api/v1/courses
@@ -86,11 +86,10 @@ python3 java-environment/scripts/prepare_review_import.py \
   --output data/private/a3/review-import/delivery/review-import-faculty-history-with-display-names.json
 ```
 
-对 `review-import-winter.json` 重复运行并更换输入、输出文件名。本地启动服务时绑定 loopback 地址，
+对 `review-import-winter.json` 重复运行并更换输入、输出文件名。服务默认绑定 `127.0.0.1`（可用 `COURSEPILOT_BIND_ADDRESS` 覆盖），
 分别对每个不超过 200 条的 JSON 文件调用导入端点；导入需要服务密钥、管理员密钥和主体头：
 
 ```bash
-COURSEPILOT_SERVICE_KEY=local-dev-key \
 COURSEPILOT_ADMIN_KEY=local-admin-key \
 ./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.address=127.0.0.1
 ```
@@ -100,7 +99,7 @@ COURSEPILOT_ADMIN_KEY=local-admin-key \
 ```bash
 curl -X POST 'http://127.0.0.1:8081/api/v1/reviews/import' \
   -H 'Content-Type: application/json' \
-  -H 'X-Service-Key: local-dev-key' \
+  -H "X-Service-Key: $COURSEPILOT_SERVICE_KEY" \
   -H 'X-Admin-Key: local-admin-key' \
   -H 'X-Subject-Id: teacher:local-review-import' \
   -H 'X-Request-Id: review-import-faculty-1' \
@@ -199,7 +198,7 @@ H2 控制台默认关闭——它在同一端口上提供免认证的任意 SQL 
 直接读整张成绩表。临时需要时用命令行参数打开，不要写回仓库：
 
 ```bash
-COURSEPILOT_SERVICE_KEY=local-dev-key ./mvnw spring-boot:run \
+./mvnw spring-boot:run \
   -Dspring-boot.run.jvmArguments="-Dspring.h2.console.enabled=true"
 ```
 
