@@ -25,7 +25,11 @@ coverage/
 benchmark/private/
 benchmark/gold/
 benchmark/held-out/
+benchmark/cases/held-out/
 runs/
+# 本地 H2 数据库文件（Java 核验服务的存储与 trace）：含学业数据，绝不进仓库
+*.mv.db
+*.trace.db
 docs/team/*filled*
 
 # Local editor/session scratch
