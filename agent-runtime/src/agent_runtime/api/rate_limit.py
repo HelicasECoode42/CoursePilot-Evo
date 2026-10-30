@@ -4,13 +4,15 @@
 SessionStore、IdempotencyStore、SessionPlanStore 都会在进程内存里多一条且不会自动清理。
 不限流的话，一个循环就能把内存撑爆，网页对所有人都打不开。
 
-局限（必须知道，不要当成按人限流）：分桶键是 request.client.host。放在反向代理
-后面时它是代理的地址，于是整个限流退化成一个全局配额——所有人共享同一个桶。
-真正的按人限流需要可信的调用方身份，而建会话这一步恰恰还没有身份。
+分桶键见 client_rate_key：默认是直连对端地址。放在同机反向代理（cloudflared、Vite 代理）
+后面时对端总是 127.0.0.1，整个限流会退化成一个全局配额。CP_TRUST_CF_CONNECTING_IP=true
+时，对端是回环地址才改用 CF-Connecting-IP 分桶，这样每个访客才有自己的配额。
+真正的按人限流仍需要可信的调用方身份，而建会话这一步恰恰还没有身份。
 """
 
 from __future__ import annotations
 
+import ipaddress
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -64,3 +66,32 @@ class FixedWindowRateLimiter:
     def tracked_keys(self) -> int:
         """给测试和排查用。"""
         return len(self._events)
+
+
+def client_rate_key(
+    peer_host: str | None,
+    cf_connecting_ip: str | None,
+    *,
+    trust_cf_connecting_ip: bool,
+) -> str:
+    """决定限流分桶用哪个地址。
+
+    - 默认（或未开启信任）：直连对端地址。
+    - 开启信任且对端是回环地址（说明请求来自同机代理）：用 CF-Connecting-IP，但必须是
+      合法 IP 字面量，否则退回对端地址。规范化后再返回，避免同一地址写法不同被拆成两桶。
+    - 从不读取 X-Forwarded-For：它可以被任何客户端伪造。
+    """
+    peer = peer_host or "unknown"
+    if not trust_cf_connecting_ip or not _is_loopback(peer) or cf_connecting_ip is None:
+        return peer
+    try:
+        return str(ipaddress.ip_address(cf_connecting_ip.strip()))
+    except ValueError:
+        return peer
+
+
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False

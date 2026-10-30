@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -70,6 +72,101 @@ def test_build_model_adapter_stays_fake_without_key() -> None:
         max_output_tokens=2000,
     )
     assert adapter.__class__.__name__ == "FakeModelAdapter"
+
+
+def test_shared_model_transport_caps_generate_and_chat_at_30_seconds() -> None:
+    observed_timeouts: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_timeouts.append(request.extensions["timeout"]["read"])
+        messages = json.loads(request.content)["messages"]
+        is_chat = "只含以下四个字段" in messages[0]["content"]
+        content = (
+            '{"reply":"回答","question":null,"courses":[],"suggestions":[]}'
+            if is_chat
+            else '{"items":[]}'
+        )
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": content}}]},
+        )
+
+    adapter = HttpModelAdapter(
+        "https://model.test/v1",
+        "test-key",
+        "test-model",
+        0.0,
+        100,
+        transport=httpx.MockTransport(handler),
+    )
+    context = replace(_context(), deadline=datetime.now(UTC) + timedelta(seconds=90))
+    adapter.generate(context=context, messages=[], tool_schemas=[])
+    adapter.generate_chat(context=context, messages=[])
+
+    assert observed_timeouts == [30.0, 30.0]
+
+
+@pytest.mark.parametrize(
+    ("content_factory", "expected_path", "expected_reason"),
+    [
+        (lambda: "private-model-text that is not JSON", "content", "INVALID_JSON"),
+        (
+            lambda: json.dumps(
+                {
+                    "reply": "回答",
+                    "question": None,
+                    "courses": [
+                        {
+                            "courseCode": "CS101",
+                            "reason": "private-model-text" * 51,
+                            "reviewNoteIds": [],
+                        }
+                    ],
+                    "suggestions": [],
+                },
+                ensure_ascii=False,
+            ),
+            "courses[0].reason",
+            "STRING_LENGTH",
+        ),
+    ],
+)
+def test_advice_chat_invalid_output_logs_redacted_field_diagnostics_once(
+    caplog, content_factory, expected_path, expected_reason
+) -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"finish_reason": "stop", "message": {"content": content_factory()}}],
+                "usage": {"prompt_tokens": 23, "completion_tokens": 11},
+            },
+        )
+
+    adapter = HttpModelAdapter(
+        "https://model.test/v1",
+        "test-key",
+        "test-model",
+        0.0,
+        100,
+        transport=httpx.MockTransport(handler),
+    )
+    caplog.set_level(logging.WARNING, logger="agent_runtime.adapters.model_client")
+    with pytest.raises(ModelInvalidOutput) as caught:
+        adapter.generate_chat(context=_context(), messages=[])
+
+    assert calls == 1
+    assert caught.value.input_tokens == 23
+    assert caught.value.output_tokens == 11
+    assert caught.value.diagnostics["request_id"] == "req:demo"
+    assert caught.value.diagnostics["field_path"] == expected_path
+    assert caught.value.diagnostics["reason_code"] == expected_reason
+    assert caught.value.diagnostics["finish_reason"] == "stop"
+    assert "private-model-text" not in caplog.text
 
 
 def test_http_model_parses_json_items() -> None:

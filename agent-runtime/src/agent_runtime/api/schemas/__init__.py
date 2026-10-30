@@ -16,6 +16,7 @@ from .academic import (
     Outcome,
     RecordSourceKind,
 )
+from .advice_chat import AdviceChatAnswer, AdviceChatRequest
 from .answer import (
     Choice,
     Decision,
@@ -88,6 +89,8 @@ from .validation import (
 )
 
 __all__ = [
+    "AdviceChatAnswer",
+    "AdviceChatRequest",
     "AcademicRecord",
     "AcademicRecordInput",
     "AuditItem",
@@ -170,6 +173,8 @@ __all__ = [
 # positive/negative examples against the Python DTOs. ``Envelope`` is generic and
 # intentionally not listed (no example validates it bare).
 SCHEMA_DEFS: dict[str, type[DomainModel]] = {
+    "AdviceChatRequest": AdviceChatRequest,
+    "AdviceChatAnswer": AdviceChatAnswer,
     "SourceRef": SourceRef,
     "Issue": Issue,
     "CompletedCourse": CompletedCourse,

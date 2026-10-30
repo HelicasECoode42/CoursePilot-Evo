@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     session_rate_limit_window_seconds: int = Field(default=300, ge=1)
     max_live_sessions: int = Field(default=10000, ge=1)
     cors_origins: str = "http://127.0.0.1:5173"
+    # 请求体上限（字节）。2 MiB 够最大的合法请求（学校进度 PUT，Java 侧也是 2 MiB）。
+    # 超过返回 413，信封里的 code 仍是 INVALID_INPUT（与 Java 侧一致）。
+    max_body_bytes: int = Field(default=2 * 1024 * 1024, ge=1)
+    # 只有直连对端是回环地址（同机的 cloudflared / Vite 代理）时，才信任 CF-Connecting-IP
+    # 作为建会话限流的分桶键。不信任 X-Forwarded-For。默认关闭：直接暴露时头部可以伪造。
+    trust_cf_connecting_ip: bool = False
 
     # Harness whitelist directory (relative to the agent-runtime module root).
     harness_dir: str = "harness"
@@ -59,6 +65,9 @@ class Settings(BaseSettings):
     session_max_input_tokens: int = Field(default=40000, ge=1)
     session_max_output_tokens: int = Field(default=10000, ge=1)
     max_tracked_sessions: int = Field(default=10000, ge=1)
+    # 进程级每日上限（input 与 output 合计，UTC 日切换）。所有会话共用，挡住多开会话绕过
+    # 每会话上限。默认 1000000，约等于 80 次满额单次运行（每次最多 8000 + 4000）。
+    model_daily_token_cap: int = Field(default=1000000, ge=1)
 
     @property
     def cors_origin_list(self) -> list[str]:

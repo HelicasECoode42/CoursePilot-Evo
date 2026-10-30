@@ -3025,6 +3025,79 @@
           }
         }
       }
+    },
+    "/api/v1/advice/chat": {
+      "post": {
+        "operationId": "adviceChat",
+        "summary": "生成一轮课程建议对话",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./schemas/domain.schema.json#/$defs/AdviceChatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "./schemas/domain.schema.json#/$defs/AdviceChatAnswer"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "会话无效"
+          },
+          "422": {
+            "description": "请求或模型输出无效"
+          },
+          "503": {
+            "description": "依赖不可用"
+          },
+          "504": {
+            "description": "截止时间到达"
+          }
+        }
+      }
     }
   },
   "components": {

@@ -108,5 +108,20 @@
     "file": "session-plan-edit-empty-result.json",
     "definition": "SessionPlanEditResult",
     "valid": true
+  },
+  {
+    "file": "advice-chat-request.json",
+    "definition": "AdviceChatRequest",
+    "valid": true
+  },
+  {
+    "file": "invalid-advice-chat-request-mode.json",
+    "definition": "AdviceChatRequest",
+    "valid": false
+  },
+  {
+    "file": "advice-chat-answer.json",
+    "definition": "AdviceChatAnswer",
+    "valid": true
   }
 ]

@@ -12,11 +12,13 @@ from agent_runtime.adapters.harness_loader import HarnessLoader
 from agent_runtime.adapters.model_client import build_model_adapter
 from agent_runtime.adapters.result_repository import FileResultRepository
 from agent_runtime.adapters.tool_client import ToolClient
+from agent_runtime.api.body_limit import BodySizeLimitMiddleware
 from agent_runtime.api.errors import register_error_handlers
 from agent_runtime.api.idempotency import IdempotencyStore
 from agent_runtime.api.rate_limit import FixedWindowRateLimiter, RateLimit
 from agent_runtime.api.routes import (
     academic_records,
+    advice_chat,
     gateway,
     plan_replacement,
     planning,
@@ -26,6 +28,7 @@ from agent_runtime.api.routes import (
 )
 from agent_runtime.api.session_store import SessionStore
 from agent_runtime.api.settings import Settings, load_settings
+from agent_runtime.application.advice_chat import AdviceChatService
 from agent_runtime.application.budget import Budget, SessionSpendCap, SessionSpendLedger
 from agent_runtime.application.plan_store import SessionPlanStore
 from agent_runtime.application.run_manifest import RunIdentity
@@ -81,6 +84,7 @@ def create_app(
             max_input_tokens=settings.session_max_input_tokens,
             max_output_tokens=settings.session_max_output_tokens,
             max_tracked_sessions=settings.max_tracked_sessions,
+            max_daily_tokens=settings.model_daily_token_cap,
         )
     )
     app.state.runner = runner or PlanningRunner(
@@ -99,7 +103,26 @@ def create_app(
         budget=budget,
         plan_store=app.state.plan_store,
     )
+    app.state.advice_chat = AdviceChatService(
+        tool_client=tool_client,
+        model_adapter=build_model_adapter(
+            model_base_url=settings.model_base_url,
+            model_api_key=settings.model_api_key,
+            model_id=settings.model_id,
+            temperature=settings.temperature,
+            max_output_tokens=settings.max_output_tokens,
+        ),
+        budget=Budget(
+            max_input_tokens=settings.max_input_tokens,
+            max_output_tokens=settings.max_output_tokens,
+            max_tool_calls=min(6, settings.max_tool_calls),
+            max_model_calls=1,
+            deadline_ms=settings.deadline_ms,
+        ),
+    )
 
+    # 请求体大小中间件放在 CORS 里层（后添加的在外层），超限的 413 仍能带上 CORS 头。
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
@@ -116,6 +139,7 @@ def create_app(
     register_error_handlers(app)
     app.include_router(sessions.router)
     app.include_router(planning.router)
+    app.include_router(advice_chat.router)
     app.include_router(plan_replacement.router)
     app.include_router(academic_records.router)
     app.include_router(school_progress.router)

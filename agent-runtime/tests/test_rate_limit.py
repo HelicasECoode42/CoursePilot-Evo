@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from agent_runtime.api.rate_limit import FixedWindowRateLimiter, RateLimit
+from agent_runtime.api.rate_limit import (
+    FixedWindowRateLimiter,
+    RateLimit,
+    client_rate_key,
+)
 
 T0 = datetime(2026, 10, 29, 12, 0, 0, tzinfo=UTC)
 
@@ -76,3 +80,35 @@ def test_expired_keys_are_reclaimed_when_the_table_is_full() -> None:
     # 旧键整桶过期，应被回收，新键放行。
     assert limiter.check_and_record("10.0.0.99", now=later) is True
     assert limiter.tracked_keys() <= 5
+
+
+# --- 分桶键：CF-Connecting-IP 只在显式信任且对端是回环地址时生效 ---------------------
+
+
+def test_default_key_is_the_direct_peer_and_ignores_the_cf_header() -> None:
+    assert client_rate_key("127.0.0.1", "203.0.113.7", trust_cf_connecting_ip=False) == "127.0.0.1"
+
+
+def test_trusted_cf_header_is_used_only_when_the_peer_is_loopback() -> None:
+    assert client_rate_key("127.0.0.1", "203.0.113.7", trust_cf_connecting_ip=True) == "203.0.113.7"
+    assert client_rate_key("::1", "203.0.113.7", trust_cf_connecting_ip=True) == "203.0.113.7"
+    # 对端不是回环：说明是直接连进来的，头部可以伪造，必须忽略。
+    assert (
+        client_rate_key("198.51.100.9", "203.0.113.7", trust_cf_connecting_ip=True)
+        == "198.51.100.9"
+    )
+
+
+def test_invalid_cf_header_falls_back_to_the_peer() -> None:
+    for bad in ["", "not-an-ip", "203.0.113.7, 10.0.0.1", "x" * 500]:
+        assert client_rate_key("127.0.0.1", bad, trust_cf_connecting_ip=True) == "127.0.0.1"
+
+
+def test_missing_cf_header_falls_back_to_the_peer() -> None:
+    assert client_rate_key("127.0.0.1", None, trust_cf_connecting_ip=True) == "127.0.0.1"
+
+
+def test_cf_header_is_normalised_so_spellings_share_one_bucket() -> None:
+    assert (
+        client_rate_key("127.0.0.1", " 2001:DB8::1 ", trust_cf_connecting_ip=True) == "2001:db8::1"
+    )

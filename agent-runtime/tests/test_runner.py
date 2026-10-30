@@ -16,7 +16,7 @@ from agent_runtime.adapters.model_client import (
     ModelTimeout,
 )
 from agent_runtime.adapters.result_repository import FileResultRepository
-from agent_runtime.adapters.tool_client import ToolClient, ToolUnavailable
+from agent_runtime.adapters.tool_client import ToolClient, ToolRejected, ToolUnavailable
 from agent_runtime.api.schemas import (
     AuditResult,
     CompletedCourse,
@@ -27,10 +27,14 @@ from agent_runtime.api.schemas import (
     PlanValidation,
     ReviewNote,
     RunManifest,
+    SchoolProgressImportResult,
+    SchoolProgressReceipt,
+    SchoolProgressSnapshot,
     SoftPreference,
     TeacherPreference,
 )
 from agent_runtime.api.schemas.answer import CourseRationale, ExplorationDirection
+from agent_runtime.api.schemas.school_progress import SchoolProgressNode
 from agent_runtime.application.budget import Budget, BudgetExceeded
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.runner import PlanningRunner
@@ -79,8 +83,8 @@ def test_run_returns_course_layer_recommendations_on_w2_fake_loop(
     answer = _runner().run(planning_request, _context(planning_request))
     assert answer.decision == "RECOMMENDATIONS"
     assert len(answer.recommendations) == 1
-    # 6 次 = getAcademicRecord + listCourses + listTeacherCourseOptions + auditRequirements
-    # + searchReviews（意图含 GPA 等动机时查一门）+ validatePlan，正好用满
+    # 6 次 = getSchoolProgress（W2 返回 404）+ getAcademicRecord + listCourses
+    # + listTeacherCourseOptions + searchReviews（意图含 GPA 时查一门）+ validatePlan
     # docs/04 第 3 节的 maxToolCalls=6。
     assert answer.usage.toolCalls == 6
     recommendation = answer.recommendations[0]
@@ -91,6 +95,166 @@ def test_run_returns_course_layer_recommendations_on_w2_fake_loop(
     assert any(issue.code == "FAKE_TOOL" for issue in answer.unknowns)
     assert any(issue.code == "FAKE_MODEL" for issue in answer.unknowns)
     assert all(issue.code != "FAKE_MODEL" for issue in recommendation.verification.unknownChecks)
+
+
+def test_school_progress_enters_model_payload_without_replacing_audit_unknowns(
+    planning_request: PlanningRequest,
+) -> None:
+    class Tools(TypedFakeToolClient):
+        def call(self, tool, dto, context, *, params=None, idempotency_key=None):
+            if tool == "getSchoolProgress":
+                record = super().call(
+                    "getAcademicRecord", None, context, params={"recordId": "record:demo"}
+                )
+                record = record.model_copy(
+                    update={
+                        "completedCourses": [
+                            CompletedCourse(
+                                courseCode="CS101",
+                                outcome="UNKNOWN",
+                                earnedCredits=None,
+                                completedTerm=None,
+                            )
+                        ]
+                    }
+                )
+                return SchoolProgressImportResult(
+                    receipt=SchoolProgressReceipt(
+                        schoolProgressId="school:demo",
+                        contentHash="a" * 64,
+                        importedAt=datetime(2026, 10, 30, tzinfo=UTC),
+                        reused=True,
+                    ),
+                    snapshot=SchoolProgressSnapshot(
+                        format="coursepilot-shu-academic-progress",
+                        version=1,
+                        capturedAt=datetime(2026, 10, 29, tzinfo=UTC),
+                        source="CURRICULUM_FILE / UNVERIFIED",
+                        nodes=[
+                            SchoolProgressNode(
+                                nodeId="node:elective",
+                                parentId=None,
+                                schoolNodeId="98",
+                                leaf=True,
+                                name="专业选修课",
+                                requiredCredits=Decimal("24"),
+                                earnedCredits=Decimal("9"),
+                                remainingCredits=Decimal("15"),
+                            )
+                        ],
+                        courses=[],
+                    ),
+                    academicRecord=record,
+                )
+            return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
+
+    class Model:
+        messages = []
+
+        def generate(self, *, context, messages, tool_schemas):
+            self.messages = messages
+            return ModelReply(items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
+
+    model = Model()
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    answer = PlanningRunner(
+        tool_client=Tools(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=model,
+    ).run(planning_request, _context(planning_request))
+
+    payload = json.loads(model.messages[-1]["content"].split("AVAILABLE_FACTS:", 1)[-1])
+    assert payload["schoolProgress"]["availability"] == "AVAILABLE"
+    assert payload["schoolProgress"]["progress"]["source"] == "CURRICULUM_FILE / UNVERIFIED"
+    assert payload["schoolProgress"]["progress"]["nodes"][0]["remainingCredits"] == "15"
+    assert payload["academicRecordOutcomeUnknownCourseCodes"] == ["CS101"]
+    assert any(issue.code == "FAKE_TOOL" for issue in answer.unknowns)
+    assert answer.usage.toolCalls == 6
+
+
+@pytest.mark.parametrize(
+    ("mismatch", "expected_code"),
+    [
+        ("record", "SCHOOL_PROGRESS_RECORD_MISMATCH"),
+        ("snapshot", "SCHOOL_PROGRESS_SNAPSHOT_MISMATCH"),
+    ],
+)
+def test_mismatched_school_progress_is_not_added_to_model_facts(
+    planning_request: PlanningRequest, mismatch: str, expected_code: str
+) -> None:
+    class Tools(TypedFakeToolClient):
+        def __init__(self):
+            self.record_reads = 0
+
+        def call(self, tool, dto, context, *, params=None, idempotency_key=None):
+            if tool == "getSchoolProgress":
+                record = super().call(
+                    "getAcademicRecord", None, context, params={"recordId": "record:demo"}
+                )
+                if mismatch == "record":
+                    record = record.model_copy(update={"academicRecordId": "record:old"})
+                else:
+                    record = record.model_copy(update={"curriculumSnapshotId": "curr:old"})
+                return SchoolProgressImportResult(
+                    receipt=SchoolProgressReceipt(
+                        schoolProgressId="school:old",
+                        contentHash="c" * 64,
+                        importedAt=datetime(2026, 10, 30, tzinfo=UTC),
+                        reused=True,
+                    ),
+                    snapshot=SchoolProgressSnapshot(
+                        format="coursepilot-shu-academic-progress",
+                        version=1,
+                        capturedAt=datetime(2025, 10, 29, tzinfo=UTC),
+                        source="OLD_SNAPSHOT",
+                        nodes=[
+                            SchoolProgressNode(
+                                nodeId="node:old",
+                                parentId=None,
+                                schoolNodeId="old",
+                                leaf=True,
+                                name="旧培养方案缺口",
+                                requiredCredits=Decimal("99"),
+                                earnedCredits=Decimal("0"),
+                                remainingCredits=Decimal("99"),
+                            )
+                        ],
+                        courses=[],
+                    ),
+                    academicRecord=record,
+                )
+            if tool == "getAcademicRecord":
+                self.record_reads += 1
+            return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
+
+    class Model:
+        messages = []
+
+        def generate(self, *, context, messages, tool_schemas):
+            self.messages = messages
+            return ModelReply(items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
+
+    tools = Tools()
+    model = Model()
+    planning_request.intent.motives = ["GPA"]
+    planning_request.intent.priorityOrder = ["GPA"]
+    answer = PlanningRunner(
+        tool_client=tools,
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=model,
+    ).run(planning_request, _context(planning_request))
+
+    payload = json.loads(model.messages[-1]["content"].split("AVAILABLE_FACTS:", 1)[-1])
+    assert payload["schoolProgress"] == {
+        "availability": "MISMATCH",
+        "issueCode": expected_code,
+        "progress": None,
+        "uncertainCourseCodes": [],
+        "inProgressCourseCodes": [],
+    }
+    assert tools.record_reads == 1
+    assert any(issue.code == "FAKE_TOOL" for issue in answer.unknowns)
 
 
 @pytest.mark.parametrize("outcome", ["PASSED", "IN_PROGRESS"])
@@ -408,6 +572,8 @@ def test_empty_candidate_list_is_unable_to_verify(planning_request: PlanningRequ
 def test_empty_tool_catalog_is_unable_to_verify(planning_request: PlanningRequest) -> None:
     class EmptyCatalog(TypedFakeToolClient):
         def call(self, tool, dto, context, *, params=None):
+            if tool == "getSchoolProgress":
+                raise ToolRejected(tool, 404, "SCHOOL_PROGRESS_UNAVAILABLE", "fixture has none")
             if tool == "getAcademicRecord":
                 return super().call(tool, dto, context, params=params)
             del context, params
@@ -444,6 +610,8 @@ def test_fake_model_marker_does_not_rewrite_valid_verdict(
 ) -> None:
     class ValidJava(TypedFakeToolClient):
         def call(self, tool, dto, context, *, params=None):
+            if tool == "getSchoolProgress":
+                raise ToolRejected(tool, 404, "SCHOOL_PROGRESS_UNAVAILABLE", "fixture has none")
             if tool == "getAcademicRecord":
                 return super().call(tool, dto, context, params=params)
             del context, params
@@ -463,7 +631,7 @@ def test_fake_model_marker_does_not_rewrite_valid_verdict(
                         courseCode="CS101",
                         name="程序设计基础",
                         credits=Decimal("4.00"),
-                        category="必修",
+                        category="专业选修课",
                         sourceRefIds=["source:demo"],
                     )
                 ]
@@ -532,7 +700,9 @@ def test_model_reasons_and_exploration_are_returned(planning_request: PlanningRe
 
     planning_request.intent.motives = ["CAREER"]
     planning_request.intent.priorityOrder = ["CAREER"]
-    answer = _runner(Model()).run(planning_request, _context(planning_request))
+    answer = _runner_with(_RecordingTools(), Model()).run(
+        planning_request, _context(planning_request)
+    )
     assert answer.recommendations[0].courseRationales[0].reason == "适合学习基础"
     rationale = answer.recommendations[0].courseRationales[0]
     assert rationale.courseSourceRefIds == ["source:fake-w2"]
@@ -565,7 +735,9 @@ def test_runner_generates_factual_rationale_for_every_recommended_course(
 
     planning_request.intent.motives = ["CAREER"]
     planning_request.intent.priorityOrder = ["CAREER"]
-    answer = _runner(Model()).run(planning_request, _context(planning_request))
+    answer = _runner_with(_RecordingTools(), Model()).run(
+        planning_request, _context(planning_request)
+    )
     rationales = answer.recommendations[0].courseRationales
     assert {rationale.courseCode for rationale in rationales} == {"CS101", "MATH201"}
     assert all(rationale.courseSourceRefIds == ["source:fake-w2"] for rationale in rationales)
@@ -592,7 +764,7 @@ def test_runner_returns_server_derived_review_source_for_cited_evidence(
         sourceRefId="review-source:cs101:line-8",
     )
 
-    class Tools(TypedFakeToolClient):
+    class Tools(_RecordingTools):
         def call(self, tool, dto, context, *, params=None, idempotency_key=None):
             if tool == "searchReviews":
                 return [note]
@@ -739,6 +911,38 @@ class _RecordingTools(TypedFakeToolClient):
 
     def call(self, tool, dto, context, *, params=None, idempotency_key=None):
         self.tools.append(tool)
+        if tool == "getSchoolProgress":
+            record = super().call(
+                "getAcademicRecord", None, context, params={"recordId": "record:demo"}
+            )
+            return SchoolProgressImportResult(
+                receipt=SchoolProgressReceipt(
+                    schoolProgressId="school:test",
+                    contentHash="b" * 64,
+                    importedAt=datetime(2026, 10, 30, tzinfo=UTC),
+                    reused=True,
+                ),
+                snapshot=SchoolProgressSnapshot(
+                    format="coursepilot-shu-academic-progress",
+                    version=1,
+                    capturedAt=datetime(2026, 10, 29, tzinfo=UTC),
+                    source="TEST_FIXTURE",
+                    nodes=[
+                        SchoolProgressNode(
+                            nodeId="node:test",
+                            parentId=None,
+                            schoolNodeId="test",
+                            leaf=True,
+                            name="专业选修课",
+                            requiredCredits=Decimal("24"),
+                            earnedCredits=Decimal("9"),
+                            remainingCredits=Decimal("15"),
+                        )
+                    ],
+                    courses=[],
+                ),
+                academicRecord=record,
+            )
         return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
 
 
@@ -795,28 +999,28 @@ def test_course_candidates_prioritize_interest_and_omit_ambiguous_codes(
                         courseCode="DUP",
                         name="体育一",
                         credits=1,
-                        category="公共",
+                        category="公共基础课",
                         sourceRefIds=["s:1"],
                     ),
                     Course(
                         courseCode="DUP",
                         name="体育二",
                         credits=1,
-                        category="公共",
+                        category="公共基础课",
                         sourceRefIds=["s:2"],
                     ),
                     Course(
                         courseCode="AI101",
                         name="人工智能导论",
                         credits=3,
-                        category="选修",
+                        category="专业选修课",
                         sourceRefIds=["s:3"],
                     ),
                     Course(
                         courseCode="A101",
                         name="普通课程",
                         credits=3,
-                        category="选修",
+                        category="专业选修课",
                         sourceRefIds=["s:4"],
                     ),
                 ]

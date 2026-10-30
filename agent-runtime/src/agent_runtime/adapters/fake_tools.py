@@ -26,14 +26,14 @@ class TypedFakeToolClient:
             courseCode="CS101",
             name="程序设计基础（演示）",
             credits=Decimal("4.00"),
-            category="必修",
+            category="专业选修课",
             sourceRefIds=["source:fake-w2"],
         ),
         Course(
             courseCode="MATH201",
             name="离散数学（演示）",
             credits=Decimal("3.00"),
-            category="必修",
+            category="高年级研讨课",
             sourceRefIds=["source:fake-w2"],
         ),
     )
@@ -110,6 +110,13 @@ class TypedFakeToolClient:
                 transcriptComplete=False,
                 sourceKind="SYNTHETIC",
                 createdAt=datetime.now(UTC),
+            )
+        if tool == "getSchoolProgress":
+            raise ToolRejected(
+                tool,
+                404,
+                "SCHOOL_PROGRESS_UNAVAILABLE",
+                "W2 假工具未提供学校进度快照",
             )
         if tool in {
             "listCurricula",

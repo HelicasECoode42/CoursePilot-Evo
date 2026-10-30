@@ -15,7 +15,7 @@ from agent_runtime.adapters.model_client import (
     ModelTimeout,
     ModelUpstreamError,
 )
-from agent_runtime.adapters.tool_client import ToolPage, ToolUnavailable
+from agent_runtime.adapters.tool_client import ToolPage, ToolRejected, ToolUnavailable
 from agent_runtime.api.app import create_app
 from agent_runtime.api.schemas import AcademicRecord, AuditItem, AuditResult, PlanningRequest
 from agent_runtime.api.settings import Settings, load_settings
@@ -69,6 +69,13 @@ class FakeToolClient:
                 transcriptComplete=False,
                 sourceKind="SYNTHETIC",
                 createdAt=datetime.now(UTC),
+            )
+        if tool == "getSchoolProgress":
+            raise ToolRejected(
+                tool,
+                404,
+                "SCHOOL_PROGRESS_UNAVAILABLE",
+                "测试假客户端未提供学校进度快照",
             )
         if tool in {
             "listCurricula",
@@ -614,3 +621,16 @@ def test_gateway_offering_snapshots_route_with_fake_tools() -> None:
     )
     assert response.status_code == 200
     assert response.json()["data"] == {"items": []}
+
+
+def test_admin_key_comparison_rejects_non_ascii_without_crashing() -> None:
+    """compare_digest 对 str 只接受 ASCII；按字节比较后，非 ASCII 应返回 403 而不是 500。"""
+    client = TestClient(create_app(Settings(admin_key="secret")))
+    session = client.post("/api/v1/sessions").json()["data"]
+    headers = {
+        "Authorization": f"Bearer {session['sessionToken']}",
+        # httpx 的 str 头部只接受 ASCII，这里直接以 latin-1 字节发送非 ASCII 值。
+        "X-Admin-Key": "sécret".encode("latin-1"),
+    }
+    response = client.get("/api/v1/reports/runs/run:demo", headers=headers)
+    assert response.status_code == 403

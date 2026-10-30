@@ -3097,6 +3097,513 @@
       ],
       "title": "SchoolProgressImportResult",
       "type": "object"
+    },
+    "AdviceChatMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "enum": [
+            "user",
+            "assistant"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 3000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "text"
+      ],
+      "title": "AdviceChatMessage",
+      "type": "object"
+    },
+    "AdviceChatRequest": {
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "curriculumSnapshotId",
+        "academicRecordId",
+        "mode",
+        "message",
+        "history",
+        "interestText",
+        "selectedCourseCodes"
+      ],
+      "type": "object",
+      "title": "AdviceChatRequest",
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "curriculumSnapshotId": {
+          "maxLength": 120,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "title": "Curriculumsnapshotid",
+          "type": "string"
+        },
+        "academicRecordId": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Academicrecordid"
+        },
+        "mode": {
+          "enum": [
+            "REAL",
+            "SIMULATION"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/$defs/AdviceChatMessage"
+          },
+          "maxItems": 8,
+          "title": "History",
+          "type": "array"
+        },
+        "interestText": {
+          "maxLength": 1000,
+          "title": "Interesttext",
+          "type": "string"
+        },
+        "selectedCourseCodes": {
+          "items": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Selectedcoursecodes",
+          "type": "array"
+        },
+        "preferredCourseCodes": {
+          "items": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Preferredcoursecodes",
+          "type": "array",
+          "default": []
+        }
+      }
+    },
+    "AdviceChatCourse": {
+      "additionalProperties": false,
+      "properties": {
+        "courseCode": {
+          "maxLength": 120,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "title": "Coursecode",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "credits": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ],
+              "ge": 0,
+              "le": 1000,
+              "multiple_of": "0.01"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Credits"
+        },
+        "category": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Category",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        },
+        "reviewNoteIds": {
+          "items": {
+            "maxLength": 120,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Reviewnoteids",
+          "type": "array"
+        },
+        "reviews": {
+          "items": {
+            "$ref": "#/$defs/ReviewNote"
+          },
+          "maxItems": 10,
+          "title": "Reviews",
+          "type": "array"
+        },
+        "reviewStatus": {
+          "enum": [
+            "AVAILABLE",
+            "NONE",
+            "NOT_QUERIED",
+            "UNKNOWN"
+          ],
+          "title": "Reviewstatus",
+          "type": "string"
+        }
+      },
+      "required": [
+        "courseCode",
+        "name",
+        "credits",
+        "category",
+        "reason",
+        "reviewNoteIds",
+        "reviews",
+        "reviewStatus"
+      ],
+      "title": "AdviceChatCourse",
+      "type": "object"
+    },
+    "AdviceChatSuggestion": {
+      "additionalProperties": false,
+      "properties": {
+        "suggestionId": {
+          "maxLength": 120,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "title": "Suggestionid",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "INTEREST",
+            "SELECT_COURSE",
+            "PREFER_COURSE"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "suggestionId",
+        "kind",
+        "label",
+        "value"
+      ],
+      "title": "AdviceChatSuggestion",
+      "type": "object"
+    },
+    "AdviceSchoolProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "capturedAt": {
+          "title": "Capturedat",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/AdviceSchoolProgressNode"
+          },
+          "maxItems": 1000,
+          "title": "Nodes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "capturedAt",
+        "source",
+        "nodes"
+      ],
+      "title": "AdviceSchoolProgress",
+      "type": "object"
+    },
+    "AdviceSchoolProgressNode": {
+      "additionalProperties": false,
+      "properties": {
+        "nodeId": {
+          "maxLength": 120,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "title": "Nodeid",
+          "type": "string"
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parentid"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "requiredCredits": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ],
+              "ge": 0,
+              "le": 1000,
+              "multiple_of": "0.01"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Requiredcredits"
+        },
+        "earnedCredits": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ],
+              "ge": 0,
+              "le": 1000,
+              "multiple_of": "0.01"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Earnedcredits"
+        },
+        "remainingCredits": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ],
+              "ge": 0,
+              "le": 1000,
+              "multiple_of": "0.01"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Remainingcredits"
+        }
+      },
+      "required": [
+        "nodeId",
+        "parentId",
+        "name",
+        "requiredCredits",
+        "earnedCredits",
+        "remainingCredits"
+      ],
+      "title": "AdviceSchoolProgressNode",
+      "type": "object"
+    },
+    "Usage": {
+      "additionalProperties": false,
+      "properties": {
+        "inputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Inputtokens"
+        },
+        "outputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Outputtokens"
+        },
+        "toolCalls": {
+          "maximum": 6,
+          "minimum": 0,
+          "title": "Toolcalls",
+          "type": "integer"
+        },
+        "elapsedMs": {
+          "minimum": 0,
+          "title": "Elapsedms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "inputTokens",
+        "outputTokens",
+        "toolCalls",
+        "elapsedMs"
+      ],
+      "title": "Usage",
+      "type": "object"
+    },
+    "AdviceChatAnswer": {
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "reply",
+        "question",
+        "courses",
+        "suggestions",
+        "schoolProgress",
+        "unknowns",
+        "usage"
+      ],
+      "type": "object",
+      "title": "AdviceChatAnswer",
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "reply": {
+          "maxLength": 3000,
+          "minLength": 1,
+          "title": "Reply",
+          "type": "string"
+        },
+        "question": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Question"
+        },
+        "courses": {
+          "items": {
+            "$ref": "#/$defs/AdviceChatCourse"
+          },
+          "maxItems": 5,
+          "title": "Courses",
+          "type": "array"
+        },
+        "suggestions": {
+          "items": {
+            "$ref": "#/$defs/AdviceChatSuggestion"
+          },
+          "maxItems": 6,
+          "title": "Suggestions",
+          "type": "array"
+        },
+        "schoolProgress": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdviceSchoolProgress"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unknowns": {
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "maxItems": 200,
+          "title": "Unknowns",
+          "type": "array"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
+        }
+      }
     }
   }
 }

@@ -1,6 +1,6 @@
 # 接口契约基线 v1
 
-状态：开发契约，尚未实现服务。OpenAPI/Schema 是字段真源，行为不变量见 [共享契约](../docs/04-infrastructure-workflow.md)。模块 TRD 不重复创造同名 DTO。当前版本为 1.0，开工时的具体基模 ID/首次培养路径还需要填入配置。
+OpenAPI/Schema 是字段真源，行为不变量见 [共享契约](../docs/04-infrastructure-workflow.md)。模块 TRD 不重复创造同名 DTO。当前版本为 1.0，具体模型和培养路径由部署配置与数据快照确定。
 
 - [Java OpenAPI](java.openapi.json)：课程/记录/导入/核对/评价/班次/核验。
 - [Python OpenAPI](planning.openapi.json)：匿名演示会话、学生 API 网关、规划与受限报告。
@@ -20,6 +20,8 @@ uv run python scripts/self_check.py
 改契约时提交 Schema、正反例、提供者/消费者修改或明确的兼容适配、TRD 和测试证据。破坏性变化升版本；在 benchmark 版本比较中不得修改 Java API/评分条件。
 
 ## 变更记录
+
+- 新增 `POST /api/v1/advice/chat` 及 AdviceChatRequest/Answer、课程建议、学校进度引用与确认动作 Schema，支持有来源的课程咨询。相同请求重放不重复调用模型；明确选课与优先考虑分别进入硬条件和软偏好。完整字段与交互见 [对话接口](../docs/29-advice-chat-contract.md)。
 
 - `Recommendation` 增加可选 `courseRationales` 和 `explorationDirections`：逐课程理由携带所引用的评价编号，探索方向包含可执行的学习步骤。Python 校验理由所引用的评价来自同一课程的已查询证据；方向内容为模型建议。
 - `GET /api/v1/reviews/search` 增加可选的 `cursor` 和响应 `nextCursor`，按评价 ID 顺序分页；课程维度统计需要读取全部页面。评价记录数不等同于独立评价人数。

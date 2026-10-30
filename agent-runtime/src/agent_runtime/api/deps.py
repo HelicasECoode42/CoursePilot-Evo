@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -68,7 +69,10 @@ def require_admin(
     admin_key = request.app.state.settings.admin_key
     if not admin_key:
         raise ForbiddenError("未配置管理员密钥")
-    if x_admin_key != admin_key:
+    # 用 compare_digest 做定长比较，避免按字节比对时的时序差异泄露密钥前缀。
+    # 按 UTF-8 字节比较：str 形式的 compare_digest 遇到非 ASCII 会抛 TypeError（变成 500）。
+    presented = (x_admin_key or "").encode("utf-8")
+    if not hmac.compare_digest(presented, admin_key.encode("utf-8")):
         raise ForbiddenError("无报告权限")
 
 

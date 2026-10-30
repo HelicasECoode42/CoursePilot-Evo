@@ -246,6 +246,21 @@ def _json(request: Request, status_code: int, status: str, issues: list[Issue]) 
     return JSONResponse(status_code=status_code, content=body.model_dump(mode="json"))
 
 
+def payload_too_large_response(request: Request) -> JSONResponse:
+    """请求体超过 CP_MAX_BODY_BYTES。
+
+    HTTP 状态是 413，信封里的 code 复用既有的 INVALID_INPUT，不新造错误码
+    （Java 侧超大请求也是这样回的）。供纯 ASGI 中间件使用，那里拿不到异常处理器。
+    """
+    issue = Issue(
+        code="INVALID_INPUT",
+        message="请求体超过大小上限",
+        field=None,
+        retryable=False,
+    )
+    return _json(request, 413, "INVALID_INPUT", [issue])
+
+
 def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def api_error(request: Request, exc: ApiError) -> JSONResponse:
@@ -299,10 +314,22 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ModelInvalidOutput)
     async def model_invalid_output(request: Request, exc: ModelInvalidOutput) -> JSONResponse:
         # Bad model output is a deterministic defect in this request, not a transient fault.
+        diagnostics = exc.diagnostics
+        if str(diagnostics.get("stage", "")).startswith("advice_chat"):
+            message = {
+                "COURSE_REFERENCE_MISMATCH": "课程引用不匹配",
+                "REVIEW_REFERENCE_MISMATCH": "课程评价引用不匹配",
+                "SUGGESTION_REFERENCE_MISMATCH": "课程建议引用不匹配",
+            }.get(str(diagnostics.get("reason_code")), "回答结构错误")
+            field = diagnostics.get("field_path")
+            safe_field = field if isinstance(field, str) else None
+        else:
+            message = _bounded(str(exc))
+            safe_field = None
         issue = Issue(
             code="MODEL_INVALID_OUTPUT",
-            message=_bounded(str(exc)),
-            field=None,
+            message=_bounded(message),
+            field=_bounded_field(safe_field),
             retryable=False,
         )
         return _json(request, 422, "ERROR", [issue])
