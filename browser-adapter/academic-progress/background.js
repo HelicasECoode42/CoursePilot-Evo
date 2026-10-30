@@ -13,7 +13,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
 // 15 分钟，原先 5 分钟。流程是「先在 CoursePilot 点连接 → 去学校页面登录 → 回来导入」，
       // 登录本身就可能花掉几分钟，5 分钟太紧，过期后学校那一页只会说「请先点击连接教务」。
       const active = destination?.pending && Date.now() - destination.pendingAt < 900000;
-      if (active) return { ok: false, error: "已有学业进度导入正在进行。" };
+      // 同一发起标签页刷新后会生成新的 requestId，允许它更新登记；其他标签页
+      // 仍不能覆盖正在等待的目标，避免学校页把数据发给错误的 CoursePilot 页面。
+      if (active && destination.tabId !== sender.tab.id) return { ok: false, error: "已有学业进度导入正在进行。" };
       await chrome.storage.session.set({ destination: { tabId: sender.tab.id, requestId: message.requestId, pending: true, pendingAt: Date.now() } });
       return { ok: true };
     }).then(reply);

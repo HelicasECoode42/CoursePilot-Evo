@@ -426,6 +426,57 @@ describe("student question page", () => {
     expect(wrapper.text()).not.toContain("尚未选择具体课程与教师");
   });
 
+  it("lists courses chosen in the advice chat on the profile summary with their names", async () => {
+    store.$patch({
+      adviceMessages: [
+        {
+          role: "assistant",
+          text: "回答",
+          answer: {
+            schemaVersion: "1.0",
+            reply: "回答",
+            question: null,
+            courses: [
+              {
+                courseCode: "08306099",
+                name: "Java程序设计(实践)",
+                credits: 4,
+                category: "专业选修课",
+                reason: "偏实践",
+                reviewNoteIds: [],
+                reviews: [],
+                reviewStatus: "NOT_QUERIED",
+              },
+            ],
+            suggestions: [],
+            schoolProgress: null,
+            unknowns: [],
+            usage: {
+              inputTokens: null,
+              outputTokens: null,
+              toolCalls: 0,
+              elapsedMs: 0,
+            },
+          },
+        },
+      ],
+      draft: {
+        ...emptyPlanningDraft(),
+        selectedCourseCodes: ["08306099"],
+        preferredCourseCodes: ["08306098"],
+      },
+    });
+    await router.replace("/plan/questions/ready");
+    const wrapper = mountPage();
+    const text = wrapper.text();
+    expect(text).toContain("已选课程");
+    expect(text).toContain("Java程序设计(实践)（08306099）");
+    expect(text).toContain("已选入，方案中必须保留");
+    expect(text).toContain("优先考虑的课程");
+    expect(text).toContain("08306098");
+    expect(text).toContain("尽量优先");
+  });
+
   it("always exposes school import and the selected curriculum on the ready page", async () => {
     store.$patch({
       curricula: [{ ...curriculum, displayName: "计算机科学与技术培养方案" }],

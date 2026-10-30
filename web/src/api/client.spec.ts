@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApiClient } from "./index";
 import { ApiFailure, HttpApiClient } from "./client";
-import type { PlanningRequest } from "../contracts";
+import type {
+  AdviceChatAnswer,
+  AdviceChatRequest,
+  PlanningRequest,
+} from "../contracts";
 
 function envelope(status: string, data: unknown, issues: unknown[] = []) {
   return {
@@ -492,6 +496,50 @@ async function authedClient(fetcher: ReturnType<typeof vi.fn>) {
   await client.createSession();
   return client;
 }
+
+describe("HTTP API client · advice chat", () => {
+  it("posts the documented request with bearer, request ID, and idempotency headers", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "回答",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: { inputTokens: 1, outputTokens: 2, toolCalls: 1, elapsedMs: 20 },
+    };
+    const body: AdviceChatRequest = {
+      schemaVersion: "1.0",
+      curriculumSnapshotId: "curriculum-2026",
+      academicRecordId: null,
+      mode: "REAL",
+      message: "问题",
+      history: [],
+      interestText: "",
+      selectedCourseCodes: [],
+      preferredCourseCodes: [],
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(200, envelope("OK", answer)));
+    const client = await authedClient(fetcher);
+    await expect(client.adviceChat(body, "idem-advice-1")).resolves.toEqual(
+      answer,
+    );
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/advice/chat");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(String(options.body))).toEqual(body);
+    expect((options.headers as Headers).get("Authorization")).toBe(
+      `Bearer ${session.sessionToken}`,
+    );
+    expect((options.headers as Headers).get("Idempotency-Key")).toBe(
+      "idem-advice-1",
+    );
+  });
+});
 
 describe("HTTP API client · E2 academic records, audit and planning", () => {
   it("treats an empty session record list as a normal state, not an error", async () => {

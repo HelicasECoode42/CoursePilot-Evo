@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AcademicRecord,
   AcademicRecordInput,
+  AdviceChatAnswer,
   AuditResult,
   CompletedCourse,
   PlanningAnswer,
@@ -88,6 +89,9 @@ function fakeClient(
     submitPlanning: vi.fn(async () => {
       throw new ApiFailure("stub 未实现规划", "invalid_response");
     }),
+    adviceChat: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现对话", "invalid_response");
+    }),
     // E4 方法在这份 store 测试里用不到，统一给出明确的未实现错误。
     searchSessionOfferings: vi.fn(async () => {
       throw new ApiFailure("stub 未实现班次搜索", "invalid_response");
@@ -142,6 +146,420 @@ describe("planning session store", () => {
     await first;
     expect(store.sessionStatus).toBe("ready");
     expect(store.selectedCurriculumId).toBe(curriculum.snapshotId);
+  });
+
+  it("sends a chat message and adopts interest and preferred courses only after explicit confirmation", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "可先了解这门课程。",
+      question: null,
+      courses: [
+        {
+          courseCode: "CS201",
+          name: "数据分析",
+          credits: 3,
+          category: "专业选修课",
+          reason: "与方向相关",
+          reviewNoteIds: [],
+          reviews: [],
+          reviewStatus: "NONE",
+        },
+      ],
+      suggestions: [
+        {
+          suggestionId: "s-interest",
+          kind: "INTEREST",
+          label: "采用兴趣",
+          value: "数据分析",
+        },
+        {
+          suggestionId: "s-prefer",
+          kind: "PREFER_COURSE",
+          label: "优先考虑课程",
+          value: "CS201",
+        },
+      ],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 20,
+        toolCalls: 1,
+        elapsedMs: 100,
+      },
+    };
+    const adviceChat = vi.fn(async () => answer);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    expect(await store.sendAdviceMessage("想了解数据分析方向")).toBe(true);
+    expect(store.adviceMessages.map((item) => item.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+    expect(store.adviceMessages[1]?.text).toBe(answer.reply);
+    expect(store.draft.careerText).toBe("");
+    expect(store.draft.preferredCourseCodes).toEqual([]);
+    expect(store.adoptAdviceSuggestion(answer, "s-interest")).toBe(true);
+    expect(store.adoptAdviceSuggestion(answer, "s-interest")).toBe(true);
+    expect(store.draft.careerText).toBe("数据分析");
+    expect(store.adoptAdviceSuggestion(answer, "s-prefer")).toBe(true);
+    expect(store.adoptAdviceSuggestion(answer, "s-prefer")).toBe(true);
+    expect(store.draft.preferredCourseCodes).toEqual(["CS201"]);
+    expect(store.draft.selectedCourseCodes).toEqual([]);
+  });
+
+  it("retries a failed identical chat request with the same idempotency key", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "已收到。",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
+    const adviceChat = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiFailure("连接失败", "network", null, null, true),
+      )
+      .mockResolvedValueOnce(answer);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    expect(await store.sendAdviceMessage("原问题")).toBe(false);
+    expect(store.adviceFailure?.retryMode).toBe("same-key");
+    expect(store.adviceBusy).toBe(false);
+    expect(store.advicePendingMessage).toBe("");
+    expect(await store.retryAdviceMessage()).toBe(true);
+    expect(adviceChat).toHaveBeenCalledTimes(2);
+    expect(adviceChat.mock.calls[0]?.[1]).toBe(adviceChat.mock.calls[1]?.[1]);
+    expect(adviceChat.mock.calls[0]?.[0]).toEqual(
+      adviceChat.mock.calls[1]?.[0],
+    );
+  });
+
+  it("tells the student the session advice budget is spent and offers no retry that cannot succeed", async () => {
+    const adviceChat = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiFailure(
+          "本会话累计 output token 已达上限，请新建会话",
+          "http",
+          503,
+          "BUDGET_EXCEEDED",
+        ),
+      );
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    expect(await store.sendAdviceMessage("再问一个问题")).toBe(false);
+    expect(store.adviceFailure?.retryMode).toBe("none");
+    expect(store.adviceError).toContain("对话额度已用完");
+    expect(store.adviceError).not.toContain("重新生成");
+    expect(await store.retryAdviceMessage()).toBe(false);
+    expect(await store.regenerateAdviceMessage()).toBe(false);
+    expect(adviceChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a new explicit key to regenerate terminal model failures and preserves adopted preferences", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "建议数据分析方向。",
+      question: null,
+      courses: [],
+      suggestions: [
+        {
+          suggestionId: "interest-data",
+          kind: "INTEREST",
+          label: "采用数据分析兴趣",
+          value: "数据分析",
+        },
+      ],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
+    const repaired: AdviceChatAnswer = { ...answer, reply: "重新生成的回答" };
+    const terminalFailure = new ApiFailure(
+      "旧的接口通用文案",
+      "http",
+      422,
+      "MODEL_INVALID_OUTPUT",
+    );
+    const adviceChat = vi
+      .fn()
+      .mockResolvedValueOnce(answer)
+      .mockRejectedValueOnce(terminalFailure)
+      .mockRejectedValueOnce(terminalFailure)
+      .mockResolvedValueOnce(repaired);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    await store.sendAdviceMessage("先聊兴趣");
+    expect(store.adoptAdviceSuggestion(answer, "interest-data")).toBe(true);
+    expect(await store.sendAdviceMessage("接口输出失败的问题")).toBe(false);
+    expect(store.adviceFailure?.retryMode).toBe("regenerate");
+    expect(store.adviceError).toContain("可重新生成回答");
+    expect(store.adviceError).not.toContain("没有写入任何方案");
+    expect(store.adviceBusy).toBe(false);
+    expect(store.advicePendingMessage).toBe("");
+    expect(store.adviceMessages.map((item) => item.text)).not.toContain(
+      "接口输出失败的问题",
+    );
+
+    expect(await store.sendAdviceMessage("接口输出失败的问题")).toBe(false);
+    expect(adviceChat).toHaveBeenCalledTimes(2);
+    expect(await store.retryAdviceMessage()).toBe(false);
+    expect(adviceChat).toHaveBeenCalledTimes(3);
+    expect(adviceChat.mock.calls[1]?.[1]).toBe(adviceChat.mock.calls[2]?.[1]);
+    expect(store.adviceFailure?.retryMode).toBe("regenerate");
+
+    expect(await store.regenerateAdviceMessage()).toBe(true);
+    expect(adviceChat).toHaveBeenCalledTimes(4);
+    expect(adviceChat.mock.calls[2]?.[1]).not.toBe(
+      adviceChat.mock.calls[3]?.[1],
+    );
+    expect(adviceChat.mock.calls[2]?.[0]).toEqual(
+      adviceChat.mock.calls[3]?.[0],
+    );
+    expect(store.draft.careerText).toBe("数据分析");
+    expect(store.adviceFailure).toBeNull();
+    expect(store.adviceMessages.map((item) => item.text)).toEqual([
+      "先聊兴趣",
+      "建议数据分析方向。",
+      "接口输出失败的问题",
+      "重新生成的回答",
+    ]);
+  });
+
+  it("sends an edited failed question as a new request without adding the failed text to history", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "修改后的回答",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
+    const adviceChat = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiFailure("模型校验失败", "http", 422, "MODEL_INVALID_OUTPUT"),
+      )
+      .mockResolvedValueOnce(answer);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    await store.sendAdviceMessage("原始问题");
+    expect(await store.sendAdviceMessage("修改后的问题")).toBe(true);
+    expect(adviceChat.mock.calls[0]?.[1]).not.toBe(
+      adviceChat.mock.calls[1]?.[1],
+    );
+    expect(adviceChat.mock.calls[1]?.[0].message).toBe("修改后的问题");
+    expect(adviceChat.mock.calls[1]?.[0].history).toEqual([]);
+  });
+
+  it("ignores duplicate send clicks while one chat request is pending", async () => {
+    const pending = deferred<AdviceChatAnswer>();
+    const adviceChat = vi.fn(() => pending.promise);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    const first = store.sendAdviceMessage("单条问题");
+    expect(await store.sendAdviceMessage("单条问题")).toBe(false);
+    expect(adviceChat).toHaveBeenCalledTimes(1);
+    pending.resolve({
+      schemaVersion: "1.0",
+      reply: "回答",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    });
+    expect(await first).toBe(true);
+  });
+
+  it("does not adopt a course that the subsequently loaded record marks passed or in progress", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "课程建议",
+      question: null,
+      courses: [
+        {
+          courseCode: "CS201",
+          name: "数据分析",
+          credits: 3,
+          category: "专业选修课",
+          reason: "方向相关",
+          reviewNoteIds: [],
+          reviews: [],
+          reviewStatus: "NONE",
+        },
+      ],
+      suggestions: [
+        {
+          suggestionId: "s-select",
+          kind: "SELECT_COURSE",
+          label: "选入",
+          value: "CS201",
+        },
+      ],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
+    const store = createPlanningStore(
+      fakeClient({ adviceChat: vi.fn(async () => answer) }),
+    )();
+    await store.startSession();
+    await store.sendAdviceMessage("问题");
+    store.$patch({
+      selectedRecordId: "record-current",
+      records: [
+        {
+          academicRecordId: "record-current",
+          revision: 1,
+          curriculumSnapshotId: curriculum.snapshotId,
+          completedCourses: [
+            {
+              courseCode: "CS201",
+              earnedCredits: 3,
+              outcome: "IN_PROGRESS",
+              completedTerm: null,
+            },
+          ],
+          transcriptComplete: true,
+          sourceKind: "USER_IMPORT",
+          createdAt: "2026-10-01T00:00:00Z",
+        },
+      ],
+    });
+    expect(store.adoptAdviceSuggestion(answer, "s-select")).toBe(false);
+    expect(store.draft.selectedCourseCodes).toEqual([]);
+    expect(store.adviceError).toContain("正在修读");
+    expect(store.adviceMessages).toHaveLength(2);
+  });
+
+  it("clears chat history and adopted choices when the curriculum changes", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "回答",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
+    const store = createPlanningStore(
+      fakeClient({
+        adviceChat: vi.fn(async () => answer),
+      }),
+    )();
+    await store.startSession();
+    await store.sendAdviceMessage("问题");
+    store.$patch({
+      curricula: [
+        ...store.curricula,
+        { ...curriculum, snapshotId: "other-curriculum" },
+      ],
+    });
+    store.chooseCurriculum("other-curriculum");
+    expect(store.adviceMessages).toEqual([]);
+    expect(store.adoptedAdviceSuggestions).toEqual([]);
+  });
+
+  it("ignores a late answer from the previous curriculum without clearing the new request state", async () => {
+    const first = deferred<AdviceChatAnswer>();
+    const second = deferred<AdviceChatAnswer>();
+    const adviceChat = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    const requestA = store.sendAdviceMessage("问题 A");
+    store.$patch({
+      curricula: [
+        ...store.curricula,
+        { ...curriculum, snapshotId: "other-curriculum" },
+      ],
+    });
+    store.chooseCurriculum("other-curriculum");
+    const requestB = store.sendAdviceMessage("问题 B");
+
+    first.resolve({
+      schemaVersion: "1.0",
+      reply: "回答 A",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    });
+    await requestA;
+    expect(store.adviceBusy).toBe(true);
+    expect(store.adviceMessages).toEqual([]);
+    expect(store.advicePendingMessage).toBe("问题 B");
+
+    second.resolve({
+      schemaVersion: "1.0",
+      reply: "回答 B",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    });
+    await requestB;
+    expect(store.adviceBusy).toBe(false);
+    expect(store.adviceMessages.map((item) => item.text)).toEqual([
+      "问题 B",
+      "回答 B",
+    ]);
   });
 
   it("shows session creation failure and allows a fresh retry without fixture fallback", async () => {

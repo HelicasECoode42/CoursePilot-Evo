@@ -27,104 +27,75 @@ const mountSetup = async (pagePort = "5173") => {
   });
 };
 
-const probeButton = (wrapper: ReturnType<typeof mount>) =>
-  wrapper.findAll("button").find((b) => b.text().includes("探测插件"))!;
-
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.useRealTimers();
   document.body.innerHTML = "";
 });
 
-describe("配置三步", () => {
-  it("讲明「先连接再导入」的顺序，并说反过来会看到什么", async () => {
-    // background.js 要求先由 CoursePilot 页面发 CP_START_IMPORT 登记接收标签页，
-    // 学校页面的导入才有地方送。顺序反了学校那边会提示「请先在 CoursePilot
-    // 点击连接教务」，不说清楚就会被当成故障。
+describe("连接学业资料", () => {
+  const connectButton = (wrapper: Awaited<ReturnType<typeof mountSetup>>) =>
+    wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("连接我的学业资料"))!;
+  it("先解释连接与返回的顺序，打开页面不占用扩展的导入任务", async () => {
+    const post = vi.spyOn(globalThis.window, "postMessage");
     const wrapper = await mountSetup();
-    const text = wrapper.text();
-    expect(text).toContain("先连接，再导入");
-    expect(text).toContain("先不要点浮窗里的导入");
-    expect(text).toContain("请先在 CoursePilot 点击连接教务");
+    expect(wrapper.text()).toContain("先连接扩展，再打开学校学业情况");
+    expect(wrapper.text()).toContain("导入 CoursePilot 并返回");
+    expect(post).not.toHaveBeenCalled();
   });
-
-  it("去学业资料页之前先建会话，不把人送进死胡同", async () => {
-    // /records 自己不建会话，没有会话时只显示「还没有可用会话，请先回到引导页」。
-    // 从配置页直接链过去就是死路，所以这一步必须先 startSession 再跳。
+  it("去导入之前建立会话", async () => {
     const wrapper = await mountSetup();
     const store = usePlanningStore();
-    const startSession = vi
+    const start = vi
       .spyOn(store, "startSession")
       .mockImplementation(async () => {
         store.$patch({ sessionStatus: "ready", sessionId: "session-test" });
       });
-    await wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("去学业资料页"))!
-      .trigger("click");
+    await connectButton(wrapper).trigger("click");
     await flushPromises();
-    expect(startSession).toHaveBeenCalled();
+    expect(start).toHaveBeenCalledOnce();
     expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe(
       "/records?import=school",
     );
   });
-
-  it("建会话失败时留在原地并说明，不是静悄悄什么都不发生", async () => {
+  it("连接失败时保留重试入口和具体错误", async () => {
     const wrapper = await mountSetup();
     const store = usePlanningStore();
     vi.spyOn(store, "startSession").mockImplementation(async () => {
       store.$patch({ sessionStatus: "error", errorMessage: "服务没启动" });
     });
-    await wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("去学业资料页"))!
-      .trigger("click");
+    await connectButton(wrapper).trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("服务没启动");
-    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe("/setup");
+    expect(wrapper.vm.$router.currentRoute.value.path).toBe("/setup");
+    expect(connectButton(wrapper).attributes("disabled")).toBeUndefined();
   });
-
-  it("写明不代登录、不读密码、不读 Cookie", async () => {
+  it("已有会话直接沿用", async () => {
     const wrapper = await mountSetup();
-    const text = wrapper.text();
-    expect(text).toContain("不替你登录");
-    expect(text).toContain("不读密码");
-    expect(text).toContain("不读 Cookie");
-  });
-
-  it("插件回 ok:false 也算装着了，不能误报成没装", async () => {
-    // background.js 在五分钟内重复收到 CP_START_IMPORT 会回 ok:false。
-    // 把这种情况当成「没装插件」会让学生白装一遍，所以必须区分开。
-    const wrapper = await mountSetup();
-    await probeButton(wrapper).trigger("click");
-    // 直接派发事件：jsdom 的 postMessage 不填 source，过不了同源同窗守卫。
-    globalThis.window.dispatchEvent(
-      new MessageEvent("message", {
-        data: { type: "CP_IMPORT_READY", ok: false },
-        origin: globalThis.location.origin,
-        source: globalThis.window,
-      }),
+    const store = usePlanningStore();
+    store.$patch({ sessionStatus: "ready", sessionId: "session-test" });
+    const start = vi.spyOn(store, "startSession");
+    await connectButton(wrapper).trigger("click");
+    await flushPromises();
+    expect(start).not.toHaveBeenCalled();
+    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe(
+      "/records?import=school",
     );
-    await flushPromises();
-    expect(wrapper.text()).toContain("插件已连接");
-    expect(wrapper.text()).not.toContain("插件没有回应");
   });
-
-  it("端口不是 5173 时直接说清原因，不发探测也不冤枉插件", async () => {
-    const wrapper = await mountSetup("5175");
-    await probeButton(wrapper).trigger("click");
-    await flushPromises();
-    expect(wrapper.text()).toContain("5173 端口");
-    expect(wrapper.text()).toContain("当前页面端口是 5175");
+  it("端口不匹配时给出扩展支持的入口，同时保留文件导入", async () => {
+    const wrapper = await mountSetup("5176");
+    expect(wrapper.find('a[href="http://127.0.0.1:5173/setup"]').exists()).toBe(
+      true,
+    );
+    expect(wrapper.text()).toContain("当前页面端口是 5176");
+    expect(wrapper.text()).toContain("已有的学业汇总文件");
   });
-
-  it("插件不回应时说明可能是没刷新，而不是断言没装", async () => {
-    vi.useFakeTimers();
+  it("读取范围说明可以展开查看", async () => {
     const wrapper = await mountSetup();
-    await probeButton(wrapper).trigger("click");
-    vi.advanceTimersByTime(3000);
-    await flushPromises();
-    expect(wrapper.text()).toContain("插件没有回应");
-    expect(wrapper.text()).toContain("刷新本页");
+    expect(wrapper.get(".setup-privacy summary").text()).toBe(
+      "会读取哪些内容？",
+    );
+    expect(wrapper.text()).toContain("不读密码、不读 Cookie");
   });
 });

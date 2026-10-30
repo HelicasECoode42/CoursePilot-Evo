@@ -211,6 +211,58 @@ export interface Usage {
   elapsedMs: number;
 }
 
+export interface AdviceChatRequest {
+  schemaVersion: typeof SCHEMA_VERSION;
+  curriculumSnapshotId: string;
+  academicRecordId: string | null;
+  mode: PlanningMode;
+  message: string;
+  history: Array<{ role: "user" | "assistant"; text: string }>;
+  interestText: string;
+  selectedCourseCodes: string[];
+  preferredCourseCodes?: string[];
+}
+
+export interface AdviceChatCourse {
+  courseCode: string;
+  name: string;
+  credits: number | null;
+  category: string;
+  reason: string;
+  reviewNoteIds: string[];
+  reviews: ReviewNote[];
+  reviewStatus: "AVAILABLE" | "NONE" | "NOT_QUERIED" | "UNKNOWN";
+}
+
+export interface AdviceChatSuggestion {
+  suggestionId: string;
+  kind: "INTEREST" | "SELECT_COURSE" | "PREFER_COURSE";
+  label: string;
+  value: string;
+}
+
+export interface AdviceChatAnswer {
+  schemaVersion: typeof SCHEMA_VERSION;
+  reply: string;
+  question: string | null;
+  courses: AdviceChatCourse[];
+  suggestions: AdviceChatSuggestion[];
+  schoolProgress: {
+    capturedAt: string;
+    source: string;
+    nodes: Array<{
+      nodeId: string;
+      parentId: string | null;
+      name: string;
+      requiredCredits: number | null;
+      earnedCredits: number | null;
+      remainingCredits: number | null;
+    }>;
+  } | null;
+  unknowns: Issue[];
+  usage: Usage;
+}
+
 export type PlanningDecision =
   | "RECOMMENDATIONS"
   | "CLARIFY"

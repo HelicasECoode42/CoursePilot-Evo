@@ -12,43 +12,38 @@
  *  - 没有评价记录就写「暂无评价记录」，不能留空让人读成「没人吐槽」。
  */
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { useRouter } from "vue-router";
 import { api } from "../api";
 import type { CareerDirection, Course, ReviewNote } from "../contracts";
+import SchoolProgressTree from "../components/SchoolProgressTree.vue";
+import ReviewSummary from "../components/ReviewSummary.vue";
+import AdviceChat from "../components/AdviceChat.vue";
 import { groupAuditItems } from "../domain/academic-record";
 import { isCurriculumUsableForMode } from "../domain/planning-request";
 import { usePlanningStore } from "../stores/planning";
 
 const store = usePlanningStore();
-const router = useRouter();
 
-/** 学生打的问题。送进规划请求的 promptText，模型会读到。 */
-const question = ref("");
-
-const SAMPLE_QUESTIONS = [
-  "我这学期应该学什么？",
-  "我想往后端开发方向走，这个方向需要掌握哪些东西？",
-  "专业选修课里哪些和人工智能相关？",
-  "还差哪些学分，优先补哪个类别？",
-];
-
-/**
- * 带着问题进规划流程。
- *
- * 不在这里替学生把动机、优先级这些问题自动填掉：那几步是「一次一问、每个问题
- * 都要问到」的，自动填等于替他声明了没说过的偏好。这里只把问题记下来，
- * 向导照常一步步问，问题最终随 promptText 一起送进模型。
- */
-async function askModel() {
-  const text = question.value.trim();
-  if (!text) return;
-  store.updateDraft("questionText", text);
-  await router.push("/plan/questions/goals");
+const activeView = ref<"progress" | "courses" | "directions">("progress");
+const courseQuery = ref("");
+function selectView(view: "progress" | "courses" | "directions") {
+  activeView.value = view;
+  if (view === "directions" && askOpen.value !== "directions")
+    void openDirections();
 }
-
-function useSample(text: string) {
-  question.value = text;
-}
+const sourceLabel = computed(
+  () =>
+    ({
+      VERIFIED: "来源已核验",
+      UNVERIFIED: "来源待核验",
+      SYNTHETIC: "虚构示例",
+    })[store.selectedCurriculum?.sourceValidation ?? "UNVERIFIED"],
+);
+const outcomeLabels = {
+  PASSED: "已通过",
+  FAILED: "未通过",
+  IN_PROGRESS: "在读",
+  UNKNOWN: "状态待确认",
+};
 
 type Load = "idle" | "loading" | "ready" | "error";
 
@@ -62,6 +57,7 @@ const coursesError = ref("");
 const expanded = ref<string | null>(null);
 const reviewsByCourse = ref<Record<string, ReviewNote[]>>({});
 const reviewStatus = ref<Record<string, Load>>({});
+const reviewUnconfirmed = ref<Record<string, boolean>>({});
 
 const directions = ref<CareerDirection[]>([]);
 const directionsStatus = ref<Load>("idle");
@@ -70,17 +66,6 @@ const directionsError = ref("");
 const askOpen = ref<"" | "learned" | "directions">("");
 
 let controller: AbortController | null = null;
-
-const DIMENSION_LABELS: Record<ReviewNote["dimensions"][number], string> = {
-  GRADING: "给分",
-  ATTENDANCE: "签到",
-  WORKLOAD: "工作量",
-  EXAM: "考试",
-  GROUP_WORK: "小组作业",
-  PRESENTATION: "课堂汇报",
-  TEACHING: "讲课",
-  OVERALL: "综合",
-};
 
 /**
  * 能用的培养方案。沿用 domain/planning-request 的同一个判断，
@@ -110,6 +95,12 @@ const auditGroups = computed(() =>
 const courseGroups = computed(() => {
   const byCategory = new Map<string, Course[]>();
   for (const course of courses.value) {
+    const term = courseQuery.value.trim().toLocaleLowerCase();
+    if (
+      term &&
+      !`${course.name} ${course.courseCode}`.toLocaleLowerCase().includes(term)
+    )
+      continue;
     const key = course.category || "未注明类别";
     const bucket = byCategory.get(key);
     if (bucket) bucket.push(course);
@@ -120,7 +111,17 @@ const courseGroups = computed(() => {
     .sort((a, b) => b.items.length - a.items.length);
 });
 
-const courseCount = computed(() => courses.value.length);
+const courseCount = computed(
+  () => new Set(courses.value.map((course) => course.courseCode)).size,
+);
+const importedCourseNames = computed(() => {
+  const names = new Map(
+    courses.value.map((course) => [course.courseCode, course.name]),
+  );
+  for (const course of store.schoolProgress?.snapshot.courses ?? [])
+    names.set(course.courseCode, course.name);
+  return names;
+});
 
 function formatCredits(value: number | null): string {
   if (value === null) return "学分未注明";
@@ -151,6 +152,7 @@ async function loadCourses(snapshotId: string, signal: AbortSignal) {
       if (!cursor) break;
     }
     if (signal.aborted) return;
+    if (cursor) throw new Error("课程目录尚未读取完整，请重试。");
     courses.value = collected;
     coursesStatus.value = "ready";
   } catch (error) {
@@ -162,18 +164,25 @@ async function loadCourses(snapshotId: string, signal: AbortSignal) {
 }
 
 async function toggleCourse(course: Course) {
-  if (expanded.value === course.courseCode) {
+  if (
+    expanded.value === course.courseCode &&
+    reviewStatus.value[course.courseCode] !== "error"
+  ) {
     expanded.value = null;
     return;
   }
   expanded.value = course.courseCode;
-  if (reviewStatus.value[course.courseCode]) return;
+  if (
+    ["ready", "loading"].includes(reviewStatus.value[course.courseCode] ?? "")
+  )
+    return;
   reviewStatus.value = {
     ...reviewStatus.value,
     [course.courseCode]: "loading",
   };
   try {
     const found = await api.searchReviews(course.courseCode, null);
+    reviewUnconfirmed.value[course.courseCode] = found.status === "UNKNOWN";
     reviewsByCourse.value = {
       ...reviewsByCourse.value,
       [course.courseCode]: found.items,
@@ -220,17 +229,6 @@ function unboundNoteCount(courseCode: string): number {
   ).length;
 }
 
-function dimensionsOf(courseCode: string): string[] {
-  const notes = reviewsByCourse.value[courseCode] ?? [];
-  const tags = new Set<string>();
-  for (const note of notes) {
-    for (const dimension of note.dimensions) {
-      tags.add(DIMENSION_LABELS[dimension] ?? dimension);
-    }
-  }
-  return [...tags];
-}
-
 async function openDirections() {
   askOpen.value = askOpen.value === "directions" ? "" : "directions";
   if (askOpen.value !== "directions" || directionsStatus.value === "ready")
@@ -264,7 +262,10 @@ async function boot() {
       bootError.value = store.errorMessage || "没能建立本次会话。";
       return;
     }
-    await Promise.all([store.loadRecords(), store.loadSchoolProgress()]);
+    const initialLoads: Promise<unknown>[] = [];
+    if (store.recordsStatus !== "ready") initialLoads.push(store.loadRecords());
+    if (!store.schoolProgress) initialLoads.push(store.loadSchoolProgress());
+    await Promise.all(initialLoads);
     if (store.selectedCurriculumId && store.selectedRecordId && !store.audit) {
       await store.runAudit();
     }
@@ -286,214 +287,266 @@ onUnmounted(() => controller?.abort());
 </script>
 
 <template>
-  <section class="question-card" aria-labelledby="dash-title">
+  <section class="dashboard" aria-labelledby="dash-title">
     <p v-if="api.mode === 'fixture'" class="notice notice--demo" role="note">
-      当前是演示模式：下面的课程和评价是虚构示例，不是真实教务数据。
+      页面演示 · 以下课程与进度为虚构示例
     </p>
-    <p class="eyebrow">个人控制台</p>
-    <h1 id="dash-title">我的学业与可选课程</h1>
-
-    <p v-if="bootStatus === 'loading'" class="microcopy" role="status">
+    <header class="dashboard-heading">
+      <div>
+        <p class="eyebrow">从这里继续</p>
+        <h1 id="dash-title" tabindex="-1">我的学业</h1>
+        <p class="dashboard-subtitle">
+          {{
+            store.selectedCurriculum?.displayName ||
+            "先连接学业资料，再开始规划"
+          }}
+          <span v-if="store.selectedCurriculum" class="source-pill">{{
+            sourceLabel
+          }}</span>
+        </p>
+      </div>
+      <RouterLink
+        class="button button--secondary"
+        to="/records?import=school"
+        >{{
+          store.schoolProgress ? "更新学业资料" : "导入学业进度"
+        }}</RouterLink
+      >
+    </header>
+    <p v-if="bootStatus === 'loading'" class="notice" role="status">
       正在读取你的学业数据…
     </p>
-    <div v-else-if="bootStatus === 'error'">
-      <p class="notice notice--error" role="alert">{{ bootError }}</p>
+    <div
+      v-else-if="bootStatus === 'error'"
+      class="notice notice--error"
+      role="alert"
+    >
+      <p>{{ bootError }}</p>
       <button class="button button--secondary" type="button" @click="boot">
-        重试
+        重新连接
       </button>
     </div>
-
     <template v-else>
-      <!-- ① 我的状态 -->
-      <section class="dash-block" aria-labelledby="dash-status">
-        <h2 id="dash-status">我的状态</h2>
-        <div v-if="!store.selectedCurriculum">
-          <p v-if="usableCurricula.length === 0" class="notice" role="note">
-            还没有可用的培养方案。
-            <RouterLink to="/setup">回到配置</RouterLink>
-            把学校数据接上，这一页才有内容。
-          </p>
-          <template v-else>
-            <p class="microcopy">
-              有 {{ usableCurricula.length }} 份培养方案可用，先选一份。
-              来源核验状态照原样列出，不替你挑「看起来更可信」的那份。
+      <ol class="student-journey" aria-label="规划进度">
+        <li>
+          <span
+            class="journey-dot"
+            :class="{ 'is-complete': store.selectedRecordId }"
+            >1</span
+          >
+          <div>
+            <strong>了解学业</strong
+            ><small>{{
+              store.selectedRecordId ? "已有课程记录" : "等待导入"
+            }}</small>
+          </div>
+        </li>
+        <li>
+          <span
+            class="journey-dot"
+            :class="{ 'is-complete': store.draft.prioritiesConfirmed }"
+            >2</span
+          >
+          <div>
+            <strong>整理需求</strong
+            ><small>{{
+              store.draft.prioritiesConfirmed
+                ? "目标顺序已确认"
+                : "兴趣、偏好与时间"
+            }}</small>
+          </div>
+        </li>
+        <li>
+          <span
+            class="journey-dot"
+            :class="{ 'is-complete': store.planningResult }"
+            >3</span
+          >
+          <div>
+            <strong>调整方案</strong
+            ><small>{{
+              store.planningResult ? "已有规划结果" : "选课与课表"
+            }}</small>
+          </div>
+        </li>
+      </ol>
+      <nav class="view-switch" aria-label="学业内容">
+        <button
+          type="button"
+          data-view="progress"
+          :aria-pressed="activeView === 'progress'"
+          @click="selectView('progress')"
+        >
+          学分进度
+        </button>
+        <button
+          type="button"
+          data-view="courses"
+          :aria-pressed="activeView === 'courses'"
+          @click="selectView('courses')"
+        >
+          课程与评价
+        </button>
+        <button
+          type="button"
+          data-view="directions"
+          :aria-pressed="activeView === 'directions'"
+          @click="selectView('directions')"
+        >
+          有哪些方向
+        </button>
+      </nav>
+      <section
+        v-if="activeView === 'progress'"
+        class="dashboard-panel"
+        aria-labelledby="progress-title"
+      >
+        <div class="section-heading">
+          <div>
+            <h2 id="progress-title">我还缺哪些学分？</h2>
+            <p v-if="store.schoolProgress" class="microcopy">
+              来自本次导入的学校学业报告 · 各类别独立显示
             </p>
-            <label class="dash-picker">
-              <span>培养方案</span>
-              <select
+          </div>
+          <button
+            v-if="store.selectedRecord"
+            class="linkbtn"
+            type="button"
+            @click="toggleLearned"
+          >
+            我学了什么
+          </button>
+        </div>
+        <div v-if="!store.selectedCurriculum" class="empty-state">
+          <template v-if="usableCurricula.length"
+            ><h3>先选定你的培养方案</h3>
+            <label class="dash-picker"
+              ><span>培养方案</span
+              ><select
                 :value="store.selectedCurriculumId ?? ''"
                 @change="
-                  pickCurriculum(
-                    ($event.target as HTMLSelectElement | null)?.value ?? '',
-                  )
+                  pickCurriculum(($event.target as HTMLSelectElement).value)
                 "
               >
-                <option value="" disabled>请选择</option>
+                <option disabled value="">请选择</option>
                 <option
                   v-for="item in usableCurricula"
                   :key="item.snapshotId"
                   :value="item.snapshotId"
                 >
-                  {{ item.displayName ?? item.snapshotId }} ·
-                  {{ item.sourceKind }} · {{ item.sourceValidation }}
+                  {{ item.displayName ?? "未命名培养方案" }}
                 </option>
-              </select>
-            </label>
-          </template>
+              </select></label
+            ></template
+          >
+          <template v-else
+            ><h3>还没有可用的培养方案</h3>
+            <RouterLink to="/setup">连接学业资料</RouterLink></template
+          >
         </div>
-        <template v-else>
-          <p class="dash-plan">
-            {{ store.selectedCurriculum.displayName ?? "未命名培养方案" }}
-            <span class="dash-badge">
-              来源核验：{{ store.selectedCurriculum.sourceValidation }}
-            </span>
+        <template v-else-if="store.schoolProgress">
+          <SchoolProgressTree :nodes="store.schoolProgress.snapshot.nodes" />
+          <details class="record-help">
+            <summary>本地培养方案核对与资料来源</summary>
+            <p>
+              {{
+                sourceLabel
+              }}；学校报告保留原类别，本地核对按所选培养方案计算。
+            </p>
+            <p v-if="!store.audit">
+              还没有学业核对结果。<RouterLink to="/records"
+                >查看资料并核对</RouterLink
+              >
+            </p>
+            <ul v-else class="dash-audit">
+              <li v-for="group in auditGroups" :key="group.key">
+                <strong>{{ group.label }}</strong>
+                <ul>
+                  <li v-for="item in group.items" :key="item.requirementId">
+                    {{ item.category ?? "类别未注明" }} ·
+                    {{ formatGap(item.gapCredits) }}
+                  </li>
+                </ul>
+              </li>
+            </ul>
+          </details>
+        </template>
+        <template v-else-if="store.audit">
+          <p class="microcopy">
+            以下按已填写课程核对；你也可以导入学校学业报告。
           </p>
-          <p v-if="!store.audit" class="microcopy">
-            还没有学业核对结果。
-            <RouterLink to="/records">去学业资料页核对</RouterLink>。
-          </p>
-          <ul v-else class="dash-audit">
+          <ul class="dash-audit">
             <li v-for="group in auditGroups" :key="group.key">
               <strong>{{ group.label }}</strong>
               <ul>
                 <li v-for="item in group.items" :key="item.requirementId">
-                  {{ item.category ?? item.requirementId }} ·
+                  {{ item.category ?? "类别未注明" }} ·
                   {{ formatGap(item.gapCredits) }}
                 </li>
               </ul>
             </li>
           </ul>
         </template>
-      </section>
-
-      <!-- ② 问一问 -->
-      <section class="dash-block" aria-labelledby="dash-ask">
-        <h2 id="dash-ask">问一问</h2>
-        <p class="microcopy">
-          打字提问会把问题交给模型；下面两个按钮的答案是确定的，直接来自学校数据与
-          Java 的核对，<strong>不经过模型</strong>。
-        </p>
-
-        <label class="dash-ask-label" for="dash-question">
-          想问什么
-          <textarea
-            id="dash-question"
-            v-model="question"
-            class="dash-ask-input"
-            rows="2"
-            placeholder="例如：我这学期应该学什么？"
-          ></textarea>
-        </label>
-        <div class="dash-samples">
-          <button
-            v-for="sample in SAMPLE_QUESTIONS"
-            :key="sample"
-            class="dash-sample"
-            type="button"
-            @click="useSample(sample)"
-          >
-            {{ sample }}
-          </button>
-        </div>
-        <button
-          class="button button--primary"
-          type="button"
-          :disabled="question.trim() === ''"
-          @click="askModel"
-        >
-          带着这个问题去规划
-        </button>
-        <p class="microcopy">
-          问题会随规划请求一起送进模型。中间几步（想达成什么、时间安排这些）仍然
-          会一步步问你，不替你填——那几步是你的偏好，模型不能替你声明。
-          回答在规划结果页，包含「方向是什么、需要学什么」和每门课的推荐理由。
-        </p>
-        <div class="dash-ask-row">
-          <button
-            class="button button--secondary"
-            type="button"
-            @click="toggleLearned"
-          >
-            我学了什么
-          </button>
-          <button
-            class="button button--secondary"
-            type="button"
-            @click="openDirections"
-          >
-            有哪些方向，分别要学什么
-          </button>
+        <div v-else class="empty-state">
+          <h3>导入后，就能查看学校报告的学分进度</h3>
+          <p>培养方案已准备好，已有课程无需逐门重填。</p>
           <RouterLink
             class="button button--secondary"
-            to="/plan/questions/goals"
+            to="/records?import=school"
+            >导入我的学业情况</RouterLink
           >
-            我还能学什么
-          </RouterLink>
+          <p class="microcopy">还没有学业核对结果。</p>
         </div>
-
+        <p v-if="store.schoolProgressError" class="notice" role="status">
+          {{ store.schoolProgressError }}
+        </p>
         <div v-if="askOpen === 'learned'" class="dash-answer">
-          <p v-if="!store.selectedRecord" class="microcopy">
-            本次会话还没有学业记录。
-            <RouterLink to="/records">去补录或导入</RouterLink>。
-          </p>
-          <template v-else>
-            <p class="microcopy">
-              共 {{ store.selectedRecord.completedCourses.length }} 条课程记录。
-              {{
-                store.selectedRecord.transcriptComplete
-                  ? "已声明记录完整。"
-                  : "未声明完整，所以会有「无法确认」的要求。"
-              }}
+          <h3>已读取的课程</h3>
+          <p v-if="!store.selectedRecord">本次会话还没有学业记录。</p>
+          <template v-else
+            ><p class="microcopy">
+              已读取
+              {{ store.selectedRecord.completedCourses.length }}
+              条记录；在读课程尚未计入已获学分。
             </p>
             <ul class="dash-learned">
               <li
                 v-for="(done, index) in store.selectedRecord.completedCourses"
                 :key="`${done.courseCode}-${index}`"
               >
-                {{ done.courseCode }} · {{ done.outcome }} ·
-                {{ formatCredits(done.earnedCredits) }}
+                <span>{{
+                  importedCourseNames.get(done.courseCode) || done.courseCode
+                }}</span
+                ><span
+                  >{{ outcomeLabels[done.outcome] }} ·
+                  {{ formatCredits(done.earnedCredits) }}</span
+                >
               </li>
-            </ul>
-          </template>
-        </div>
-
-        <div v-if="askOpen === 'directions'" class="dash-answer">
-          <p
-            v-if="directionsStatus === 'loading'"
-            class="microcopy"
-            role="status"
+            </ul></template
           >
-            正在读取职业方向…
-          </p>
-          <p
-            v-else-if="directionsStatus === 'error'"
-            class="notice notice--error"
-            role="alert"
-          >
-            {{ directionsError }}
-          </p>
-          <p v-else-if="directions.length === 0" class="microcopy">
-            服务端没有返回职业方向。这是正常业务状态，不是错误。
-          </p>
-          <ul v-else class="dash-directions">
-            <li v-for="item in directions" :key="item.directionId">
-              <strong>{{ item.title }}</strong>
-              <p class="microcopy">{{ item.description }}</p>
-              <p class="microcopy">
-                建议课程：{{
-                  item.courseCodes.length > 0
-                    ? item.courseCodes.join("、")
-                    : "未给出课程号"
-                }}
-              </p>
-            </li>
-          </ul>
         </div>
       </section>
-
-      <!-- ③ 看开什么课 -->
-      <section class="dash-block" aria-labelledby="dash-courses">
-        <h2 id="dash-courses">看开什么课</h2>
+      <section
+        v-else-if="activeView === 'courses'"
+        class="dashboard-panel"
+        aria-labelledby="dash-courses"
+      >
+        <div class="section-heading">
+          <div>
+            <h2 id="dash-courses">培养方案中的课程</h2>
+            <p class="microcopy">
+              {{ courseCount }} 门课程 ·
+              按类别浏览，点开查看历史评价。目录不代表下学期开课清单。
+            </p>
+          </div>
+        </div>
+        <label class="catalog-search"
+          ><span class="visually-hidden">搜索课程号或课程名</span
+          ><input
+            v-model="courseQuery"
+            type="search"
+            placeholder="搜索课程号或课程名"
+        /></label>
         <p v-if="coursesStatus === 'loading'" class="microcopy" role="status">
           正在读取课程…
         </p>
@@ -504,323 +557,479 @@ onUnmounted(() => controller?.abort());
         >
           {{ coursesError }}
         </p>
-        <template v-else>
-          <p class="microcopy">
-            培养方案里共 {{ courseCount }} 条课程记录，按要求类别分组。
-            点开一门课才会去查它的评价。
-            <strong>本学期谁上课、周几第几节，要等选课开放才公开。</strong>
-          </p>
-          <div v-for="group in courseGroups" :key="group.category">
-            <h3 class="dash-category">
-              {{ group.category }}
-              <span class="dash-count">{{ group.items.length }} 条</span>
-            </h3>
-            <ul class="dash-courses">
-              <li
-                v-for="course in group.items"
-                :key="`${course.courseCode}-${course.name}`"
+        <p v-else-if="courseGroups.length === 0" class="empty-state">
+          {{
+            courseQuery
+              ? "没有找到匹配课程，请换个关键词。"
+              : "当前方案还没有课程资料。"
+          }}
+        </p>
+        <details
+          v-for="group in courseGroups"
+          v-else
+          :key="group.category"
+          class="catalog-group"
+          :open="Boolean(courseQuery)"
+        >
+          <summary>
+            {{ group.category }} <span>{{ group.items.length }} 条</span>
+          </summary>
+          <ul class="dash-courses">
+            <li
+              v-for="course in group.items"
+              :key="`${course.courseCode}-${course.name}`"
+            >
+              <button
+                class="dash-course"
+                type="button"
+                :aria-expanded="expanded === course.courseCode"
+                @click="toggleCourse(course)"
               >
+                <span class="dash-course__name">{{ course.name }}</span
+                ><span class="dash-course__meta"
+                  >{{ course.courseCode }} · {{ formatCredits(course.credits)
+                  }}<template v-if="course.suggestedTerm">
+                    · 建议 {{ course.suggestedTerm }}</template
+                  ></span
+                ><span class="course-open" aria-hidden="true">{{
+                  expanded === course.courseCode ? "−" : "+"
+                }}</span>
+              </button>
+              <div
+                v-if="expanded === course.courseCode"
+                class="dash-course__body"
+              >
+                <p
+                  v-if="reviewStatus[course.courseCode] === 'loading'"
+                  class="microcopy"
+                  role="status"
+                >
+                  正在读取评价…
+                </p>
                 <button
-                  class="dash-course"
+                  v-else-if="reviewStatus[course.courseCode] === 'error'"
                   type="button"
-                  :aria-expanded="expanded === course.courseCode"
+                  class="linkbtn"
                   @click="toggleCourse(course)"
                 >
-                  <span class="dash-course__name">{{ course.name }}</span>
-                  <span class="dash-course__meta">
-                    {{ course.courseCode }} ·
-                    {{ formatCredits(course.credits) }}
-                    <template v-if="course.suggestedTerm">
-                      · 建议 {{ course.suggestedTerm }}
-                    </template>
-                  </span>
+                  评价读取失败，点击重试
                 </button>
-                <div
-                  v-if="expanded === course.courseCode"
-                  class="dash-course__body"
-                >
-                  <p
-                    v-if="reviewStatus[course.courseCode] === 'loading'"
-                    class="microcopy"
-                    role="status"
-                  >
-                    正在读取评价…
-                  </p>
-                  <p
-                    v-else-if="reviewStatus[course.courseCode] === 'error'"
+                <template v-else
+                  ><p
+                    v-if="
+                      (reviewsByCourse[course.courseCode] ?? []).length === 0 &&
+                      !reviewUnconfirmed[course.courseCode]
+                    "
                     class="microcopy"
                   >
-                    评价暂时读不出来，再点一次可重试。
+                    暂无评价记录。
                   </p>
-                  <template v-else>
-                    <p
+                  <template v-else
+                    ><p
                       v-if="
-                        (reviewsByCourse[course.courseCode] ?? []).length === 0
+                        reviewUnconfirmed[course.courseCode] &&
+                        !reviewsByCourse[course.courseCode].length
                       "
                       class="microcopy"
                     >
-                      暂无评价记录。
+                      评价资料状态未确认，当前没有可展示的评价记录。
                     </p>
-                    <template v-else>
-                      <p class="microcopy">
-                        评价 {{ reviewsByCourse[course.courseCode].length }} 条
-                        · 维度：{{
-                          dimensionsOf(course.courseCode).join(" / ")
-                        }}
-                      </p>
-                      <p
-                        v-if="boundTeachers(course.courseCode).length > 0"
-                        class="microcopy"
-                      >
-                        已确认教过这门课的教师：{{
-                          boundTeachers(course.courseCode).join("、")
-                        }}（历史记录，不代表本学期谁上）
-                      </p>
-                      <p
-                        v-if="unboundNoteCount(course.courseCode) > 0"
-                        class="microcopy"
-                      >
-                        另有 {{ unboundNoteCount(course.courseCode) }}
-                        条评价提到了教师名，但服务端没有确认这位教师教过这门课，
-                        所以不列进上面的名单。
-                      </p>
-                      <ul class="dash-excerpts">
-                        <li
-                          v-for="note in reviewsByCourse[course.courseCode]"
-                          :key="note.reviewNoteId"
-                        >
-                          <blockquote>{{ note.excerpt }}</blockquote>
-                          <span class="microcopy">
-                            {{ note.termId ?? "学期未注明" }} ·
-                            {{ note.matchStatus }}
-                          </span>
-                        </li>
-                      </ul>
-                    </template>
-                  </template>
-                </div>
-              </li>
-            </ul>
-          </div>
-        </template>
+                    <p v-else class="microcopy">
+                      评价 {{ reviewsByCourse[course.courseCode].length }} 条
+                    </p>
+                    <p
+                      v-if="boundTeachers(course.courseCode).length"
+                      class="microcopy"
+                    >
+                      已确认教过这门课的教师：{{
+                        boundTeachers(course.courseCode).join("、")
+                      }}（历史记录，不代表下学期任课）
+                    </p>
+                    <p
+                      v-if="unboundNoteCount(course.courseCode)"
+                      class="microcopy"
+                    >
+                      部分评价没有确认这位教师教过这门课，仅按课程参考。
+                    </p>
+                    <ReviewSummary
+                      :course-code="course.courseCode"
+                      :unconfirmed="reviewUnconfirmed[course.courseCode]"
+                      :notes="reviewsByCourse[course.courseCode]" /></template
+                ></template>
+              </div>
+            </li>
+          </ul>
+        </details>
       </section>
-
-      <!-- ④ 开始选课 -->
-      <section class="dash-block" aria-labelledby="dash-start">
-        <h2 id="dash-start">开始选课</h2>
+      <section
+        v-else
+        class="dashboard-panel"
+        aria-labelledby="directions-title"
+      >
+        <h2 id="directions-title">还没有明确方向，也可以先了解</h2>
         <p class="microcopy">
-          进现有的规划流程：先问几个问题，再按学分缺口挑课，最后给出方案。
+          方向资料帮助你表达兴趣，选课仍要结合培养方案和课程来源。
         </p>
-        <RouterLink class="button button--primary" to="/plan/questions/goals">
-          开始选课
-        </RouterLink>
+        <p v-if="directionsStatus === 'loading'" role="status">
+          正在读取方向资料…
+        </p>
+        <p
+          v-else-if="directionsStatus === 'error'"
+          class="notice notice--error"
+          role="alert"
+        >
+          {{ directionsError }}
+        </p>
+        <p v-else-if="directions.length === 0" class="empty-state">
+          暂时没有方向资料。你可以直接写下感兴趣的主题，继续需求引导。
+        </p>
+        <ul v-else class="dash-directions">
+          <li v-for="item in directions" :key="item.directionId">
+            <h3>{{ item.title }}</h3>
+            <p>{{ item.description }}</p>
+            <p v-if="item.courseCodes.length" class="microcopy">
+              相关课程：{{
+                item.courseCodes
+                  .map((code) => importedCourseNames.get(code) || code)
+                  .join("、")
+              }}
+            </p>
+          </li>
+        </ul>
+      </section>
+      <section class="plan-start" aria-labelledby="plan-start-title">
+        <div>
+          <p class="eyebrow">下一步 · 整理需求</p>
+          <h2 id="plan-start-title">你想怎样安排下学期？</h2>
+          <p class="microcopy">
+            可以先讨论课程与方向；确认采用的兴趣或课程会进入本次规划草稿。完整引导仍会逐步确认目标、偏好和时间。
+          </p>
+        </div>
+        <AdviceChat />
+        <div class="plan-start__actions">
+          <RouterLink class="button button--primary" to="/plan/questions/goals"
+            >继续完整需求引导 →</RouterLink
+          ><RouterLink
+            v-if="store.planningResult"
+            class="button button--secondary"
+            to="/plan/result"
+            >查看已有方案</RouterLink
+          >
+        </div>
       </section>
     </template>
   </section>
 </template>
 
 <style scoped>
-.dash-block {
-  margin: 1.25rem 0;
-  padding: 1rem 1.1rem;
-  border: 1px solid var(--line);
-  border-radius: 14px;
+.dashboard-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.7rem;
 }
-
-.dash-block h2 {
-  margin: 0 0 0.5rem;
+.dashboard-heading h1 {
+  margin-bottom: 0.4rem;
+}
+.source-pill {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.dashboard-subtitle {
+  margin: 0;
+  color: var(--soft);
+  font-size: 0.9rem;
+}
+.student-journey {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  list-style: none;
+  margin: 0 0 2rem;
+  padding: 1.2rem 0;
+  border-block: 1px solid var(--line);
+}
+.student-journey li {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.student-journey strong {
+  font-size: 0.85rem;
+  font-weight: 550;
+}
+.student-journey small {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--soft);
+}
+.journey-dot {
+  width: 1.65rem;
+  height: 1.65rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  font-size: 0.75rem;
+  color: var(--soft);
+}
+.journey-dot.is-complete {
+  background: var(--green);
+  border-color: var(--green);
+  color: white;
+}
+.view-switch {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+.view-switch button {
+  background: transparent;
+  color: var(--soft);
+  padding: 0.8rem 1rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font-size: 0.9rem;
+}
+.view-switch button[aria-pressed="true"] {
+  color: var(--green);
+  font-weight: 600;
+  border-bottom-color: var(--green);
+}
+.dashboard-panel {
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  min-height: 180px;
+}
+.dashboard-panel h2,
+.plan-start h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  line-height: 1.5;
+}
+.dashboard-panel h3 {
   font-size: 1rem;
 }
-
-.dash-picker {
+.section-heading {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0.5rem 0;
-  font-size: 0.88rem;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
 }
-
-.dash-picker select {
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: white;
-  font-size: 0.88rem;
-  max-width: 100%;
-}
-
-.dash-plan {
-  margin: 0 0 0.5rem;
-  font-weight: 550;
-}
-
-.dash-badge {
-  margin-left: 0.5rem;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--wash);
-  border: 1px solid var(--line);
-  font-size: 0.75rem;
-  font-weight: 400;
+.empty-state {
   color: var(--soft);
-  white-space: nowrap;
+  padding-block: 1.5rem;
 }
-
+.empty-state h3 {
+  color: var(--ink);
+  margin: 0 0 0.5rem;
+}
+.dash-picker {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 28rem;
+}
+.dash-picker select {
+  width: 100%;
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
 .dash-audit,
 .dash-audit ul,
-.dash-courses,
-.dash-directions,
 .dash-learned,
-.dash-excerpts {
+.dash-courses,
+.dash-directions {
   list-style: none;
-  margin: 0.35rem 0 0;
   padding: 0;
+  margin: 0.75rem 0 0;
 }
-
 .dash-audit > li {
-  margin-bottom: 0.6rem;
+  padding-block: 0.5rem;
 }
-
-.dash-audit ul li,
-.dash-learned li {
-  font-size: 0.88rem;
+.dash-audit ul {
   color: var(--soft);
-  padding: 2px 0;
+  font-size: 0.85rem;
+  margin-top: 0.3rem;
 }
-
+.dash-learned li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 0;
+  font-size: 0.85rem;
+}
+.dash-learned li > span:last-child {
+  color: var(--soft);
+}
+.dash-answer {
+  background: var(--wash);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+.catalog-search input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--canvas);
+  margin-bottom: 1rem;
+}
+.catalog-group {
+  border-bottom: 1px solid var(--line);
+  padding-block: 0.75rem;
+}
+.catalog-group > summary {
+  cursor: pointer;
+  font-weight: 550;
+  font-size: 0.9rem;
+}
+.catalog-group > summary > span {
+  float: right;
+  color: var(--soft);
+  font-weight: 400;
+  font-size: 0.8rem;
+}
+.dash-courses > li {
+  border-top: 1px solid var(--line);
+}
+.dash-course {
+  width: 100%;
+  position: relative;
+  display: grid;
+  gap: 0.25rem;
+  text-align: left;
+  border: 0;
+  padding: 0.9rem 2rem 0.9rem 0.25rem;
+  background: transparent;
+}
+.dash-course__name {
+  font-weight: 550;
+  font-size: 0.95rem;
+}
+.dash-course__meta {
+  color: var(--soft);
+  font-size: 0.8rem;
+}
+.course-open {
+  position: absolute;
+  right: 0.4rem;
+  top: 1rem;
+  color: var(--green);
+}
+.dash-course__body {
+  padding: 0.25rem 0.5rem 1rem;
+}
+.dash-directions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.dash-directions li {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.dash-directions h3 {
+  margin: 0 0 0.5rem;
+}
+.dash-directions p {
+  color: var(--soft);
+  font-size: 0.9rem;
+}
+.plan-start {
+  padding: 1.6rem;
+  margin-top: 1.5rem;
+  border-radius: 16px;
+  background: var(--wash);
+  border: 1px solid var(--line);
+}
 .dash-ask-label {
   display: block;
-  margin: 0.6rem 0 0.5rem;
-  font-size: 0.88rem;
-  font-weight: 550;
+  margin-top: 1.25rem;
+  font-size: 0.85rem;
 }
-
 .dash-ask-input {
   display: block;
   width: 100%;
-  margin-top: 0.35rem;
-  padding: 0.6rem 0.7rem;
+  min-height: 88px;
+  padding: 0.85rem;
+  margin-top: 0.5rem;
   border: 1px solid var(--line);
   border-radius: 10px;
-  font: inherit;
-  font-size: 0.9rem;
-  line-height: 1.6;
+  background: var(--surface);
   resize: vertical;
 }
-
 .dash-samples {
   display: flex;
+  gap: 0.45rem;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-bottom: 0.7rem;
+  margin-block: 0.8rem 1.2rem;
 }
-
 .dash-sample {
-  padding: 5px 10px;
+  padding: 0.4rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--wash);
-  color: var(--green);
-  font-size: 0.8rem;
-  cursor: pointer;
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 0.75rem;
+  color: var(--soft);
+  text-align: left;
 }
-
-.dash-sample:hover {
-  background: white;
-}
-
-.dash-ask-row {
+.plan-start__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
-  margin: 0.5rem 0;
+  gap: 0.7rem;
 }
-
-.dash-answer {
-  margin-top: 0.75rem;
-  padding: 0.85rem 1rem;
-  border-radius: 12px;
-  background: var(--wash);
-}
-
-.dash-directions > li {
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.dash-directions > li:last-child {
-  border-bottom: 0;
-}
-
-.dash-category {
-  margin: 1rem 0 0.35rem;
-  font-size: 0.9rem;
-  color: var(--soft);
-}
-
-.dash-count {
-  font-weight: 400;
-}
-
-.dash-courses > li {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  margin-bottom: 0.5rem;
-  overflow: hidden;
-}
-
-.dash-course {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  padding: 0.7rem 0.85rem;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.dash-course:hover {
-  background: var(--wash);
-}
-
-.dash-course__name {
-  font-weight: 550;
-  color: var(--ink);
-}
-
-.dash-course__meta {
-  font-size: 0.8rem;
-  color: var(--soft);
-}
-
-.dash-course__body {
-  padding: 0 0.85rem 0.8rem;
-  border-top: 1px solid var(--line);
-}
-
-.dash-excerpts > li {
-  padding: 0.4rem 0;
-}
-
-.dash-excerpts blockquote {
-  margin: 0 0 2px;
-  padding-left: 0.65rem;
-  border-left: 3px solid var(--line);
-  font-size: 0.88rem;
-  line-height: 1.6;
-}
-
-@media (max-width: 540px) {
-  .dash-ask-row {
-    flex-direction: column;
+@media (max-width: 640px) {
+  .dashboard-heading {
+    align-items: flex-start;
   }
-
-  .dash-ask-row > * {
-    width: 100%;
+  .dashboard-heading .button {
+    font-size: 0.8rem;
+    padding: 0.7rem;
+    min-width: auto;
+  }
+  .student-journey li {
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+  .student-journey small {
+    font-size: 0.7rem;
+  }
+  .journey-dot {
+    width: 1.4rem;
+    height: 1.4rem;
+    flex: none;
+  }
+  .dashboard-panel,
+  .plan-start {
+    padding: 1.1rem;
+  }
+  .view-switch {
+    gap: 0;
+  }
+  .view-switch button {
+    flex: 1;
+    padding-inline: 0.3rem;
+    font-size: 0.85rem;
+  }
+  .dash-directions {
+    grid-template-columns: 1fr;
+  }
+  .dash-learned li {
+    flex-direction: column;
+    gap: 0.2rem;
   }
 }
 </style>

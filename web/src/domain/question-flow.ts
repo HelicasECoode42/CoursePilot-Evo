@@ -34,6 +34,14 @@ export interface PlanningDraft {
    * 前缀，拿它装一个通用问题会把问题框成职业方向，模型读到的就是歪的。
    */
   questionText: string;
+  /**
+   * 要改的那份方案的 planId。
+   *
+   * 契约和 Runner 本来就支持续问（docs/04：previousPlanId 必须属于本会话），
+   * 但前端一直把它写死成 null，所以学生在结果页只能手动搜课换课，
+   * 没法回头跟模型说「按这个改」。
+   */
+  previousPlanId: string | null;
   motives: Motive[];
   classPreferences: ClassPreferenceId[];
   classPreferencesReviewed: boolean;
@@ -44,6 +52,7 @@ export interface PlanningDraft {
   teacherHandoffAccepted: boolean;
   teacherPicks: TeacherPick[];
   selectedCourseCodes: string[];
+  preferredCourseCodes: string[];
   mustSlots: string[];
   mustReviewed: boolean;
   preferSlots: string[];
@@ -54,6 +63,7 @@ export interface PlanningDraft {
 
 export const emptyPlanningDraft = (): PlanningDraft => ({
   questionText: "",
+  previousPlanId: null,
   motives: [],
   classPreferences: [],
   classPreferencesReviewed: false,
@@ -64,6 +74,7 @@ export const emptyPlanningDraft = (): PlanningDraft => ({
   teacherHandoffAccepted: false,
   teacherPicks: [],
   selectedCourseCodes: [],
+  preferredCourseCodes: [],
   mustSlots: [],
   mustReviewed: false,
   preferSlots: [],

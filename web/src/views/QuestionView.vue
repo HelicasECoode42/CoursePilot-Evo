@@ -9,6 +9,7 @@ import {
 } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { api } from "../api";
+import DirectionSuggestions from "../components/DirectionSuggestions.vue";
 import type { Motive, SnapshotSummary } from "../contracts";
 import { CLASS_PREFERENCE_OPTIONS } from "../domain/class-preferences";
 import { MOTIVE_LABELS, MOTIVE_OPTIONS } from "../domain/goals";
@@ -68,6 +69,17 @@ function toggleMotive(motive: Motive) {
     ? selectedGoals.value.filter((item) => item !== motive)
     : [...selectedGoals.value, motive];
   store.setMotives(next);
+}
+
+function addDirection(title: string) {
+  const current = store.draft.careerText;
+  const addition = `${current.length ? "；" : ""}想了解${title}`;
+  if (
+    current.includes(`想了解${title}`) ||
+    current.length + addition.length > 1000
+  )
+    return;
+  store.updateDraft("careerText", current + addition);
 }
 
 function advance() {
@@ -235,6 +247,17 @@ function curriculumOptionLabel(item: SnapshotSummary, index: number): string {
       ? `演示培养方案 ${index + 1}`
       : `培养方案 ${index + 1}`;
   return `${label} · 资料记录于 ${date}`;
+}
+
+/**
+ * 画像里的课程只显示编号时，学生认不出是哪门。名字来自本会话里对话返回的课程
+ * 卡片；没有对应卡片时只能退回编号，不能编造名字。
+ */
+function courseLabel(code: string): string {
+  const named = store.adviceMessages
+    .flatMap((item) => item.answer?.courses ?? [])
+    .find((course) => course.courseCode === code);
+  return named ? `${named.name}（${code}）` : code;
 }
 
 function scheduleSummary(keys: readonly string[]): string {
@@ -499,6 +522,10 @@ async function openRecords() {
           )
         "
       ></textarea>
+      <DirectionSuggestions
+        :selected-text="store.draft.careerText"
+        @choose="addDirection"
+      />
     </template>
 
     <template v-else-if="selectedQuestion === 'teacher'">
@@ -797,6 +824,38 @@ async function openRecords() {
                 }}
                 ·
                 {{ pick.mode === "MUST" ? "必须保留" : "优先考虑" }}
+              </li>
+            </ul>
+          </dd>
+        </div>
+        <div>
+          <dt>已选课程</dt>
+          <dd v-if="store.draft.selectedCourseCodes.length === 0">
+            这一项留空了
+          </dd>
+          <dd v-else>
+            <ul class="summary-list">
+              <li
+                v-for="code in store.draft.selectedCourseCodes"
+                :key="`selected:${code}`"
+              >
+                {{ courseLabel(code) }} · 已选入，方案中必须保留
+              </li>
+            </ul>
+          </dd>
+        </div>
+        <div>
+          <dt>优先考虑的课程</dt>
+          <dd v-if="store.draft.preferredCourseCodes.length === 0">
+            这一项留空了
+          </dd>
+          <dd v-else>
+            <ul class="summary-list">
+              <li
+                v-for="code in store.draft.preferredCourseCodes"
+                :key="`preferred:${code}`"
+              >
+                {{ courseLabel(code) }} · 尽量优先
               </li>
             </ul>
           </dd>

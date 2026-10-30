@@ -5,6 +5,8 @@ import { api } from "../api";
 import type {
   AcademicRecord,
   AcademicRecordInput,
+  AdviceChatAnswer,
+  AdviceChatRequest,
   AuditResult,
   CompletedCourse,
   Motive,
@@ -18,7 +20,11 @@ import type {
   SchoolProgressImportResult,
   SchoolProgressSnapshot,
 } from "../domain/school-progress";
-import { keyForRequest, type IdempotencyKeyState } from "../domain/idempotency";
+import {
+  keyForRequest,
+  requestDigest,
+  type IdempotencyKeyState,
+} from "../domain/idempotency";
 import { buildRecordInput } from "../domain/academic-record";
 import type { ClassPreferenceId } from "../domain/class-preferences";
 import {
@@ -73,6 +79,26 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     const errorMessage = ref("");
     const sessionVersion = ref(0);
     const draft = ref<PlanningDraft>(emptyPlanningDraft());
+    const adviceMessages = ref<
+      Array<{
+        role: "user" | "assistant";
+        text: string;
+        answer?: AdviceChatAnswer;
+      }>
+    >([]);
+    const adviceError = ref("");
+    const adviceBusy = ref(false);
+    const advicePendingMessage = ref("");
+    const adviceFailure = ref<{
+      text: string;
+      /** none：额度已用尽，同一会话里重试或重新生成都不会成功。 */
+      retryMode: "same-key" | "regenerate" | "none";
+    } | null>(null);
+    const adoptedAdviceSuggestions = ref<string[]>([]);
+    let adviceKeyState: IdempotencyKeyState | null = null;
+    let adviceFailedRequest: AdviceChatRequest | null = null;
+    let adviceFailedKeyState: IdempotencyKeyState | null = null;
+    let adviceController: AbortController | null = null;
     /** 仅供界面显示的教师姓名，键为课程号与教师键；不进入规划草稿或请求。 */
     const teacherPickDisplayNames = ref<Record<string, string>>({});
     function setTeacherPickDisplayName(
@@ -119,6 +145,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     let schoolProgressLoadVersion = 0;
     let submitController: AbortController | null = null;
     let submitVersion = 0;
+    let adviceVersion = 0;
     let keyState: IdempotencyKeyState | null = null;
     let recordKeyState: IdempotencyKeyState | null = null;
     let schoolProgressKeyState: IdempotencyKeyState | null = null;
@@ -195,6 +222,302 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       clearPlanningHandoff();
     }
 
+    function clearAdviceChat() {
+      adviceVersion += 1;
+      adviceController?.abort();
+      adviceController = null;
+      adviceMessages.value = [];
+      adviceError.value = "";
+      adviceBusy.value = false;
+      advicePendingMessage.value = "";
+      adviceFailure.value = null;
+      adoptedAdviceSuggestions.value = [];
+      adviceKeyState = null;
+      adviceFailedRequest = null;
+      adviceFailedKeyState = null;
+    }
+
+    function adviceFailureDetails(error: unknown) {
+      const code = error instanceof ApiFailure ? error.code : null;
+      if (code === "BUDGET_EXCEEDED") {
+        // 会话累计额度已满：服务端明确不可重试。原先这里落到「重新生成回答」，
+        // 学生会一直点一个注定失败的按钮，而且看不到「请新建会话」的原因。
+        return {
+          retryMode: "none" as const,
+          message:
+            "本会话的对话额度已用完，无法再生成回答。请刷新页面重新开始；刷新后草稿会清空。",
+        };
+      }
+      if (code === "MODEL_INVALID_OUTPUT") {
+        return {
+          retryMode: "regenerate" as const,
+          message:
+            "这次回答未能生成，返回内容未通过接口校验。可重新生成回答或修改问题。",
+        };
+      }
+      if (code === "MODEL_OUTPUT_TRUNCATED") {
+        return {
+          retryMode: "regenerate" as const,
+          message: "这次回答未能完整生成。可重新生成回答或修改问题。",
+        };
+      }
+      if (
+        error instanceof ApiFailure &&
+        (error.retryable ||
+          error.kind === "network" ||
+          error.kind === "timeout")
+      ) {
+        return {
+          retryMode: "same-key" as const,
+          message: error.message,
+        };
+      }
+      return {
+        retryMode: "regenerate" as const,
+        message: "这次回答未能生成。可重新生成回答或修改问题。",
+      };
+    }
+
+    async function executeAdviceRequest(
+      message: string,
+      body: AdviceChatRequest,
+      keyState: IdempotencyKeyState,
+    ): Promise<boolean> {
+      const requestVersion = ++adviceVersion;
+      const sessionAtStart = sessionId.value;
+      const curriculumAtStart = body.curriculumSnapshotId;
+      const isCurrentRequest = () =>
+        adviceVersion === requestVersion &&
+        sessionId.value === sessionAtStart &&
+        selectedCurriculumId.value === curriculumAtStart;
+      adviceKeyState = keyState;
+      adviceBusy.value = true;
+      adviceError.value = "";
+      advicePendingMessage.value = message;
+      const controller = new AbortController();
+      adviceController = controller;
+      try {
+        const answer = await client.adviceChat(
+          body,
+          keyState.key,
+          controller.signal,
+        );
+        if (!isCurrentRequest()) return false;
+        adviceMessages.value = [
+          ...adviceMessages.value,
+          { role: "user", text: message },
+          { role: "assistant", text: answer.reply, answer },
+        ];
+        adviceFailure.value = null;
+        adviceFailedRequest = null;
+        adviceFailedKeyState = null;
+        return true;
+      } catch (error) {
+        if (!isCurrentRequest()) return false;
+        if (error instanceof ApiFailure && error.kind === "aborted")
+          return false;
+        if (error instanceof ApiFailure && error.status === 401) {
+          invalidateSession(error.message);
+          return false;
+        }
+        const failure = adviceFailureDetails(error);
+        adviceFailure.value = { text: message, retryMode: failure.retryMode };
+        adviceFailedRequest = body;
+        adviceFailedKeyState = keyState;
+        adviceError.value = failure.message;
+        return false;
+      } finally {
+        if (isCurrentRequest()) {
+          if (adviceController === controller) adviceController = null;
+          adviceBusy.value = false;
+          advicePendingMessage.value = "";
+        }
+      }
+    }
+
+    async function sendAdviceMessage(rawText: string): Promise<boolean> {
+      const message = rawText.trim();
+      if (adviceBusy.value || message.length === 0 || message.length > 1000)
+        return false;
+      const curriculumSnapshotId = selectedCurriculumId.value;
+      if (!sessionId.value || !curriculumSnapshotId) {
+        adviceError.value = "请先建立会话并选择培养方案。";
+        return false;
+      }
+      const body: AdviceChatRequest = {
+        schemaVersion: "1.0",
+        curriculumSnapshotId,
+        academicRecordId: selectedRecord.value?.academicRecordId ?? null,
+        mode: planningMode.value,
+        message,
+        history: adviceMessages.value
+          .slice(-8)
+          .map(({ role, text }) => ({ role, text })),
+        interestText: draft.value.careerText.slice(0, 1000),
+        selectedCourseCodes: draft.value.selectedCourseCodes.slice(0, 10),
+        preferredCourseCodes: draft.value.preferredCourseCodes.slice(0, 10),
+      };
+      const digest = requestDigest(body);
+      if (
+        adviceFailedRequest &&
+        requestDigest(adviceFailedRequest) === digest
+      ) {
+        adviceError.value = "这条问题已有失败记录，请选择重试或重新生成回答。";
+        return false;
+      }
+      const keyState = keyForRequest(adviceKeyState, body, newIdempotencyKey);
+      return executeAdviceRequest(message, body, keyState);
+    }
+
+    function retryAdviceMessage() {
+      const body = adviceFailedRequest;
+      const failed = adviceFailure.value;
+      const keyState = adviceFailedKeyState;
+      if (
+        !failed ||
+        failed.retryMode === "none" ||
+        !body ||
+        !keyState ||
+        adviceBusy.value
+      )
+        return Promise.resolve(false);
+      return executeAdviceRequest(failed.text, body, keyState);
+    }
+
+    function regenerateAdviceMessage() {
+      const body = adviceFailedRequest;
+      const failed = adviceFailure.value;
+      if (!failed || failed.retryMode === "none" || !body || adviceBusy.value)
+        return Promise.resolve(false);
+      const keyState = {
+        digest: requestDigest(body),
+        key: newIdempotencyKey(),
+      };
+      return executeAdviceRequest(failed.text, body, keyState);
+    }
+
+    function adoptAdviceSuggestion(
+      answer: AdviceChatAnswer,
+      suggestionId: string,
+    ): boolean {
+      const suggestion = answer.suggestions.find(
+        (item) => item.suggestionId === suggestionId,
+      );
+      if (!suggestion) return false;
+      if (adoptedAdviceSuggestions.value.includes(suggestionId)) return true;
+      if (suggestion.kind === "INTEREST") {
+        const previous = draft.value.careerText;
+        const addition = suggestion.value.trim();
+        if (!addition) return false;
+        if (previous.includes(addition)) {
+          adoptedAdviceSuggestions.value = [
+            ...adoptedAdviceSuggestions.value,
+            suggestionId,
+          ];
+          return true;
+        }
+        const separator = previous.trim() ? "；" : "";
+        const available = 1000 - previous.length - separator.length;
+        if (available <= 0) {
+          adviceError.value = "兴趣文本已达到 1000 字符上限，未添加这条建议。";
+          return false;
+        }
+        draft.value.careerText = `${previous}${separator}${addition.slice(0, available)}`;
+        draft.value.careerReviewed = false;
+        clearPlanningHandoff();
+        adoptedAdviceSuggestions.value = [
+          ...adoptedAdviceSuggestions.value,
+          suggestionId,
+        ];
+        return true;
+      }
+      const course = answer.courses.find(
+        (item) => item.courseCode === suggestion.value,
+      );
+      if (!course) return false;
+      const outcome = selectedRecord.value?.completedCourses.find(
+        (item) => item.courseCode === course.courseCode,
+      )?.outcome;
+      if (outcome === "PASSED" || outcome === "IN_PROGRESS") {
+        adviceError.value =
+          outcome === "PASSED"
+            ? "这门课程已通过，未加入规划草稿。"
+            : "这门课程正在修读，未加入规划草稿。";
+        return false;
+      }
+      if (suggestion.kind === "PREFER_COURSE") {
+        if (
+          draft.value.preferredCourseCodes.includes(course.courseCode) ||
+          draft.value.selectedCourseCodes.includes(course.courseCode)
+        ) {
+          adoptedAdviceSuggestions.value = [
+            ...adoptedAdviceSuggestions.value,
+            suggestionId,
+          ];
+          return true;
+        }
+        if (draft.value.preferredCourseCodes.length >= 10) return false;
+        updateDraft("preferredCourseCodes", [
+          ...draft.value.preferredCourseCodes,
+          course.courseCode,
+        ]);
+      } else {
+        if (draft.value.selectedCourseCodes.includes(course.courseCode)) {
+          adoptedAdviceSuggestions.value = [
+            ...adoptedAdviceSuggestions.value,
+            suggestionId,
+          ];
+          return true;
+        }
+        if (draft.value.selectedCourseCodes.length >= 10) return false;
+        updateDraft("selectedCourseCodes", [
+          ...draft.value.selectedCourseCodes,
+          course.courseCode,
+        ]);
+      }
+      adoptedAdviceSuggestions.value = [
+        ...adoptedAdviceSuggestions.value,
+        suggestionId,
+      ];
+      return true;
+    }
+
+    function removeSelectedCourse(courseCode: string) {
+      updateDraft(
+        "selectedCourseCodes",
+        draft.value.selectedCourseCodes.filter((code) => code !== courseCode),
+      );
+      adoptedAdviceSuggestions.value = adoptedAdviceSuggestions.value.filter(
+        (id) =>
+          !adviceMessages.value.some((item) =>
+            item.answer?.suggestions.some(
+              (suggestion) =>
+                suggestion.suggestionId === id &&
+                suggestion.value === courseCode &&
+                suggestion.kind === "SELECT_COURSE",
+            ),
+          ),
+      );
+    }
+
+    function removePreferredCourse(courseCode: string) {
+      updateDraft(
+        "preferredCourseCodes",
+        draft.value.preferredCourseCodes.filter((code) => code !== courseCode),
+      );
+      adoptedAdviceSuggestions.value = adoptedAdviceSuggestions.value.filter(
+        (id) =>
+          !adviceMessages.value.some((item) =>
+            item.answer?.suggestions.some(
+              (suggestion) =>
+                suggestion.suggestionId === id &&
+                suggestion.value === courseCode &&
+                suggestion.kind === "PREFER_COURSE",
+            ),
+          ),
+      );
+    }
+
     /**
      * 同一批内容的重试复用幂等键；内容变了换新键。规则和规划提交共用
      * domain/idempotency.ts 的 keyForRequest，不在这里另写一份。
@@ -245,6 +568,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     }
 
     function invalidateSession(message = "本次会话已失效，请重新开始。") {
+      clearAdviceChat();
       clearExpiryTimer();
       const controller = activeController;
       activeController = null;
@@ -442,6 +766,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       if (!curricula.value.some((item) => item.snapshotId === snapshotId))
         return;
       selectedCurriculumId.value = snapshotId;
+      clearAdviceChat();
       clearPlanningHandoff();
       // 核对绑定培养方案版本，换方案后旧核对结果不再适用。
       discardRecords();
@@ -1010,6 +1335,18 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       unknownMessages,
       errorMessage,
       draft,
+      adviceMessages,
+      adoptedAdviceSuggestions,
+      adviceError,
+      adviceBusy,
+      advicePendingMessage,
+      adviceFailure,
+      sendAdviceMessage,
+      retryAdviceMessage,
+      regenerateAdviceMessage,
+      adoptAdviceSuggestion,
+      removeSelectedCourse,
+      removePreferredCourse,
       teacherPickDisplayNames,
       setTeacherPickDisplayName,
       planningHandoff,

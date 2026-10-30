@@ -10,6 +10,8 @@
   --green: #226c50;
   --wash: #f2f7f4;
   --line: #e1e8e3;
+  --surface: #fff;
+  --canvas: #fcfdfb;
 }
 
 * {
@@ -20,7 +22,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background: #fff;
+  background: var(--canvas);
 }
 
 button,
@@ -65,6 +67,43 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.main-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.main-nav a {
+  padding: 9px 14px;
+  border-radius: 9px;
+  text-decoration: none;
+  font-size: 13px;
+  color: var(--soft);
+  white-space: nowrap;
+}
+.main-nav a:hover {
+  background: var(--wash);
+  color: var(--green);
+}
+.main-nav a[aria-current="page"] {
+  background: var(--wash);
+  color: var(--green);
+  font-weight: 600;
+}
+.skip-link {
+  position: absolute;
+  left: 20px;
+  top: -80px;
+  z-index: 100;
+  padding: 12px 16px;
+  background: var(--surface);
+  color: var(--green);
+}
+.skip-link:focus {
+  top: 12px;
 }
 
 .brand {
@@ -108,6 +147,14 @@ select:focus-visible {
   min-height: 500px;
   margin: 32px auto 20px;
   flex: 1;
+}
+
+.page-shell--wide {
+  width: min(1040px, calc(100% - 64px));
+  margin-top: 52px;
+}
+.page-shell:focus {
+  outline: none;
 }
 
 .start-card,
@@ -672,8 +719,22 @@ fieldset {
 
 @media (max-width: 540px) {
   .topbar {
-    height: 67px;
-    padding: 0 20px;
+    min-height: 96px;
+    padding: 14px 20px 8px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .main-nav {
+    order: 3;
+    width: 100%;
+    justify-content: space-between;
+  }
+  .main-nav a {
+    padding: 7px 10px;
+  }
+  .page-shell--wide {
+    width: calc(100% - 40px);
+    margin-top: 28px;
   }
 
   .brand {

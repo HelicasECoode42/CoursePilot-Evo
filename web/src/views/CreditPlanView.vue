@@ -26,6 +26,7 @@ import {
 } from "../domain/credit-plan";
 import { explainAuditUnknown } from "../domain/academic-record";
 import { usePlanningStore } from "../stores/planning";
+import SchoolProgressTree from "../components/SchoolProgressTree.vue";
 
 /** 课程目录按后端 cursor 翻页读全；上限防止异常分页死循环。 */
 const MAX_CATALOG_PAGES = 20;
@@ -38,6 +39,7 @@ const catalog = ref<Course[]>([]);
 const catalogStatus = ref<"idle" | "loading" | "ready" | "error">("idle");
 const catalogError = ref("");
 let catalogVersion = 0;
+const pagePreparing = ref(false);
 
 /** 已勾选的课程保存在当前规划草稿中，切换页面后仍保留。 */
 const selectedCodes = computed({
@@ -48,6 +50,7 @@ const selectionMessage = ref("");
 /** 每个类别的筛选词与当前页，key 为 requirementId。 */
 const filterOf = ref<Record<string, string>>({});
 const pageOf = ref<Record<string, number>>({});
+const activeRequirementId = ref("");
 
 const audit = computed(() => store.audit);
 const auditMatchesCurriculum = computed(
@@ -67,7 +70,10 @@ const completedCodes = computed(
   () =>
     new Set(
       (sourceRecord.value?.completedCourses ?? [])
-        .filter((course) => course.outcome === "PASSED")
+        .filter(
+          (course) =>
+            course.outcome === "PASSED" || course.outcome === "IN_PROGRESS",
+        )
         .map((course) => course.courseCode.trim()),
     ),
 );
@@ -115,6 +121,17 @@ const plans = computed<CategoryCreditPlan[]>(() => {
     ),
   );
 });
+watch(
+  plans,
+  (items) => {
+    if (
+      !items.some((item) => item.requirementId === activeRequirementId.value)
+    ) {
+      activeRequirementId.value = items[0]?.requirementId ?? "";
+    }
+  },
+  { immediate: true },
+);
 function schoolCategoryReference(category: string | null): string | null {
   if (!category || !store.schoolProgress) return null;
   const matches = store.schoolProgress.snapshot.nodes.filter(
@@ -148,9 +165,16 @@ const canLoad = computed(
 /** 页面顶部的已选清单：只列可计入的已选课程。 */
 const selectedCourses = computed<PlanCourse[]>(() => {
   const picked: PlanCourse[] = [];
+  const seen = new Set<string>();
   for (const plan of plans.value) {
     for (const course of plan.countable) {
-      if (selectedCodes.value.includes(course.courseCode)) picked.push(course);
+      if (
+        selectedCodes.value.includes(course.courseCode) &&
+        !seen.has(course.courseCode)
+      ) {
+        picked.push(course);
+        seen.add(course.courseCode);
+      }
     }
   }
   return picked;
@@ -275,8 +299,41 @@ async function loadCatalog() {
 }
 
 onMounted(() => {
-  if (canLoad.value) void loadCatalog();
+  void prepareCreditPage();
 });
+
+async function prepareCreditPage() {
+  if (pagePreparing.value) return;
+  pagePreparing.value = true;
+  try {
+    if (store.sessionStatus !== "ready") {
+      if (store.sessionStatus === "loading") return;
+      await store.startSession();
+    }
+    if (store.sessionStatus !== "ready" || !store.sessionId) return;
+    const requests: Promise<void>[] = [];
+    if (store.recordsStatus !== "ready") requests.push(store.loadRecords());
+    if (
+      store.selectedCurriculumId &&
+      !store.schoolProgress &&
+      store.schoolProgressStatus !== "loading"
+    ) {
+      requests.push(store.loadSchoolProgress());
+    }
+    await Promise.all(requests);
+    if (canLoad.value && catalogStatus.value === "idle") await loadCatalog();
+  } finally {
+    pagePreparing.value = false;
+  }
+}
+
+watch(
+  () => store.sessionStatus,
+  (status) => {
+    if (status === "ready" && store.recordsStatus === "idle")
+      void prepareCreditPage();
+  },
+);
 
 watch(
   () => store.selectedCurriculumId,
@@ -375,8 +432,73 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
       勾选的课程会加入本次规划，并交由后端重新核验。
     </p>
 
-    <p v-if="!canLoad" class="notice notice--warning" role="note">
-      还没有可用会话。请先回到引导页开始。
+    <p
+      v-if="pagePreparing || store.sessionStatus === 'loading'"
+      class="notice"
+      role="status"
+    >
+      正在准备本次会话和学业记录…
+    </p>
+    <div
+      v-else-if="store.sessionStatus === 'error'"
+      class="notice notice--error"
+      role="alert"
+    >
+      <p>{{ store.errorMessage || "会话准备失败，请重试。" }}</p>
+      <button
+        class="button button--secondary"
+        type="button"
+        @click="prepareCreditPage"
+      >
+        重试准备
+      </button>
+    </div>
+
+    <details v-if="store.schoolProgress" class="school-report-reference">
+      <summary>学校报告进度 · 原始类别与学分</summary>
+      <p class="microcopy">
+        以下数字保留学校报告原值。Java
+        本地核对状态和缺口单独显示，学校类别尚未确认抵扣关系。
+      </p>
+      <SchoolProgressTree
+        :nodes="store.schoolProgress.snapshot.nodes"
+        :courses="store.schoolProgress.snapshot.courses"
+      />
+      <button
+        v-if="!audit || !auditMatchesCurriculum"
+        class="button button--secondary"
+        type="button"
+        @click="goToRecords"
+      >
+        去学业资料运行本地核对
+      </button>
+    </details>
+
+    <p
+      v-if="
+        store.sessionStatus === 'ready' &&
+        store.sessionId &&
+        !store.selectedCurriculumId
+      "
+      class="notice notice--warning"
+      role="note"
+    >
+      本次会话尚未选择培养方案。<RouterLink to="/records">
+        去学业资料选择培养方案并核对
+      </RouterLink>
+    </p>
+    <p
+      v-else-if="
+        !canLoad &&
+        store.sessionStatus !== 'error' &&
+        store.sessionStatus !== 'loading'
+      "
+      class="notice notice--warning"
+      role="note"
+    >
+      尚未准备好学业会话。<RouterLink to="/records?import=school">
+        去学业资料导入
+      </RouterLink>
     </p>
 
     <template v-else>
@@ -396,6 +518,18 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
 
       <p v-if="!audit" class="notice notice--warning" role="note">
         还没有学业核对结果，无法知道每个类别还差多少学分。
+        <span v-if="store.recordsStatus === 'error'">
+          {{ store.recordsError }}
+        </span>
+        <span v-else-if="store.records.length === 0">
+          当前会话还没有学业记录，请先导入学校进度或补录已修课程。
+        </span>
+        <RouterLink
+          v-if="store.records.length === 0"
+          to="/records?import=school"
+        >
+          去学业资料导入
+        </RouterLink>
         <button
           class="button button--secondary"
           type="button"
@@ -446,259 +580,313 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
         </div>
 
         <!-- 已选清单：全页共用，实时反映勾选。 -->
-        <section class="credits-cart" aria-label="已选课程">
-          <p v-if="sourceRecord" class="credits-total">
-            记录中已通过课程的已填学分：{{
-              formatCredits(recordedCredits.total)
-            }}
-          </p>
-          <p v-if="recordedCredits.missing" class="microcopy">
-            {{ recordedCredits.missing }} 门已通过课程的学分待确认。
-          </p>
-          <p v-if="recordedCredits.duplicates" class="microcopy">
-            记录中有重复课程，合计需要核对。
-          </p>
-          <h2 class="sub-label">已选 {{ selectedCourses.length }} 门</h2>
-          <p class="credits-total">
-            已选学分：{{
-              formatCredits(
-                selectedCourses.reduce(
-                  (sum, course) => sum + course.credits,
-                  0,
-                ),
-              )
-            }}
-          </p>
-          <p v-if="selectionMessage" role="status">{{ selectionMessage }}</p>
-          <p v-if="selectedCourses.length === 0" class="microcopy">
-            还没有勾选课程。在下面每个类别里勾选想学的课。
-          </p>
-          <ul v-else class="credits-list">
-            <li v-for="course in selectedCourses" :key="course.courseCode">
-              <span>{{ courseLine(course) }}</span>
-              <button
-                class="button button--quiet"
-                type="button"
-                @click="removeSelected(course.courseCode)"
-              >
-                移除
-              </button>
-            </li>
-          </ul>
-          <button
-            v-if="selectedCodes.length > 0"
-            class="button button--quiet"
-            type="button"
-            @click="clearSelection"
-          >
-            清空已选
-          </button>
-        </section>
-
-        <p class="microcopy">{{ interestNote() }}</p>
-        <p v-if="otherIssues.length" class="notice notice--warning" role="note">
-          <span
-            v-for="issue in otherIssues"
-            :key="issue.code"
-            class="credits-issue"
-          >
-            {{ explainAuditUnknown(issue.code, issue.message) }}
-          </span>
-        </p>
-
-        <details
-          v-for="plan in plans"
-          :key="plan.requirementId"
-          class="option-section credits-category"
-          :aria-label="plan.category ?? '未命名类别'"
-        >
-          <summary>
-            <strong>{{ plan.category ?? "未命名类别" }}</strong> ·
-            {{ ledgerLine(plan) }}
-          </summary>
-
-          <p v-if="schoolCategoryReference(plan.category)" class="microcopy">
-            {{ schoolCategoryReference(plan.category) }}下方候选和组合按 Java
-            核验的培养方案缺口计算。
-          </p>
-
-          <p
-            v-if="plan.category === null"
-            class="notice notice--warning"
-            role="note"
-          >
-            这个要求没有类别名，无法匹配课程。
-          </p>
-          <p
-            v-else-if="plan.state === 'UNKNOWN_GAP'"
-            class="notice notice--warning"
-            role="note"
-          >
-            这个类别的缺口无法确定，先补全学业记录。
-          </p>
-          <p
-            v-else-if="plan.state === 'SATISFIED'"
-            class="notice"
-            role="status"
-          >
-            这个类别已满足，不需要再选。仍可以自由勾选。
-          </p>
-
-          <!-- 候选课程：筛选 + 分页，勾选才计入账本。 -->
-          <div v-if="plan.countable.length" class="credits-block">
-            <label class="field-label" :for="`filter-${plan.requirementId}`">
-              在这个类别里找课（课程号或课程名）
-            </label>
-            <input
-              :id="`filter-${plan.requirementId}`"
-              class="text-control"
-              type="search"
-              maxlength="120"
-              :value="filterOf[plan.requirementId] ?? ''"
-              @input="
-                setFilter(plan, ($event.target as HTMLInputElement).value)
-              "
-            />
-            <p
-              v-if="visibleCourses(plan).length === 0"
-              class="microcopy"
-              role="status"
-            >
-              没有符合筛选条件的课程。
+        <div class="credits-layout">
+          <section class="credits-cart" aria-label="已选课程">
+            <p v-if="sourceRecord" class="credits-total">
+              记录中已通过课程的已填学分：{{
+                formatCredits(recordedCredits.total)
+              }}
             </p>
-            <ul class="credits-list">
-              <li v-for="course in pageItems(plan)" :key="course.courseCode">
-                <label class="credits-check">
-                  <input
-                    type="checkbox"
-                    :checked="isSelected(course.courseCode)"
-                    @change="toggleCourse(course.courseCode)"
-                  />
-                  <span>{{ courseLine(course) }}</span>
-                </label>
+            <p v-if="recordedCredits.missing" class="microcopy">
+              {{ recordedCredits.missing }} 门已通过课程的学分待确认。
+            </p>
+            <p v-if="recordedCredits.duplicates" class="microcopy">
+              记录中有重复课程，合计需要核对。
+            </p>
+            <h2 class="sub-label">已选 {{ selectedCourses.length }} 门</h2>
+            <p class="credits-total">
+              已选学分：{{
+                formatCredits(
+                  selectedCourses.reduce(
+                    (sum, course) => sum + course.credits,
+                    0,
+                  ),
+                )
+              }}
+            </p>
+            <p v-if="selectionMessage" role="status">{{ selectionMessage }}</p>
+            <p v-if="selectedCourses.length === 0" class="microcopy">
+              还没有勾选课程。在下面每个类别里勾选想学的课。
+            </p>
+            <ul v-else class="credits-list">
+              <li v-for="course in selectedCourses" :key="course.courseCode">
+                <span>{{ courseLine(course) }}</span>
                 <button
                   class="button button--quiet"
                   type="button"
-                  @click="goToTeacher(course.courseCode)"
+                  @click="removeSelected(course.courseCode)"
                 >
-                  看这门课的教师（不等于加入规划）
+                  移除
                 </button>
               </li>
             </ul>
-            <div
-              v-if="visibleCourses(plan).length > COURSE_PAGE_SIZE"
-              class="credits-pager"
+            <button
+              v-if="selectedCodes.length > 0"
+              class="button button--quiet"
+              type="button"
+              @click="clearSelection"
             >
-              <button
-                class="button button--secondary"
-                type="button"
-                :disabled="currentPage(plan) === 0"
-                @click="movePage(plan, -1)"
-              >
-                ← 上一页
-              </button>
-              <span class="microcopy"
-                >第 {{ currentPage(plan) + 1 }} /
-                {{ pageCount(visibleCourses(plan).length) }} 页</span
-              >
-              <button
-                class="button button--secondary"
-                type="button"
-                :disabled="
-                  currentPage(plan) + 1 >=
-                  pageCount(visibleCourses(plan).length)
-                "
-                @click="movePage(plan, 1)"
-              >
-                下一页 →
-              </button>
-            </div>
-          </div>
-          <p
-            v-else-if="plan.category !== null && plan.uncountable.length === 0"
-            class="microcopy"
-          >
-            这个类别的课程目录里没有可选课程。
-          </p>
+              清空已选
+            </button>
+          </section>
 
-          <!-- 无法纳入凑分的课程：单独列出，不当成 0。 -->
-          <div v-if="plan.uncountable.length" class="credits-block">
-            <h3 class="credits-subhead">待确认课程</h3>
-            <ul class="credits-list">
-              <li
-                v-for="course in plan.uncountable"
-                :key="`${course.courseCode}:${course.name}`"
-              >
-                <span>{{ course.courseCode }} · {{ course.name }}</span>
-                <span class="microcopy">
-                  {{
-                    course.reason === "AMBIGUOUS_COURSE_CODE"
-                      ? "课程编号重复或待确认，暂不能确定是否已修及计入学分"
-                      : course.reason === "CREDITS_UNKNOWN"
-                        ? "学分待确认，无法纳入凑分"
-                        : "学分为 0，无法纳入凑分"
-                  }}
-                </span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- 依学分差额展示组合建议。 -->
-          <div
-            v-if="showsSuggestionArea(plan)"
-            class="credits-block credits-suggest"
-          >
-            <h3 class="credits-subhead">
-              学分组合（还差
-              {{ formatCredits(ledgerOf(plan).remainingCredits ?? 0) }} 学分）
-            </h3>
-            <p class="microcopy">
-              每组最多 {{ suggestionCourseLimit }} 门，优先显示刚好补齐的组合；
-              计算有数量上限，完整课程仍可在上方选择。
-            </p>
+          <div class="credits-browser">
+            <p class="microcopy">{{ interestNote() }}</p>
             <p
-              v-if="suggestionsOf(plan).length === 0"
-              class="microcopy"
-              role="status"
+              v-if="otherIssues.length"
+              class="notice notice--warning"
+              role="note"
             >
-              暂无可计算的课程组合。
-            </p>
-            <ul v-else class="credits-list">
-              <li
-                v-for="suggestion in suggestionsOf(plan)"
-                :key="suggestion.courseCodes.join('+')"
+              <span
+                v-for="issue in otherIssues"
+                :key="issue.code"
+                class="credits-issue"
               >
-                <span>
+                {{ explainAuditUnknown(issue.code, issue.message) }}
+              </span>
+            </p>
+
+            <nav
+              v-if="plans.length"
+              class="credits-category-nav"
+              aria-label="课程类别"
+            >
+              <button
+                v-for="plan in plans"
+                :key="plan.requirementId"
+                class="button"
+                :class="
+                  activeRequirementId === plan.requirementId
+                    ? 'button--primary'
+                    : 'button--secondary'
+                "
+                type="button"
+                :aria-pressed="activeRequirementId === plan.requirementId"
+                @click="activeRequirementId = plan.requirementId"
+              >
+                {{ plan.category ?? "未命名类别" }}
+                <span class="credits-category-nav__gap">
                   {{
-                    suggestion.courseCodes
-                      .map((code) => nameOf(plan, code))
-                      .join(" + ")
+                    plan.gapCredits === null
+                      ? "缺口待确认"
+                      : `还差 ${formatCredits(plan.gapCredits)}`
                   }}
-                  = {{ formatCredits(suggestion.totalCredits) }} 学分
-                  <span v-if="suggestion.category === 'EXACT'">
-                    · 刚好补齐</span
-                  >
-                  <span v-else-if="suggestion.category === 'OVER'">
-                    · 超出 {{ formatCredits(suggestion.difference) }} 学分</span
-                  >
-                  <span v-else>
-                    · 还差 {{ formatCredits(suggestion.difference) }} 学分</span
-                  >
-                  <span class="microcopy"
-                    >（{{ suggestion.courseCodes.join(" + ") }}）</span
-                  >
                 </span>
-                <button
-                  class="button button--secondary"
-                  type="button"
-                  @click="addAll(suggestion.courseCodes)"
+              </button>
+            </nav>
+
+            <template v-for="plan in plans" :key="plan.requirementId">
+              <details
+                v-if="plan.requirementId === activeRequirementId"
+                open
+                class="option-section credits-category"
+                :aria-label="plan.category ?? '未命名类别'"
+              >
+                <summary>
+                  <strong>{{ plan.category ?? "未命名类别" }}</strong> ·
+                  {{ ledgerLine(plan) }}
+                </summary>
+
+                <p
+                  v-if="schoolCategoryReference(plan.category)"
+                  class="microcopy"
                 >
-                  勾选这组
-                </button>
-              </li>
-            </ul>
+                  {{ schoolCategoryReference(plan.category) }}下方候选和组合按
+                  Java 核验的培养方案缺口计算。
+                </p>
+
+                <p
+                  v-if="plan.category === null"
+                  class="notice notice--warning"
+                  role="note"
+                >
+                  这个要求没有类别名，无法匹配课程。
+                </p>
+                <p
+                  v-else-if="plan.state === 'UNKNOWN_GAP'"
+                  class="notice notice--warning"
+                  role="note"
+                >
+                  这个类别的缺口无法确定，先补全学业记录。
+                </p>
+                <p
+                  v-else-if="plan.state === 'SATISFIED'"
+                  class="notice"
+                  role="status"
+                >
+                  这个类别已满足，不需要再选。仍可以自由勾选。
+                </p>
+
+                <!-- 候选课程：筛选 + 分页，勾选才计入账本。 -->
+                <div v-if="plan.countable.length" class="credits-block">
+                  <label
+                    class="field-label"
+                    :for="`filter-${plan.requirementId}`"
+                  >
+                    在这个类别里找课（课程号或课程名）
+                  </label>
+                  <input
+                    :id="`filter-${plan.requirementId}`"
+                    class="text-control"
+                    type="search"
+                    maxlength="120"
+                    :value="filterOf[plan.requirementId] ?? ''"
+                    @input="
+                      setFilter(plan, ($event.target as HTMLInputElement).value)
+                    "
+                  />
+                  <p
+                    v-if="visibleCourses(plan).length === 0"
+                    class="microcopy"
+                    role="status"
+                  >
+                    没有符合筛选条件的课程。
+                  </p>
+                  <ul class="credits-list">
+                    <li
+                      v-for="course in pageItems(plan)"
+                      :key="course.courseCode"
+                    >
+                      <label class="credits-check">
+                        <input
+                          type="checkbox"
+                          :checked="isSelected(course.courseCode)"
+                          @change="toggleCourse(course.courseCode)"
+                        />
+                        <span>{{ courseLine(course) }}</span>
+                      </label>
+                      <button
+                        class="button button--quiet"
+                        type="button"
+                        @click="goToTeacher(course.courseCode)"
+                      >
+                        看这门课的教师（不等于加入规划）
+                      </button>
+                    </li>
+                  </ul>
+                  <div
+                    v-if="visibleCourses(plan).length > COURSE_PAGE_SIZE"
+                    class="credits-pager"
+                  >
+                    <button
+                      class="button button--secondary"
+                      type="button"
+                      :disabled="currentPage(plan) === 0"
+                      @click="movePage(plan, -1)"
+                    >
+                      ← 上一页
+                    </button>
+                    <span class="microcopy"
+                      >第 {{ currentPage(plan) + 1 }} /
+                      {{ pageCount(visibleCourses(plan).length) }} 页</span
+                    >
+                    <button
+                      class="button button--secondary"
+                      type="button"
+                      :disabled="
+                        currentPage(plan) + 1 >=
+                        pageCount(visibleCourses(plan).length)
+                      "
+                      @click="movePage(plan, 1)"
+                    >
+                      下一页 →
+                    </button>
+                  </div>
+                </div>
+                <p
+                  v-else-if="
+                    plan.category !== null && plan.uncountable.length === 0
+                  "
+                  class="microcopy"
+                >
+                  这个类别的课程目录里没有可选课程。
+                </p>
+
+                <!-- 无法纳入凑分的课程：单独列出，不当成 0。 -->
+                <div v-if="plan.uncountable.length" class="credits-block">
+                  <h3 class="credits-subhead">待确认课程</h3>
+                  <ul class="credits-list">
+                    <li
+                      v-for="course in plan.uncountable"
+                      :key="`${course.courseCode}:${course.name}`"
+                    >
+                      <span>{{ course.courseCode }} · {{ course.name }}</span>
+                      <span class="microcopy">
+                        {{
+                          course.reason === "AMBIGUOUS_COURSE_CODE"
+                            ? "课程编号重复或待确认，暂不能确定是否已修及计入学分"
+                            : course.reason === "CREDITS_UNKNOWN"
+                              ? "学分待确认，无法纳入凑分"
+                              : "学分为 0，无法纳入凑分"
+                        }}
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+
+                <!-- 依学分差额展示组合建议。 -->
+                <div
+                  v-if="showsSuggestionArea(plan)"
+                  class="credits-block credits-suggest"
+                >
+                  <h3 class="credits-subhead">
+                    学分组合（还差
+                    {{ formatCredits(ledgerOf(plan).remainingCredits ?? 0) }}
+                    学分）
+                  </h3>
+                  <p class="microcopy">
+                    每组最多
+                    {{ suggestionCourseLimit }} 门，优先显示刚好补齐的组合；
+                    计算有数量上限，完整课程仍可在上方选择。
+                  </p>
+                  <p
+                    v-if="suggestionsOf(plan).length === 0"
+                    class="microcopy"
+                    role="status"
+                  >
+                    暂无可计算的课程组合。
+                  </p>
+                  <ul v-else class="credits-list">
+                    <li
+                      v-for="suggestion in suggestionsOf(plan)"
+                      :key="suggestion.courseCodes.join('+')"
+                    >
+                      <span>
+                        {{
+                          suggestion.courseCodes
+                            .map((code) => nameOf(plan, code))
+                            .join(" + ")
+                        }}
+                        = {{ formatCredits(suggestion.totalCredits) }} 学分
+                        <span v-if="suggestion.category === 'EXACT'">
+                          · 刚好补齐</span
+                        >
+                        <span v-else-if="suggestion.category === 'OVER'">
+                          · 超出
+                          {{ formatCredits(suggestion.difference) }} 学分</span
+                        >
+                        <span v-else>
+                          · 还差
+                          {{ formatCredits(suggestion.difference) }} 学分</span
+                        >
+                        <span class="microcopy"
+                          >（{{ suggestion.courseCodes.join(" + ") }}）</span
+                        >
+                      </span>
+                      <button
+                        class="button button--secondary"
+                        type="button"
+                        @click="addAll(suggestion.courseCodes)"
+                      >
+                        勾选这组
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+              </details>
+            </template>
           </div>
-        </details>
+        </div>
       </template>
     </template>
 
@@ -726,16 +914,44 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
   margin-bottom: 1rem;
 }
 
+.school-report-reference {
+  margin: 0 0 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--wash);
+}
+
+.school-report-reference > summary {
+  color: var(--green);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.credits-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+  grid-template-areas: "browser cart";
+  align-items: start;
+  gap: 1rem;
+}
+
+.credits-browser {
+  grid-area: browser;
+  min-width: 0;
+}
+
 .credits-cart {
-  border: 1px solid #dbe3e8;
+  grid-area: cart;
+  border: 1px solid var(--line);
   border-radius: 12px;
   padding: 1rem;
-  margin: 1rem 0;
-  background: #f8fafb;
+  margin: 0;
+  background: var(--wash);
   position: sticky;
-  top: 0;
+  top: 1rem;
   z-index: 3;
-  max-height: 35vh;
+  max-height: calc(100vh - 2rem);
   overflow-y: auto;
 }
 
@@ -744,7 +960,21 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
 }
 
 .credits-category {
-  margin-top: 1.25rem;
+  margin-top: 0.75rem;
+  padding: 0.9rem;
+}
+
+.credits-category-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.credits-category-nav__gap {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 400;
 }
 
 .credits-ledger {
@@ -816,7 +1046,44 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
   display: block;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 800px) {
+  .credits-layout {
+    display: flex;
+    flex-direction: column;
+  }
+  .credits-browser {
+    order: 2;
+    width: 100%;
+  }
+  .credits-cart {
+    order: 1;
+    position: sticky;
+    top: 0.5rem;
+    width: 100%;
+    max-height: 32vh;
+    box-sizing: border-box;
+    box-shadow: 0 0.5rem 1rem #173d2b14;
+  }
+}
+
+@media (max-width: 540px) {
+  .credits-layout {
+    padding-bottom: 11rem;
+  }
+  .credits-cart {
+    position: fixed;
+    inset-inline: 1rem;
+    bottom: env(safe-area-inset-bottom, 0);
+    top: auto;
+    width: auto;
+    max-height: 28vh;
+    z-index: 10;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -0.5rem 1rem #173d2b14;
+  }
+  .question-nav {
+    margin-bottom: 10rem;
+  }
   .credits-list > li {
     flex-direction: column;
     align-items: stretch;

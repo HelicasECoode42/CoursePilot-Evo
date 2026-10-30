@@ -1,17 +1,60 @@
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { usePlanningStore } from "../stores/planning";
 import { api } from "../api";
 import RecordsView from "./RecordsView.vue";
 
 describe("学业资料", () => {
+  const showModal = Object.getOwnPropertyDescriptor(
+    HTMLDialogElement.prototype,
+    "showModal",
+  );
+  const close = Object.getOwnPropertyDescriptor(
+    HTMLDialogElement.prototype,
+    "close",
+  );
+  beforeEach(() => {
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+      configurable: true,
+      value(this: HTMLDialogElement) {
+        this.setAttribute("open", "");
+      },
+    });
+    Object.defineProperty(HTMLDialogElement.prototype, "close", {
+      configurable: true,
+      value(this: HTMLDialogElement) {
+        this.removeAttribute("open");
+        this.dispatchEvent(new Event("close"));
+      },
+    });
+    vi.spyOn(api, "listCourses").mockResolvedValue({
+      items: [],
+      nextCursor: null,
+    });
+  });
+  afterEach(() => {
+    if (showModal)
+      Object.defineProperty(
+        HTMLDialogElement.prototype,
+        "showModal",
+        showModal,
+      );
+    else
+      delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>)
+        .showModal;
+    if (close)
+      Object.defineProperty(HTMLDialogElement.prototype, "close", close);
+    else
+      delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).close;
+  });
   it("从资料确认页进入时直接打开学校导入弹窗", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
     const store = usePlanningStore();
     store.$patch({ sessionStatus: "ready", sessionId: "session-test" });
+    const startSession = vi.spyOn(store, "startSession");
     vi.spyOn(store, "loadRecords").mockResolvedValue();
     vi.spyOn(store, "loadSchoolProgress").mockResolvedValue();
     const router = createRouter({
@@ -23,9 +66,49 @@ describe("学业资料", () => {
     const wrapper = mount(RecordsView, {
       global: { plugins: [pinia, router] },
     });
+    await flushPromises();
     expect(
       wrapper.get('[aria-labelledby="school-import-title"]').text(),
     ).toContain("导入学校学业情况");
+    expect(
+      wrapper.get('[aria-labelledby="school-import-title"]').attributes("open"),
+    ).toBeDefined();
+    expect(startSession).not.toHaveBeenCalled();
+  });
+  it("新标签页直达学校导入时先准备会话，保留已有会话时不重建", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = usePlanningStore();
+    const startSession = vi
+      .spyOn(store, "startSession")
+      .mockImplementation(async () => {
+        store.$patch({
+          sessionStatus: "ready",
+          sessionId: "session-cold",
+          selectedCurriculumId: "curr-test",
+          recordsStatus: "ready",
+        });
+      });
+    vi.spyOn(store, "loadRecords").mockResolvedValue();
+    vi.spyOn(store, "loadSchoolProgress").mockResolvedValue();
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/records", component: RecordsView }],
+    });
+    await router.push("/records?import=school");
+    await router.isReady();
+    const wrapper = mount(RecordsView, {
+      global: { plugins: [pinia, router] },
+    });
+    await flushPromises();
+    expect(startSession).toHaveBeenCalledOnce();
+    expect(store.sessionId).toBe("session-cold");
+    expect(
+      wrapper.get("#school-progress-file").attributes("disabled"),
+    ).toBeUndefined();
+    expect(
+      wrapper.get('[aria-labelledby="school-import-title"]').attributes("open"),
+    ).toBeDefined();
   });
   it("持久化教务导入后展示保留父子关系的学校类别", async () => {
     const apiMode = Object.getOwnPropertyDescriptor(api, "mode");
@@ -137,8 +220,13 @@ describe("学业资料", () => {
     });
     await input.trigger("change");
     await flushPromises();
-    expect(wrapper.text()).toContain("公共基础课（学校类别 98）");
-    expect(wrapper.text()).toContain("公共基础课（学校类别 54）");
+    expect(
+      wrapper.findAll(".school-category h3").map((el) => el.text()),
+    ).toEqual(["公共基础课", "公共基础课"]);
+    expect(wrapper.findAll(".school-category")).toHaveLength(2);
+    expect(wrapper.text()).toMatch(/查看关联课程\s*·\s*1 门课程/);
+    expect(wrapper.text()).toContain("虚构课程 · CP001");
+    expect(wrapper.text()).toContain("状态待确认");
     expect(wrapper.text()).toContain("学校汇总不替代 Java 核验结果");
     expect(importSpy).toHaveBeenCalledOnce();
     if (apiMode) Object.defineProperty(api, "mode", apiMode);

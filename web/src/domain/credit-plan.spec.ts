@@ -39,11 +39,21 @@ function requirement(
 }
 
 describe("候选课程", () => {
+  it("已通过的重复课程编号仍从候选中排除", () => {
+    const plan = buildCategoryPlan(
+      requirement(3),
+      [course("DONE", 3), course("DONE", 3)],
+      new Set(["DONE"]),
+      [],
+    );
+    expect(plan.countable).toHaveLength(0);
+    expect(plan.uncountable).toHaveLength(0);
+  });
   it("保留重复占位编号的课程，并且不将其计入学分或认定为已修", () => {
     const plan = buildCategoryPlan(
       requirement(3),
       [course("008532xx", 1, "体育1"), course("008532xx", 1, "体育2")],
-      new Set(["008532xx"]),
+      NONE,
       [],
     );
     expect(plan.countable).toHaveLength(0);

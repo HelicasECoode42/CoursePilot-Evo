@@ -223,6 +223,11 @@ export function buildPlanningRequest(
   const softPreferences = [
     ...scheduleSoft,
     ...collectClassSoftPreferences(draft.classPreferences),
+    ...draft.preferredCourseCodes.map((courseCode) => ({
+      dimension: "course.prefer",
+      value: courseCode,
+      sourceText: "学生优先考虑的课程",
+    })),
   ];
   // 课程+教师的选择来自 E3 的比较页。契约字段就是为这个留的，不要把它
   // 塞进 softPreferences 或自造 dimension 名。
@@ -274,7 +279,7 @@ export function buildPlanningRequest(
       interestTags: cleanTags(draft),
       careerDirectionIds: [],
     },
-    previousPlanId: null,
+    previousPlanId: draft.previousPlanId,
   };
 
   if (!validateRequest?.(request)) {

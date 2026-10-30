@@ -31,7 +31,7 @@ describe("欢迎页", () => {
     // 这三条是对学生的承诺边界，首页就要讲明，不能等到出错才说。
     expect(text).toContain("不替你登录教务系统");
     expect(text).toContain("不替你提交选课");
-    expect(text).toContain("选课开放后才公开");
+    expect(text).toContain("缺少目标学期班次时，先保留课程建议");
   });
 
   it("不把评价说成分数或星级", async () => {

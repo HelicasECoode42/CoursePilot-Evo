@@ -497,6 +497,22 @@ describe("PlanningRequest handoff", () => {
 });
 
 describe("课程与教师的选择", () => {
+  it("将优先考虑课程提交为软偏好，不生成必选约束", () => {
+    const built = buildPlanningRequest(
+      readyDraft({ preferredCourseCodes: ["CS102"] }),
+      verifiedContext,
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.request.intent.softPreferences).toContainEqual({
+      dimension: "course.prefer",
+      value: "CS102",
+      sourceText: "学生优先考虑的课程",
+    });
+    expect(built.request.intent.hardConstraints).toEqual([]);
+    expect(validatePlanningRequest?.(built.request)).toBe(true);
+  });
+
   it("将学生加入规划的课程作为必选约束提交", () => {
     const built = buildPlanningRequest(
       readyDraft({ selectedCourseCodes: ["CS102", "CS103"] }),

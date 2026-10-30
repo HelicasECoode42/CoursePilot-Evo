@@ -12,6 +12,8 @@ vi.mock("../api", () => ({
   api: {
     mode: "fixture",
     listCourses: vi.fn(),
+    listSessionRecords: vi.fn(),
+    getSchoolProgress: vi.fn(),
   },
 }));
 
@@ -182,6 +184,8 @@ async function mountView(
             ],
           }
         : audit,
+    recordsStatus: "ready",
+    schoolProgressStatus: "ready",
     draft: {
       ...emptyPlanningDraft(),
       interestTags: options.interestTags ?? ["学习"],
@@ -201,13 +205,16 @@ async function mountView(
   const wrapper = mount(CreditPlanView, {
     global: { plugins: [pinia, router] },
   });
+  const loadRecordsSpy = vi.spyOn(store, "loadRecords");
   await flushPromises();
-  return { wrapper, router };
+  return { wrapper, router, store, loadRecordsSpy };
 }
 
 describe("凑学分选课页", () => {
   beforeEach(() => {
     vi.mocked(api.listCourses).mockReset();
+    vi.mocked(api.listSessionRecords).mockReset();
+    vi.mocked(api.getSchoolProgress).mockReset();
     vi.mocked(api.listCourses).mockResolvedValue({
       items: catalog,
       nextCursor: null,
@@ -226,8 +233,48 @@ describe("凑学分选课页", () => {
   });
 
   it("shows the category ledger line from the audit", async () => {
-    const { wrapper } = await mountView();
+    const { wrapper, store, loadRecordsSpy } = await mountView();
     expect(wrapper.text()).toContain("要求 24 · 已修 0 · 已选 0 · 还差 6 学分");
+    expect(store.audit?.requirements).toHaveLength(2);
+    expect(loadRecordsSpy).not.toHaveBeenCalled();
+  });
+
+  it("prepares a new session on direct entry and links to import when no record exists", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = usePlanningStore();
+    store.$patch({ sessionStatus: "idle", recordsStatus: "idle" });
+    const startSession = vi
+      .spyOn(store, "startSession")
+      .mockImplementation(async () => {
+        store.$patch({
+          sessionStatus: "ready",
+          sessionId: "session-cold",
+          selectedCurriculumId: SNAPSHOT,
+        });
+      });
+    const loadRecords = vi.mocked(api.listSessionRecords).mockResolvedValue({
+      items: [],
+    });
+    vi.mocked(api.getSchoolProgress).mockResolvedValue(null);
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/plan/credits", component: CreditPlanView },
+        { path: "/records", component: { template: "<p>资料页</p>" } },
+      ],
+    });
+    await router.push("/plan/credits");
+    await router.isReady();
+    const wrapper = mount(CreditPlanView, {
+      global: { plugins: [pinia, router] },
+    });
+    await flushPromises();
+    expect(startSession).toHaveBeenCalledOnce();
+    expect(loadRecords).toHaveBeenCalledOnce();
+    expect(store.audit).toBeNull();
+    expect(wrapper.text()).toContain("当前会话还没有学业记录");
+    expect(wrapper.text()).toContain("去学业资料导入");
   });
 
   it("uses free-form career text from the planning store to rank candidates", async () => {
@@ -308,6 +355,47 @@ describe("凑学分选课页", () => {
     expect(wrapper.text()).toContain("学分组合（还差 6 学分）");
   });
 
+  it("shows school category progress with an action to run local audit when audit is missing", async () => {
+    const { wrapper } = await mountView();
+    usePlanningStore().$patch({ audit: null });
+    usePlanningStore().$patch({
+      schoolProgress: {
+        receipt: {
+          schoolProgressId: "school:fixture",
+          contentHash: "b".repeat(64),
+          importedAt: "2026-10-29T00:00:00Z",
+          reused: false,
+        },
+        snapshot: {
+          format: "coursepilot-shu-academic-progress",
+          version: 1,
+          capturedAt: "2026-10-29T00:00:00Z",
+          source: "fictional fixture",
+          nodes: [
+            {
+              nodeId: "school-elective",
+              parentId: null,
+              schoolNodeId: "S1",
+              leaf: true,
+              name: "专业选修课",
+              requiredCredits: 10,
+              earnedCredits: 4,
+              remainingCredits: 6,
+            },
+          ],
+          courses: [],
+        },
+        academicRecord: record,
+      },
+    });
+    await flushPromises();
+    const report = wrapper.find("details.school-report-reference");
+    expect(report.text()).toContain("学校报告进度");
+    expect(report.text()).toContain("还差");
+    expect(report.text()).toContain("去学业资料运行本地核对");
+    expect(wrapper.text()).toContain("学校报告进度 · 原始类别与学分");
+  });
+
   it("says selections are included in the plan", async () => {
     const { wrapper } = await mountView();
     expect(wrapper.text()).toContain("勾选的课程会加入本次规划");
@@ -329,6 +417,40 @@ describe("凑学分选课页", () => {
     expect(wrapper.text()).toContain("已选 2 门");
     expect(wrapper.text()).toContain("已选学分：8");
     expect(usePlanningStore().draft.selectedCourseCodes).toEqual(["E6", "E2"]);
+  });
+
+  it("switches category while retaining selected courses and removes a selection from the summary", async () => {
+    const { wrapper } = await mountView();
+    const elective = wrapper
+      .findAll("label.credits-check")
+      .find((label) => label.text().includes("编译原理"))!;
+    await elective.get("input").setValue(true);
+    const categoryButton = wrapper
+      .findAll("nav[aria-label='课程类别'] button")
+      .find((button) => button.text().includes("实践教学环节"))!;
+    await categoryButton.trigger("click");
+    expect(wrapper.findAll("label.credits-check").length).toBe(0);
+    expect(wrapper.get("section[aria-label='已选课程']").text()).toContain(
+      "E2 · 编译原理 · 2 学分",
+    );
+    expect(usePlanningStore().draft.selectedCourseCodes).toEqual(["E2"]);
+    await wrapper
+      .get("section[aria-label='已选课程']")
+      .find("button")
+      .trigger("click");
+    expect(usePlanningStore().draft.selectedCourseCodes).toEqual([]);
+    expect(wrapper.get("section[aria-label='已选课程']").text()).toContain(
+      "已选 0 门",
+    );
+  });
+
+  it("counts a legacy duplicate selection only once", async () => {
+    const { wrapper } = await mountView();
+    usePlanningStore().updateDraft("selectedCourseCodes", ["E2", "E2"]);
+    await flushPromises();
+    const cart = wrapper.get("section[aria-label='已选课程']");
+    expect(cart.text()).toContain("已选 1 门");
+    expect(cart.text()).toContain("已选学分：2");
   });
 
   it("shows completion suggestions when a gap remains", async () => {
@@ -367,6 +489,31 @@ describe("凑学分选课页", () => {
     expect(wrapper.text()).toContain("要求 24 · 已修 0 · 已选 0 · 还差 6 学分");
   });
 
+  it("excludes an in-progress course from selectable credit candidates without counting its credits", async () => {
+    const { wrapper } = await mountView();
+    usePlanningStore().$patch({
+      records: [
+        {
+          ...record,
+          completedCourses: [
+            {
+              courseCode: "E2",
+              earnedCredits: 2,
+              outcome: "IN_PROGRESS",
+              completedTerm: null,
+            },
+          ],
+        },
+      ],
+    });
+    await flushPromises();
+    const courseLabel = wrapper
+      .findAll("label.credits-check")
+      .find((label) => label.text().includes("编译原理"));
+    expect(courseLabel).toBeUndefined();
+    expect(wrapper.text()).toContain("要求 24 · 已修 0 · 已选 0 · 还差 6 学分");
+  });
+
   it("adds a suggested group to the selection when asked", async () => {
     const { wrapper } = await mountView();
     const group = wrapper
@@ -399,6 +546,10 @@ describe("凑学分选课页", () => {
 
   it("does not compute anything for a category with unknown gap", async () => {
     const { wrapper } = await mountView();
+    await wrapper
+      .findAll("nav[aria-label='课程类别'] button")
+      .find((button) => button.text().includes("实践教学环节"))!
+      .trigger("click");
     expect(wrapper.text()).toContain("这个类别的缺口无法确定，先补全学业记录");
     expect(wrapper.text()).toContain("实践教学环节");
   });

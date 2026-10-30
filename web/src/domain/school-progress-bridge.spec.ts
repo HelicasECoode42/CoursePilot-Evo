@@ -19,6 +19,37 @@ const deliver = (requestId: string, payload: unknown = { any: "thing" }) => ({
 });
 
 describe("学业进度接收", () => {
+  it("重复连接保留登记中的请求号，回到资料页后仍能接收", async () => {
+    const { b, save } = bridge();
+    const id = b.requestImport();
+    expect(b.requestImport()).toBe(id);
+    expect((await b.handle(deliver(id))).kind).toBe("saved");
+    expect(save).toHaveBeenCalledOnce();
+    expect(b.requestImport()).not.toBe(id);
+  });
+
+  it("保存尚未完成时的重复投递共用同一次保存", async () => {
+    let finish!: () => void;
+    const save = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { b, posted } = bridge(save);
+    const id = b.requestImport();
+    const first = b.handle(deliver(id));
+    const second = b.handle(deliver(id));
+    expect(save).toHaveBeenCalledOnce();
+    expect(posted).not.toContainEqual({
+      type: "CP_IMPORT_ACCEPTED",
+      requestId: id,
+      ok: true,
+    });
+    finish();
+    expect((await first).kind).toBe("saved");
+    expect((await second).kind).toBe("saved");
+  });
   it("登记时发出 CP_START_IMPORT 并返回 requestId", () => {
     const { b, posted } = bridge();
     const id = b.requestImport();
@@ -82,11 +113,14 @@ describe("学业进度接收", () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
-  it("CP_IMPORT_READY 的 ok 为假也算扩展在场", async () => {
+  it("连接被另一个待处理导入占用时明确提示返回原页面", async () => {
     const { b } = bridge();
     const outcome = await b.handle({ type: "CP_IMPORT_READY", ok: false });
-    expect(outcome.kind).toBe("ready");
-    expect((outcome as { message: string }).message).toContain("扩展已连接");
+    expect(outcome).toEqual({
+      kind: "failed",
+      message:
+        "另一个 CoursePilot 页面有待完成的导入，请返回原页面，或完成后再连接。",
+    });
   });
 
   it("别的消息一律忽略", async () => {

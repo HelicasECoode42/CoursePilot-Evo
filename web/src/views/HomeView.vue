@@ -1,89 +1,185 @@
 <script setup lang="ts">
-/**
- * 欢迎页。
- *
- * 这一页不发任何请求、不建会话：它只是入口，让人先知道这是什么，
- * 再决定去配置还是直接进控制台。原先 `/` 直接 redirect 到问答向导，
- * 一打开就被塞进流程里，学校数据导入也没人找得到。
- */
 import { api } from "../api";
 </script>
 
 <template>
-  <section class="question-card" aria-labelledby="home-title">
+  <section class="welcome" aria-labelledby="home-title">
     <p v-if="api.mode === 'fixture'" class="notice notice--demo" role="note">
-      当前是演示模式：页面里的内容是虚构示例，不是真实教务数据。
+      页面演示 · 以下为虚构资料
     </p>
-    <p class="eyebrow">CoursePilot</p>
-    <h1 id="home-title">按你的培养方案，把下学期的课想清楚</h1>
-
-    <div class="home-intro">
-      <p>
-        把培养方案和你已修的课对上，算出每个类别还差多少学分，
-        再结合同学留下的课程评价，帮你挑下学期要上的课。
-      </p>
-      <p>
-        课程、学分、要求类别都来自学校的培养方案；课程评价来自真实的
-        学生记录，只给条数和维度标签，<strong>不折算成分数或星级</strong>。
-      </p>
-      <p class="home-intro__limit">
-        做不到的也说清楚：<strong>不替你登录教务系统，不替你提交选课。</strong>
-        本学期「谁上课、周几第几节」只在选课开放后才公开，现在拿不到，
-        所以课表功能是用演示班次跑的。
-      </p>
+    <div class="welcome-layout">
+      <div class="welcome-copy">
+        <p class="eyebrow">让选课有依据</p>
+        <h1 id="home-title" tabindex="-1">下学期，<br />选适合你的课。</h1>
+        <p class="welcome-lead">
+          先看学分进度，再整理你想学的内容、上课偏好和时间安排，找到合适的课程组合。
+        </p>
+        <div class="welcome-actions">
+          <RouterLink class="button button--primary" to="/setup"
+            >开始规划 <span aria-hidden="true">↗</span></RouterLink
+          >
+          <RouterLink class="button button--secondary" to="/me"
+            >查看我的学业</RouterLink
+          >
+        </div>
+        <p class="microcopy">
+          已有资料会直接沿用。引导中的每一项都可以返回修改。
+        </p>
+      </div>
+      <div class="welcome-journey" aria-label="选课的三个步骤">
+        <p class="welcome-journey__title">从学业进度，到一份课程方案</p>
+        <ol>
+          <li>
+            <span class="journey-number">01</span>
+            <div>
+              <h2>了解目前的进度</h2>
+              <p>导入学校学业情况，查看还缺哪些类别。</p>
+            </div>
+          </li>
+          <li>
+            <span class="journey-number">02</span>
+            <div>
+              <h2>说清楚你的取舍</h2>
+              <p>成绩、作业、兴趣、职业方向和时间，都可以慢慢选。</p>
+            </div>
+          </li>
+          <li>
+            <span class="journey-number">03</span>
+            <div>
+              <h2>比较并调整方案</h2>
+              <p>查看课程理由和评价依据，加入、删除或更换班次。</p>
+            </div>
+          </li>
+        </ol>
+      </div>
     </div>
-
-    <div class="home-actions">
-      <RouterLink class="button button--primary" to="/setup"
-        >开始配置</RouterLink
-      >
-      <RouterLink class="button button--secondary" to="/me">
-        我已配置过，进入控制台
-      </RouterLink>
+    <div class="welcome-facts">
+      <div><strong>学校培养方案</strong><span>课程与要求有来源</span></div>
+      <div><strong>完整需求引导</strong><span>帮助你表达想法</span></div>
+      <div><strong>可追溯的评价</strong><span>按课程和维度查看</span></div>
     </div>
-
-    <p class="microcopy">
-      配置一共三步：装浏览器插件、在学校页面登录、导入你的学业记录。
-    </p>
+    <details class="record-help welcome-details">
+      <summary>资料来源与使用方式</summary>
+      <p>
+        课程目录来自导入的培养方案，来源核验状态随资料展示。历史评价不折算成分数或星级。
+      </p>
+      <p>
+        缺少目标学期班次时，先保留课程建议，取得班次资料后再核验课表。CoursePilot
+        不替你登录教务系统，不替你提交选课。
+      </p>
+    </details>
   </section>
 </template>
 
 <style scoped>
-.home-intro {
+.welcome {
+  padding-top: 1.5rem;
+}
+.welcome-layout {
   display: grid;
-  gap: 0.75rem;
-  margin: 1.25rem 0 1.5rem;
-  max-width: 46rem;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 4rem;
+  align-items: center;
 }
-
-.home-intro p {
-  margin: 0;
-  line-height: 1.7;
+.welcome-copy h1 {
+  font-size: clamp(2.5rem, 4.5vw, 3.7rem);
+  letter-spacing: -0.045em;
+  line-height: 1.2;
+  margin-block: 1rem 1.5rem;
 }
-
-.home-intro__limit {
-  padding: 0.85rem 1rem;
-  border-radius: 12px;
-  background: var(--wash);
-  border: 1px solid var(--line);
+.welcome-lead {
+  max-width: 28rem;
+  font-size: 1rem;
   color: var(--soft);
+  line-height: 1.85;
 }
-
-.home-actions {
+.welcome-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  gap: 0.65rem;
+  margin-top: 1.8rem;
 }
-
-@media (max-width: 540px) {
-  .home-actions {
-    flex-direction: column;
+.welcome-actions .button {
+  gap: 1.5rem;
+}
+.welcome-journey {
+  background: var(--wash);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 1.8rem;
+}
+.welcome-journey__title {
+  margin: 0 0 1.6rem;
+  font-size: 0.85rem;
+  color: var(--soft);
+}
+.welcome-journey ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.welcome-journey li {
+  display: flex;
+  gap: 1rem;
+  padding-block: 1.1rem;
+  border-top: 1px solid var(--line);
+}
+.welcome-journey h2 {
+  font-size: 1rem;
+  margin: 0 0 0.35rem;
+}
+.welcome-journey li p {
+  color: var(--soft);
+  margin: 0;
+  font-size: 0.85rem;
+}
+.journey-number {
+  color: var(--green);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  padding-top: 0.15rem;
+}
+.welcome-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin-top: 3.5rem;
+  border-block: 1px solid var(--line);
+  padding-block: 1.5rem;
+}
+.welcome-facts > div {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.9rem;
+}
+.welcome-facts span {
+  color: var(--soft);
+  font-size: 0.8rem;
+}
+.welcome-details {
+  margin-top: 1.5rem;
+  border: 0;
+}
+@media (max-width: 760px) {
+  .welcome-layout {
+    grid-template-columns: 1fr;
+    gap: 2rem;
   }
-
-  .home-actions > * {
-    width: 100%;
-    text-align: center;
+  .welcome {
+    padding-top: 0;
+  }
+  .welcome-facts {
+    margin-top: 2rem;
+    gap: 0.8rem;
+  }
+}
+@media (max-width: 420px) {
+  .welcome-facts {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  .welcome-journey {
+    padding: 1.25rem;
   }
 }
 </style>

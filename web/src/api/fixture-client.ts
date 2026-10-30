@@ -1,4 +1,6 @@
 import type {
+  AdviceChatAnswer,
+  AdviceChatRequest,
   AcademicRecord,
   AcademicRecordInput,
   AcademicRecordList,
@@ -576,6 +578,58 @@ export class FixtureApiClient implements CoursePilotApiClient {
     if (!this.sessionToken)
       throw new Error("Fixture session has not been created");
     return structuredClone(DEMO_ANSWER);
+  }
+
+  async adviceChat(
+    body: AdviceChatRequest,
+    _idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<AdviceChatAnswer> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    const query = body.message.trim();
+    const courses = query
+      ? DEMO_COURSES.slice(0, 2).map((course) => ({
+          ...structuredClone(course),
+          reason: "（合成）可结合培养方案课程资料继续了解。",
+          reviewNoteIds: [],
+          reviews: [],
+          reviewStatus: "NOT_QUERIED" as const,
+        }))
+      : [];
+    return {
+      schemaVersion: "1.0",
+      reply:
+        "（合成演示）我可以根据培养方案中的课程资料讨论方向。当前演示不会调用真实模型。",
+      question: null,
+      courses,
+      suggestions: courses[0]
+        ? [
+            {
+              suggestionId: `fixture-interest-${courses[0].courseCode}`,
+              kind: "SELECT_COURSE",
+              label: `把 ${courses[0].name} 加入待选课程`,
+              value: courses[0].courseCode,
+            },
+          ]
+        : [],
+      schoolProgress: null,
+      unknowns: [
+        {
+          code: "FIXTURE_ADVICE_CHAT",
+          message: "演示对话使用合成内容，不代表真实服务回答。",
+          field: null,
+          retryable: false,
+        },
+      ],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
   }
 
   async searchSessionOfferings(

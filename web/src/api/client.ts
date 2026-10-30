@@ -6,6 +6,8 @@ import type {
   AcademicRecord,
   AcademicRecordInput,
   AcademicRecordList,
+  AdviceChatAnswer,
+  AdviceChatRequest,
   AuditResult,
   CareerDirection,
   Course,
@@ -123,6 +125,11 @@ export interface CoursePilotApiClient {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<PlanningAnswer>;
+  adviceChat(
+    body: AdviceChatRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<AdviceChatAnswer>;
   /**
    * E4：本会话方案中某门课可替换的开课班次。items 为空是正常状态，候选不构成核验结论。
    * status 为 UNKNOWN 时班次资料无法确认，空数组不代表这门课没有班次。
@@ -208,6 +215,12 @@ const validateAuditResult = ajv.getSchema(
 );
 const validatePlanningAnswer = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/PlanningAnswer",
+);
+const validateAdviceChatRequest = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/AdviceChatRequest",
+);
+const validateAdviceChatAnswer = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/AdviceChatAnswer",
 );
 const validateCourseOffering = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/CourseOffering",
@@ -687,6 +700,34 @@ export class HttpApiClient implements CoursePilotApiClient {
       );
     }
     return envelope.data as PlanningAnswer;
+  }
+
+  async adviceChat(
+    body: AdviceChatRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<AdviceChatAnswer> {
+    if (!validateAdviceChatRequest?.(body)) {
+      throw new ApiFailure("对话请求不符合当前接口约定。", "invalid_response");
+    }
+    const { response, envelope } = await this.request("/api/v1/advice/chat", {
+      method: "POST",
+      sessionToken: this.requireSession(),
+      signal,
+      body,
+      idempotencyKey,
+      timeoutMs: PLANNING_TIMEOUT_MS,
+    });
+    if (!isSuccessEnvelope(envelope))
+      throw errorForResponse(response.status, envelope);
+    if (!validateAdviceChatAnswer?.(envelope.data)) {
+      throw new ApiFailure(
+        "服务返回的对话结果不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as AdviceChatAnswer;
   }
 
   async searchSessionOfferings(

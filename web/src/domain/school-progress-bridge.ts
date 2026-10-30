@@ -47,10 +47,12 @@ export function createSchoolProgressBridge(
   deps: BridgeDeps,
 ): SchoolProgressBridge {
   let pending = "";
+  let saving: Promise<BridgeOutcome> | null = null;
 
   return {
     requestImport() {
-      pending = deps.newRequestId();
+      // Reconnecting from the same page must retain the request registered in the extension.
+      if (!pending) pending = deps.newRequestId();
       deps.post({ type: "CP_START_IMPORT", requestId: pending });
       return pending;
     },
@@ -62,13 +64,17 @@ export function createSchoolProgressBridge(
     async handle(data: unknown): Promise<BridgeOutcome> {
       const type = messageType(data);
       if (type === "CP_IMPORT_READY") {
-        // ok 为假也说明插件在（五分钟内已有一次导入占着位），不是「没装」。
         const ok = (data as { ok?: unknown }).ok === true;
+        if (!ok) {
+          return {
+            kind: "failed",
+            message:
+              "另一个 CoursePilot 页面有待完成的导入，请返回原页面，或完成后再连接。",
+          };
+        }
         return {
           kind: "ready",
-          message: ok
-            ? "扩展已连接。请打开学校学业情况，在浮窗点击导入并返回。"
-            : "扩展已连接（它回报「已有一次导入正在进行」）。请直接去学校那一页点导入。",
+          message: "扩展已连接。请打开学校学业情况，在浮窗点击导入并返回。",
         };
       }
       if (type !== "CP_DELIVER_PROGRESS") return { kind: "ignored" };
@@ -83,23 +89,31 @@ export function createSchoolProgressBridge(
         return { kind: "ignored" };
       }
 
+      if (saving) return saving;
+      saving = (async (): Promise<BridgeOutcome> => {
+        try {
+          await deps.save((data as { payload?: unknown }).payload);
+          deps.post({ type: "CP_IMPORT_ACCEPTED", requestId, ok: true });
+          pending = "";
+          return {
+            kind: "saved",
+            message: "学校学业进度已保存，课程明细已更新到学业记录。",
+          };
+        } catch (error) {
+          deps.post({ type: "CP_IMPORT_ACCEPTED", requestId, ok: false });
+          return {
+            kind: "failed",
+            message:
+              error instanceof Error && error.message
+                ? error.message
+                : "未能保存学校学业进度，请重试。",
+          };
+        }
+      })();
       try {
-        await deps.save((data as { payload?: unknown }).payload);
-        deps.post({ type: "CP_IMPORT_ACCEPTED", requestId, ok: true });
-        pending = "";
-        return {
-          kind: "saved",
-          message: "学校学业进度已保存，课程明细已更新到学业记录。",
-        };
-      } catch (error) {
-        deps.post({ type: "CP_IMPORT_ACCEPTED", requestId, ok: false });
-        return {
-          kind: "failed",
-          message:
-            error instanceof Error && error.message
-              ? error.message
-              : "未能保存学校学业进度，请重试。",
-        };
+        return await saving;
+      } finally {
+        saving = null;
       }
     },
   };

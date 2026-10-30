@@ -11,7 +11,14 @@ export function createApiClient(
     timeoutMs?: number;
   } = {},
 ): CoursePilotApiClient {
-  if (mode === "fixture") return new FixtureApiClient();
+  if (mode === "fixture") {
+    // 合成数据只给开发服务器和测试用。生产构建里 import.meta.env.DEV 为 false，
+    // 这里的 new FixtureApiClient() 会被打包器删掉，fixture 数据不进公开的包。
+    if (!import.meta.env.DEV) {
+      throw new Error("fixture 模式只在开发服务器（dev / vitest）可用");
+    }
+    return new FixtureApiClient();
+  }
   const baseUrl = options.baseUrl?.trim() || "http://127.0.0.1:8000";
   return new HttpApiClient(baseUrl, options.fetcher, options.timeoutMs, mode);
 }

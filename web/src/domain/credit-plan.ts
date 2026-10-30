@@ -124,8 +124,7 @@ export function buildCategoryPlan(
     .filter(
       (course) =>
         course.category === requirement.category &&
-        (!completedCodes.has(course.courseCode) ||
-          (codeCounts.get(course.courseCode) ?? 0) > 1),
+        !completedCodes.has(course.courseCode),
     )
     .sort((a, b) => byCode(a.courseCode, b.courseCode));
 
