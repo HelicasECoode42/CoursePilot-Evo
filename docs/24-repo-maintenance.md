@@ -32,20 +32,20 @@ CI 跑的是 `check_contracts.py` + `self_check.py` + `check_modules.py`。**CI 
 ```bash
 # macOS / Linux
 cd java-environment
-COURSEPILOT_SERVICE_KEY=local-dev-key ./mvnw spring-boot:run
+COURSEPILOT_SERVICE_KEY="$CP_SERVICE_KEY" ./mvnw spring-boot:run
 ```
 
 ```powershell
 # Windows PowerShell —— 上面那种「变量=值 命令」的写法在 PowerShell 里不认
 cd java-environment
-$env:COURSEPILOT_SERVICE_KEY = "local-dev-key"
+$env:COURSEPILOT_SERVICE_KEY = $env:CP_SERVICE_KEY
 .\mvnw.cmd spring-boot:run
 ```
 
 服务在 `http://127.0.0.1:8081`。调接口要同时带三个头：
 
 ```bash
-curl -H 'X-Service-Key: local-dev-key' \
+curl -H "X-Service-Key: $CP_SERVICE_KEY" \
      -H 'X-Subject-Id: S001' \
      -H 'X-Request-Id: req-1' \
      http://127.0.0.1:8081/api/v1/courses
@@ -53,7 +53,7 @@ curl -H 'X-Service-Key: local-dev-key' \
 
 **为什么没配密钥是 503 而不是放行**：没有密钥就分辨不出调用方是谁，而 `X-Subject-Id`（要查谁的数据）是调用方自报的。Java 信任这个自报身份的唯一前提，就是密钥已经证明调用方是已认证的 Python 服务（[工程规范](16-engineering-and-debugging.md)）。放行等于谁都能读任意学生的成绩。
 
-密钥只从环境变量来，**仓库里不放默认值**（[基础设施与协作](04-infrastructure-workflow.md)）。`local-dev-key` 只是本地占位，不要写进代码、配置文件或提交信息。
+密钥只从环境变量来，**仓库里不放默认值**（[基础设施与协作](04-infrastructure-workflow.md)）。本地密钥用 `openssl rand -hex 32` 生成，放在不进 git 的 `data/private/stack.env`（`CP_SERVICE_KEY`），使用前先 `export` 到当前终端；不要写进代码、配置文件、文档或提交信息。旧的示例值已经公开在 git 历史里，不能再用。
 
 跑测试**不需要**设这个变量：用到 HTTP 的测试自己用 `@TestPropertySource` 指定密钥和内存库。但跑测试前要先停掉 `spring-boot:run`，否则 H2 文件库被占住会导致上下文启动失败。
 
@@ -63,7 +63,7 @@ H2 控制台默认关闭——它在同一端口上提供免认证的任意 SQL 
 
 ```bash
 cd agent-runtime
-CP_JAVA_BASE_URL=http://127.0.0.1:8081 CP_SERVICE_KEY=local-dev-key uvicorn agent_runtime.api.app:create_app --factory
+CP_JAVA_BASE_URL=http://127.0.0.1:8081 CP_SERVICE_KEY="$CP_SERVICE_KEY" uvicorn agent_runtime.api.app:create_app --factory
 ```
 
 配置全部走 `CP_` 前缀的环境变量，见 `agent_runtime/api/settings.py`。`CP_JAVA_BASE_URL` 为空时所有 Java 工具报 `TOOL_UNAVAILABLE`。模型密钥不配时走受控假实现，不会调真实模型。
