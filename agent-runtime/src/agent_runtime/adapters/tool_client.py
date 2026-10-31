@@ -17,6 +17,7 @@ from agent_runtime.api.schemas import (
     CourseOffering,
     PlanValidation,
     ReviewNote,
+    SchoolProgressImportResult,
     SnapshotSummary,
     TeacherCourseOption,
 )
@@ -67,10 +68,23 @@ class ToolSpec:
     listed: bool = False
 
 
+@dataclass(frozen=True)
+class ToolPage:
+    """A Java list response including its pagination cursor."""
+
+    items: list[BaseModel]
+    next_cursor: str | None
+
+
 # Registered Java typed tools (contracts/java.openapi.json). The Runner and the
 # ModelAdapter may only call these; any other name is rejected before HTTP.
 TOOLS: dict[str, ToolSpec] = {
     "listCurricula": ToolSpec("GET", "/api/v1/curriculum-snapshots", SnapshotSummary, listed=True),
+    # 开课快照列表（contracts/java.openapi.json listOfferingSnapshots）。与 listCurricula 分开：
+    # 开课快照不能混进培养方案列表，否则会被误当培养方案使用。
+    "listOfferingSnapshots": ToolSpec(
+        "GET", "/api/v1/offering-snapshots", SnapshotSummary, listed=True
+    ),
     "listCourses": ToolSpec("GET", "/api/v1/courses", Course, listed=True),
     "listOfferings": ToolSpec("GET", "/api/v1/offerings", CourseOffering, listed=True),
     "listTeacherCourseOptions": ToolSpec(
@@ -87,6 +101,8 @@ TOOLS: dict[str, ToolSpec] = {
     # listSessionRecords (planning.openapi.json) is the gateway's list endpoint; the
     # Java side (java.openapi.json) still needs GET /api/v1/academic-records to back it.
     "listAcademicRecords": ToolSpec("GET", "/api/v1/academic-records", AcademicRecord, listed=True),
+    "importSchoolProgress": ToolSpec("PUT", "/api/v1/school-progress", SchoolProgressImportResult),
+    "getSchoolProgress": ToolSpec("GET", "/api/v1/school-progress", SchoolProgressImportResult),
 }
 
 
@@ -117,6 +133,8 @@ class ToolClient:
         context: ExecutionContext,
         *,
         params: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
+        _include_page: bool = False,
     ) -> Any:
         spec = TOOLS.get(tool)
         if spec is None:
@@ -139,6 +157,11 @@ class ToolClient:
             "X-Request-Id": context.request_id,
             "Accept": "application/json",
         }
+        # 不转发这个头，Java 侧的幂等（唯一约束 + 乐观锁 + 并发冲突回放）在生产里
+        # 永远不会触发：去重只剩本进程的内存表，重启即失效。Java 把这个头当可选，
+        # 带上才会按 (主体, 键) 入账。
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
         timeout = _timeout_seconds(context)
         body = dto.model_dump(mode="json") if dto is not None else None
 
@@ -188,7 +211,15 @@ class ToolClient:
                     raise ToolContractViolation(
                         f"{tool}: list endpoints answer with data.items (java.openapi.json)"
                     )
-                return [spec.response_model.model_validate(item) for item in items]
+                parsed_items = [spec.response_model.model_validate(item) for item in items]
+                if _include_page:
+                    if "nextCursor" not in data:
+                        raise ToolContractViolation(f"{tool}: list response is missing nextCursor")
+                    next_cursor = data.get("nextCursor")
+                    if next_cursor is not None and not isinstance(next_cursor, str):
+                        raise ToolContractViolation(f"{tool}: nextCursor must be a string or null")
+                    return ToolPage(parsed_items, next_cursor)
+                return parsed_items
             if data is None:
                 raise ToolContractViolation(
                     f"{tool}: data is null on a {payload.get('status')} response"
@@ -199,6 +230,20 @@ class ToolClient:
         except (TypeError, AttributeError) as exc:
             raise ToolContractViolation(f"{tool}: unexpected data shape: {data!r}"[:300]) from exc
 
+    def call_page(
+        self,
+        tool: str,
+        dto: BaseModel | None,
+        context: ExecutionContext,
+        *,
+        params: dict[str, object] | None = None,
+    ) -> ToolPage:
+        """Call a listed tool while preserving the provider's nextCursor."""
+        result = self.call(tool, dto, context, params=params, _include_page=True)
+        if not isinstance(result, ToolPage):
+            raise ToolContractViolation(f"{tool}: pagination requested for a non-list tool")
+        return result
+
     def _send(
         self,
         method: str,
@@ -208,10 +253,10 @@ class ToolClient:
         body: dict | None,
         timeout: float,
     ) -> httpx.Response:
+        if method not in {"GET", "POST", "PUT"}:
+            raise InvalidTool(f"unsupported HTTP method for {method}")
         with httpx.Client(timeout=timeout, transport=self._transport) as client:
-            if method == "GET":
-                return client.get(url, headers=headers, params=query)
-            return client.post(url, headers=headers, params=query, json=body)
+            return client.request(method, url, headers=headers, params=query, json=body)
 
 
 _MIN_TIMEOUT_SECONDS = 0.1

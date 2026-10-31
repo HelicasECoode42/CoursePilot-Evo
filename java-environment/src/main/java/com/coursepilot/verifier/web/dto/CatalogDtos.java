@@ -30,7 +30,13 @@ public final class CatalogDtos {
         String name,
         Double credits,
         String category,
-        List<String> sourceRefIds) {}
+        List<String> sourceRefIds,
+        String suggestedTerm) {
+        public Course(String courseCode, String name, Double credits, String category,
+                      List<String> sourceRefIds) {
+            this(courseCode, name, credits, category, sourceRefIds, null);
+        }
+    }
 
     /**
      * contracts: CourseOffering。
@@ -48,10 +54,7 @@ public final class CatalogDtos {
         ParseStatus parseStatus,
         String sourceRefId) {}
 
-    /**
-     * listCourses 的 data。nextCursor 当前固定为 null：分页未实现，
-     * 所以不会返回游标；契约要求该字段必须存在，因此显式返回 null。
-     */
+    /** listCourses 的分页 data；nextCursor 为下一页偏移量，没有下一页时为 null。 */
     public record CourseList(List<Course> items, String nextCursor) {}
 
     /** listOfferings 的 data。 */

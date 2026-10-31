@@ -50,6 +50,7 @@ export interface SnapshotSummary {
   termId: string | null;
   createdAt: string;
   sourceValidation: "VERIFIED" | "UNVERIFIED" | "SYNTHETIC";
+  displayName?: string | null;
 }
 
 export interface PlanningRequest {
@@ -62,15 +63,7 @@ export interface PlanningRequest {
   intent: {
     motives: Motive[];
     priorityOrder: string[];
-    hardConstraints: Array<{
-      kind: "BLOCK_DAY" | "BLOCK_SECTION" | "BLOCK_SLOT";
-      courseCode: null;
-      teacherKey: null;
-      dayOfWeek: number | null;
-      section: number | null;
-      value: number | null;
-      sourceText: string;
-    }>;
+    hardConstraints: Constraint[];
     softPreferences: Array<{
       dimension: string;
       value: string;
@@ -133,6 +126,8 @@ export type AuditState = "SATISFIED" | "UNSATISFIED" | "UNKNOWN";
 
 export interface AuditItem {
   requirementId: string;
+  /** 类别名（必修 / 通识 …）。为 null 时才退回显示序号。 */
+  category: string | null;
   courseCodes: string[];
   requiredCredits: number | null;
   earnedCredits: number | null;
@@ -192,6 +187,20 @@ export interface Recommendation {
   items: PlanItem[];
   explanation: string;
   reviewNoteIds: string[];
+  courseRationales?: {
+    courseCode: string;
+    reason: string;
+    reviewNoteIds: string[];
+    courseSourceRefIds?: string[];
+    reviewBasisStatus?: "HAS_EVIDENCE" | "NO_RECORDS" | "NOT_QUERIED" | null;
+    rationaleSource?: "MODEL" | "COURSE_FACTS" | null;
+    reviewEvidenceRefs?: Array<{ reviewNoteId: string; sourceRefId: string }>;
+  }[];
+  explorationDirections?: {
+    title: string;
+    description: string;
+    steps: string[];
+  }[];
   verification: PlanValidation;
 }
 
@@ -200,6 +209,58 @@ export interface Usage {
   outputTokens: number | null;
   toolCalls: number;
   elapsedMs: number;
+}
+
+export interface AdviceChatRequest {
+  schemaVersion: typeof SCHEMA_VERSION;
+  curriculumSnapshotId: string;
+  academicRecordId: string | null;
+  mode: PlanningMode;
+  message: string;
+  history: Array<{ role: "user" | "assistant"; text: string }>;
+  interestText: string;
+  selectedCourseCodes: string[];
+  preferredCourseCodes?: string[];
+}
+
+export interface AdviceChatCourse {
+  courseCode: string;
+  name: string;
+  credits: number | null;
+  category: string;
+  reason: string;
+  reviewNoteIds: string[];
+  reviews: ReviewNote[];
+  reviewStatus: "AVAILABLE" | "NONE" | "NOT_QUERIED" | "UNKNOWN";
+}
+
+export interface AdviceChatSuggestion {
+  suggestionId: string;
+  kind: "INTEREST" | "SELECT_COURSE" | "PREFER_COURSE";
+  label: string;
+  value: string;
+}
+
+export interface AdviceChatAnswer {
+  schemaVersion: typeof SCHEMA_VERSION;
+  reply: string;
+  question: string | null;
+  courses: AdviceChatCourse[];
+  suggestions: AdviceChatSuggestion[];
+  schoolProgress: {
+    capturedAt: string;
+    source: string;
+    nodes: Array<{
+      nodeId: string;
+      parentId: string | null;
+      name: string;
+      requiredCredits: number | null;
+      earnedCredits: number | null;
+      remainingCredits: number | null;
+    }>;
+  } | null;
+  unknowns: Issue[];
+  usage: Usage;
 }
 
 export type PlanningDecision =
@@ -224,6 +285,29 @@ export interface AcademicRecordList {
 }
 
 // --- E4: 换班次、教师与评价、运行报告（字段以 contracts/schemas/domain.schema.json 为准） ---
+
+/**
+ * 职业方向。来自 Java，网页只展示：title 是方向名，description 说明这是什么方向，
+ * courseCodes 是该方向建议的课程号。description 里带「【演示数据】」的条目就是演示数据，
+ * 页面不改写这个标记。
+ */
+export interface CareerDirection {
+  directionId: string;
+  subjectTags: string[];
+  title: string;
+  description: string;
+  courseCodes: string[];
+  sourceRefIds: string[];
+}
+
+export interface Course {
+  courseCode: string;
+  name: string;
+  credits: number | null;
+  category: string;
+  sourceRefIds: string[];
+  suggestedTerm?: string | null;
+}
 
 /** 一次上课时段。weeks 是教学周号，去重后不超过 60 个。 */
 export interface Meeting {
@@ -289,6 +373,7 @@ export interface ReviewNote {
   reviewNoteId: string;
   courseCode: string;
   teacherKey: string | null;
+  teacherDisplayName?: string | null;
   termId: string | null;
   sourceKind:
     | "OFFICIAL_SYLLABUS"
@@ -350,4 +435,18 @@ export interface SessionPlanReplacement {
   items: PlanItem[];
   hardConstraints: Constraint[];
   verification: PlanValidation;
+}
+
+export interface SessionPlanEditInput {
+  previousPlanId: string;
+  courseCode: string;
+}
+
+export interface SessionPlanEditResult {
+  previousPlanId: string;
+  planId: string;
+  items: PlanItem[];
+  hardConstraints: Constraint[];
+  verification: PlanValidation | null;
+  empty: boolean;
 }

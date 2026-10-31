@@ -2,11 +2,13 @@ package com.coursepilot.verifier.web;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -66,12 +68,61 @@ public class ApiExceptionHandler {
             .body(Envelope.error(null, "INVALID_SUBJECT", ex.getMessage(), "X-Subject-Id", false));
     }
 
+    /** 学业记录写入的输入不合法 */
+    @ExceptionHandler(InvalidRecordInput.class)
+    public ResponseEntity<Envelope<Void>> invalidRecord(InvalidRecordInput ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(Envelope.error(null, "INVALID_INPUT", ex.getMessage(), ex.getField(), false));
+    }
+
+    /** 幂等键与内容不符，或并发写入冲突（契约 409） */
+    @ExceptionHandler(RecordConflict.class)
+    public ResponseEntity<Envelope<Void>> recordConflict(RecordConflict ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(Envelope.error(null, "CONFLICT", ex.getMessage(), null, false));
+    }
+
+    /** 培养快照不存在（契约 422） */
+    @ExceptionHandler(UnknownSnapshot.class)
+    public ResponseEntity<Envelope<Void>> unknownSnapshot(UnknownSnapshot ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+            .body(Envelope.error(null, "SNAPSHOT_NOT_FOUND", ex.getMessage(),
+                "curriculumSnapshotId", false));
+    }
+
+    /** 查询参数存在但格式或范围不合法，例如 limit 超出 1..10 */
+    @ExceptionHandler(InvalidQuery.class)
+    public ResponseEntity<Envelope<Void>> invalidQuery(InvalidQuery ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(Envelope.error(null, "INVALID_QUERY", ex.getMessage(), ex.getField(), false));
+    }
+
+    @ExceptionHandler(UnknownCourseFacts.class)
+    public ResponseEntity<Envelope<Void>> unknownCourseFacts(UnknownCourseFacts ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(Envelope.error(null, "SNAPSHOT_COURSE_FACTS_UNKNOWN", ex.getMessage(),
+                "curriculumSnapshotId", false));
+    }
+
+    @ExceptionHandler(SnapshotMismatch.class)
+    public ResponseEntity<Envelope<Void>> snapshotMismatch(SnapshotMismatch ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(Envelope.error(null, "SNAPSHOT_MISMATCH", ex.getMessage(),
+                "curriculumSnapshotId", false));
+    }
+
     /** 缺少必填请求头 */
     @ExceptionHandler(MissingRequestHeaderException.class)
     public ResponseEntity<Envelope<Void>> missingHeader(MissingRequestHeaderException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
             .body(Envelope.error(null, "MISSING_HEADER",
                 "缺少必填请求头：" + ex.getHeaderName(), ex.getHeaderName(), false));
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Envelope<Void>> uploadTooLarge(MaxUploadSizeExceededException ex) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+            .body(Envelope.error(null, "FILE_TOO_LARGE", "工作簿超过 10 MiB", "file", false));
     }
 
     /** 兜底：任何未预期的异常 */

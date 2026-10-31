@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from agent_runtime.adapters.tool_client import InvalidTool
+from agent_runtime.adapters.tool_client import InvalidTool, ToolPage, ToolRejected
 from agent_runtime.api.schemas import (
     AcademicRecord,
     AuditResult,
@@ -25,14 +26,14 @@ class TypedFakeToolClient:
             courseCode="CS101",
             name="程序设计基础（演示）",
             credits=Decimal("4.00"),
-            category="必修",
+            category="专业选修课",
             sourceRefIds=["source:fake-w2"],
         ),
         Course(
             courseCode="MATH201",
             name="离散数学（演示）",
             credits=Decimal("3.00"),
-            category="必修",
+            category="高年级研讨课",
             sourceRefIds=["source:fake-w2"],
         ),
     )
@@ -47,8 +48,8 @@ class TypedFakeToolClient:
         ),
     )
 
-    def call(self, tool: str, dto, context, *, params=None):
-        del context, params
+    def call(self, tool: str, dto, context, *, params=None, idempotency_key=None):
+        del context, params, idempotency_key
         if tool == "auditRequirements":
             return AuditResult(
                 curriculumSnapshotId=dto.curriculumSnapshotId,
@@ -110,8 +111,16 @@ class TypedFakeToolClient:
                 sourceKind="SYNTHETIC",
                 createdAt=datetime.now(UTC),
             )
+        if tool == "getSchoolProgress":
+            raise ToolRejected(
+                tool,
+                404,
+                "SCHOOL_PROGRESS_UNAVAILABLE",
+                "W2 假工具未提供学校进度快照",
+            )
         if tool in {
             "listCurricula",
+            "listOfferingSnapshots",
             "listOfferings",
             "searchReviews",
             "listCareerDirections",
@@ -119,3 +128,23 @@ class TypedFakeToolClient:
         }:
             return []
         raise InvalidTool(tool)
+
+    def call_page(self, tool: str, dto, context, *, params=None) -> ToolPage:
+        """Return a paged view of fixed demo lists for gateway parity."""
+        params = params or {}
+        items = self.call(tool, dto, context, params=params)
+        if not isinstance(items, list):
+            raise InvalidTool(tool)
+        cursor = params.get("cursor")
+        if cursor is not None and (
+            not isinstance(cursor, str) or re.fullmatch(r"[0-9]{1,9}", cursor) is None
+        ):
+            raise ToolRejected(tool, 400, "INVALID_QUERY", "cursor 格式不合法")
+        offset = int(cursor) if cursor is not None else 0
+        requested_limit = params.get("limit")
+        limit = 20 if requested_limit is None else requested_limit
+        if not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ToolRejected(tool, 400, "INVALID_QUERY", "limit 须在 1 到 100 之间")
+        end = min(offset + limit, len(items))
+        next_cursor = str(end) if end < len(items) else None
+        return ToolPage(items[offset:end], next_cursor)

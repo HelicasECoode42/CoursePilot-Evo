@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -14,9 +15,9 @@ from agent_runtime.adapters.model_client import (
     ModelTimeout,
     ModelUpstreamError,
 )
-from agent_runtime.adapters.tool_client import ToolUnavailable
+from agent_runtime.adapters.tool_client import ToolPage, ToolRejected, ToolUnavailable
 from agent_runtime.api.app import create_app
-from agent_runtime.api.schemas import AcademicRecord, AuditResult, PlanningRequest
+from agent_runtime.api.schemas import AcademicRecord, AuditItem, AuditResult, PlanningRequest
 from agent_runtime.api.settings import Settings, load_settings
 from agent_runtime.application.ids import digest
 from agent_runtime.application.runner import PlanningRunner
@@ -27,14 +28,25 @@ CONTRACTS = Path(__file__).resolve().parents[2] / "contracts"
 class FakeToolClient:
     """Test double: returns fixed (clearly-fake) data per tool."""
 
-    def call(self, tool: str, dto, context, *, params=None):
+    def call(self, tool: str, dto, context, *, params=None, idempotency_key=None):
         if tool == "auditRequirements":
             return AuditResult(
                 curriculumSnapshotId=dto.curriculumSnapshotId,
                 academicRecordId=dto.academicRecordId,
                 recordRevision=1,
                 transcriptComplete=False,
-                requirements=[],
+                requirements=[
+                    AuditItem(
+                        requirementId="req:credits",
+                        category="必修",
+                        courseCodes=["CS101"],
+                        requiredCredits=Decimal("4.00"),
+                        earnedCredits=Decimal("3.00"),
+                        gapCredits=Decimal("1.00"),
+                        state="UNSATISFIED",
+                        sourceRefIds=["curr:demo"],
+                    )
+                ],
                 suggestedCourseCodes=[],
                 unknowns=[],
             )
@@ -58,8 +70,16 @@ class FakeToolClient:
                 sourceKind="SYNTHETIC",
                 createdAt=datetime.now(UTC),
             )
+        if tool == "getSchoolProgress":
+            raise ToolRejected(
+                tool,
+                404,
+                "SCHOOL_PROGRESS_UNAVAILABLE",
+                "测试假客户端未提供学校进度快照",
+            )
         if tool in {
             "listCurricula",
+            "listOfferingSnapshots",
             "listCourses",
             "listTeacherCourseOptions",
             "searchReviews",
@@ -68,6 +88,9 @@ class FakeToolClient:
         }:
             return []
         raise ToolUnavailable(tool)
+
+    def call_page(self, tool: str, dto, context, *, params=None):
+        return ToolPage(self.call(tool, dto, context, params=params), None)
 
 
 def _request_body() -> dict:
@@ -138,6 +161,71 @@ def test_gateway_list_courses_ok_with_fake_java() -> None:
     assert response.json()["data"] == {"items": [], "nextCursor": None}
 
 
+def test_gateway_teacher_options_preserves_java_next_cursor() -> None:
+    class PagedFake(FakeToolClient):
+        def call_page(self, tool, dto, context, *, params=None):
+            assert tool == "listTeacherCourseOptions"
+            assert params["curriculumSnapshotId"] == "curr:demo"
+            return ToolPage([], "20")
+
+    client = TestClient(create_app(tool_client=PagedFake()))
+    response = client.get(
+        "/api/v1/teacher-course-options",
+        params={"curriculumSnapshotId": "curr:demo"},
+        headers={"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:x1"},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"] == {"items": [], "nextCursor": "20"}
+
+
+def test_gateway_review_pagination_forwards_cursor() -> None:
+    class PagedFake(FakeToolClient):
+        def call_page(self, tool, dto, context, *, params=None):
+            assert tool == "searchReviews"
+            assert params["courseCode"] == "CS101"
+            assert params["cursor"] == "5"
+            return ToolPage([], "10")
+
+    client = TestClient(create_app(tool_client=PagedFake()))
+    response = client.get(
+        "/api/v1/reviews/search",
+        params={"courseCode": "CS101", "cursor": "5"},
+        headers={"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:review-page"},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"] == {"items": [], "nextCursor": "10"}
+
+
+def test_gateway_list_routes_work_with_configured_typed_fake_tools() -> None:
+    client = TestClient(create_app(Settings(use_fake_tools=True)))
+    headers = {"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:fake-page"}
+    courses = client.get(
+        "/api/v1/courses", params={"curriculumSnapshotId": "curr:demo"}, headers=headers
+    )
+    options = client.get(
+        "/api/v1/teacher-course-options",
+        params={"curriculumSnapshotId": "curr:demo"},
+        headers=headers,
+    )
+    assert courses.status_code == options.status_code == 200
+    assert len(courses.json()["data"]["items"]) == 2
+    assert len(options.json()["data"]["items"]) == 1
+    assert courses.json()["data"]["nextCursor"] is None
+    assert options.json()["data"]["nextCursor"] is None
+
+
+@pytest.mark.parametrize("cursor", ["-1", "1x", "1234567890"])
+def test_gateway_fake_tools_reject_invalid_course_cursor_like_java(cursor: str) -> None:
+    client = TestClient(create_app(Settings(use_fake_tools=True)))
+    response = client.get(
+        "/api/v1/courses",
+        params={"curriculumSnapshotId": "curr:demo", "cursor": cursor},
+        headers={"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:bad-cursor"},
+    )
+    assert response.status_code == 400
+    assert response.json()["issues"][0]["code"] == "INVALID_QUERY"
+
+
 def test_academic_records_requires_auth() -> None:
     client = TestClient(create_app())
     response = client.post(
@@ -160,6 +248,85 @@ def test_academic_records_save_is_idempotent() -> None:
     assert first.status_code == 201
     assert first.json()["data"]["academicRecordId"] == "record:demo"
     assert second.json() == first.json()
+
+
+def test_academic_record_response_uses_json_number_for_credits() -> None:
+    client = TestClient(create_app(tool_client=FakeToolClient()))
+    body = _record_body()
+    body["completedCourses"] = [
+        {
+            "courseCode": "CS101",
+            "earnedCredits": 3.0,
+            "outcome": "PASSED",
+            "completedTerm": "2024-2025-1",
+        }
+    ]
+    response = client.post(
+        "/api/v1/academic-records",
+        json=body,
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "Idempotency-Key": "k-credits-number",
+            "X-Request-Id": "req:credits-number",
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()["data"]
+    credits = data["completedCourses"][0]["earnedCredits"]
+    assert isinstance(credits, (int, float)) and not isinstance(credits, bool)
+    assert credits == 3.0
+    parsed = AcademicRecord.model_validate(data)
+    assert parsed.completedCourses[0].earnedCredits == Decimal("3.0")
+
+
+def test_academic_record_rejects_credit_string_as_off_contract_json() -> None:
+    client = TestClient(create_app(tool_client=FakeToolClient()))
+    body = _record_body()
+    body["completedCourses"] = [
+        {
+            "courseCode": "CS101",
+            "earnedCredits": "3.00",
+            "outcome": "PASSED",
+            "completedTerm": "2024-2025-1",
+        }
+    ]
+    response = client.post(
+        "/api/v1/academic-records",
+        json=body,
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "Idempotency-Key": "k-credits-string",
+            "X-Request-Id": "req:credits-string",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_audit_credit_fields_are_json_numbers() -> None:
+    client = TestClient(create_app(tool_client=FakeToolClient()))
+    response = client.post(
+        "/api/v1/requirements/audit",
+        json={
+            "schemaVersion": "1.0",
+            "curriculumSnapshotId": "curr:demo",
+            "academicRecordId": "record:demo",
+        },
+        headers={
+            "Authorization": f"Bearer {_token(client)}",
+            "X-Request-Id": "req:audit-decimals",
+        },
+    )
+    assert response.status_code == 200
+    item = response.json()["data"]["requirements"][0]
+    assert [item[field] for field in ("requiredCredits", "earnedCredits", "gapCredits")] == [
+        4.0,
+        3.0,
+        1.0,
+    ]
+    assert all(
+        isinstance(item[field], (int, float))
+        for field in ("requiredCredits", "earnedCredits", "gapCredits")
+    )
 
 
 def test_academic_records_list_requires_auth() -> None:
@@ -443,3 +610,27 @@ def test_valid_session_for_missing_object_stays_404() -> None:
     assert response.status_code == 404
     assert response.json()["status"] == "NOT_FOUND"
     assert response.json()["issues"][0]["code"] == "NOT_FOUND"
+
+
+def test_gateway_offering_snapshots_route_with_fake_tools() -> None:
+    # 网关只透传 listOfferingSnapshots；演示假工具返回空列表（没有开课快照就是空，不编造）。
+    client = TestClient(create_app(Settings(use_fake_tools=True)))
+    response = client.get(
+        "/api/v1/offering-snapshots",
+        headers={"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:offer-list"},
+    )
+    assert response.status_code == 200
+    assert response.json()["data"] == {"items": []}
+
+
+def test_admin_key_comparison_rejects_non_ascii_without_crashing() -> None:
+    """compare_digest 对 str 只接受 ASCII；按字节比较后，非 ASCII 应返回 403 而不是 500。"""
+    client = TestClient(create_app(Settings(admin_key="secret")))
+    session = client.post("/api/v1/sessions").json()["data"]
+    headers = {
+        "Authorization": f"Bearer {session['sessionToken']}",
+        # httpx 的 str 头部只接受 ASCII，这里直接以 latin-1 字节发送非 ASCII 值。
+        "X-Admin-Key": "sécret".encode("latin-1"),
+    }
+    response = client.get("/api/v1/reports/runs/run:demo", headers=headers)
+    assert response.status_code == 403

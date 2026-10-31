@@ -87,6 +87,16 @@ SERVICES: tuple[dict, ...] = (
         ),
         "health_path": None,
         "url_key": "CP_API_BASE_URL",
+        # 网关的 Settings 用 env_prefix="CP_" 读环境变量，键名与配置键同名。
+        # 不注入的话 java_base_url 为 None、service_key 为空，每次调 Java 都是 TOOL_UNAVAILABLE。
+        "env_map": {
+            "CP_JAVA_BASE_URL": "CP_JAVA_BASE_URL",
+            "CP_SERVICE_KEY": "CP_SERVICE_KEY",
+            "CP_CORS_ORIGINS": "CP_CORS_ORIGINS",
+            "CP_MODEL_BASE_URL": "CP_MODEL_BASE_URL",
+            "CP_MODEL_API_KEY": "CP_MODEL_API_KEY",
+            "CP_MODEL_ID": "CP_MODEL_ID",
+        },
     },
     {
         "name": "web",
@@ -232,6 +242,11 @@ def resolve_command(start_cmd: list[str], cwd: Path) -> list[str] | None:
         if not (candidate.is_file() and os.access(candidate, os.X_OK)):
             return None
         return [str(candidate), *start_cmd[1:]]
+    # 裸 `python` 必须是跑本脚本的解释器：shutil.which 会拿 PATH 上的第一个 python，
+    # 而模块是用 pip install -e 装进某个 venv 的，两者不一致时子进程 import 不到模块
+    # （实测：anaconda 的 python 起 uvicorn → ModuleNotFoundError: agent_runtime）。
+    if head in ("python", "python3"):
+        return [sys.executable, *start_cmd[1:]]
     resolved = shutil.which(head)
     if resolved is None:
         return None

@@ -3,7 +3,10 @@ import addFormats from "ajv-formats";
 import { describe, expect, it } from "vitest";
 import domainSchema from "../../../contracts/schemas/domain.schema.json";
 import { emptyPlanningDraft, type PlanningDraft } from "./question-flow";
-import { buildPlanningRequest } from "./planning-request";
+import {
+  buildPlanningRequest,
+  isCurriculumUsableForMode,
+} from "./planning-request";
 import { dayKeys, sectionKeys } from "./schedule-grid";
 
 const validator = new Ajv2020({ allErrors: true, strict: false });
@@ -470,7 +473,7 @@ describe("PlanningRequest handoff", () => {
     expect(result).toEqual({ ok: false, missing: ["真实培养方案"] });
   });
 
-  it("requires a verified curriculum source before creating a REAL request", () => {
+  it("allows an imported curriculum file to provide course suggestions while keeping its unverified source", () => {
     const result = buildPlanningRequest(readyDraft(), {
       ...verifiedContext,
       curriculumSnapshotId: "curriculum-unverified",
@@ -478,7 +481,7 @@ describe("PlanningRequest handoff", () => {
       academicRecordId: "record-123",
     });
 
-    expect(result).toEqual({ ok: false, missing: ["已核验培养方案"] });
+    expect(result.ok).toBe(true);
   });
 
   it("rejects a synthetic source kind even when the source is labelled verified", () => {
@@ -494,6 +497,36 @@ describe("PlanningRequest handoff", () => {
 });
 
 describe("课程与教师的选择", () => {
+  it("将优先考虑课程提交为软偏好，不生成必选约束", () => {
+    const built = buildPlanningRequest(
+      readyDraft({ preferredCourseCodes: ["CS102"] }),
+      verifiedContext,
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.request.intent.softPreferences).toContainEqual({
+      dimension: "course.prefer",
+      value: "CS102",
+      sourceText: "学生优先考虑的课程",
+    });
+    expect(built.request.intent.hardConstraints).toEqual([]);
+    expect(validatePlanningRequest?.(built.request)).toBe(true);
+  });
+
+  it("将学生加入规划的课程作为必选约束提交", () => {
+    const built = buildPlanningRequest(
+      readyDraft({ selectedCourseCodes: ["CS102", "CS103"] }),
+      verifiedContext,
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(
+      built.request.intent.hardConstraints
+        .filter((item) => item.kind === "PIN_COURSE")
+        .map((item) => item.courseCode),
+    ).toEqual(["CS102", "CS103"]);
+    expect(validatePlanningRequest!(built.request)).toBe(true);
+  });
   it("把比较页选的课程+教师交给 pinnedTeacherCoursePairs", () => {
     // 契约的 GoalIntent 早就留好了这个字段（元素是 TeacherPreference）。
     // 之前这里恒为空数组，学生在比较页标的「必须保留」永远到不了后端。
@@ -537,5 +570,94 @@ describe("课程与教师的选择", () => {
     expect(built.ok).toBe(false);
     if (built.ok) return;
     expect(built.hints?.join("")).toContain("课程与教师太多");
+  });
+});
+
+describe("isCurriculumUsableForMode", () => {
+  // 自动选择与提交请求共用来源规则。
+  const cases = [
+    { sourceKind: "CURRICULUM_FILE", sourceValidation: "VERIFIED", real: true },
+    {
+      sourceKind: "CURRICULUM_FILE",
+      sourceValidation: "UNVERIFIED",
+      real: true,
+    },
+    {
+      sourceKind: "BROWSER_SNAPSHOT",
+      sourceValidation: "UNVERIFIED",
+      real: false,
+    },
+    { sourceKind: "SYNTHETIC", sourceValidation: "SYNTHETIC", real: false },
+  ] as const;
+
+  it.each(cases)(
+    "REAL 模式下 $sourceKind/$sourceValidation 可用性为 $real",
+    ({ sourceKind, sourceValidation, real }) => {
+      expect(
+        isCurriculumUsableForMode({ sourceKind, sourceValidation }, "REAL"),
+      ).toBe(real);
+    },
+  );
+
+  it("REAL 模式的判断必须和提交前的缺项判断一致", () => {
+    for (const { sourceKind, sourceValidation } of cases) {
+      const build = buildPlanningRequest(readyDraft(), {
+        ...verifiedContext,
+        curriculumSourceKind: sourceKind,
+        curriculumSourceValidation: sourceValidation,
+      });
+      const blockedByCurriculum =
+        !build.ok &&
+        build.missing.some((item) =>
+          ["培养方案", "真实培养方案", "已核验培养方案"].includes(item),
+        );
+      expect(
+        isCurriculumUsableForMode({ sourceKind, sourceValidation }, "REAL"),
+      ).toBe(!blockedByCurriculum);
+    }
+  });
+
+  it("a pending curriculum file cannot qualify an offering snapshot for real timetable checks", () => {
+    expect(
+      isCurriculumUsableForMode(
+        {
+          kind: "OFFERING",
+          sourceKind: "CURRICULUM_FILE",
+          sourceValidation: "UNVERIFIED",
+        },
+        "REAL",
+      ),
+    ).toBe(false);
+  });
+
+  it("演示模式只接受虚构资料", () => {
+    expect(
+      isCurriculumUsableForMode(
+        { sourceKind: "SYNTHETIC", sourceValidation: "SYNTHETIC" },
+        "SIMULATION",
+      ),
+    ).toBe(true);
+    expect(
+      isCurriculumUsableForMode(
+        { sourceKind: "CURRICULUM_FILE", sourceValidation: "VERIFIED" },
+        "SIMULATION",
+      ),
+    ).toBe(false);
+  });
+
+  it("演示模式接受未核验的培养文件，但不接受未核验的开课快照", () => {
+    const source = {
+      sourceKind: "CURRICULUM_FILE",
+      sourceValidation: "UNVERIFIED",
+    } as const;
+    expect(
+      isCurriculumUsableForMode(
+        { ...source, kind: "CURRICULUM" },
+        "SIMULATION",
+      ),
+    ).toBe(true);
+    expect(
+      isCurriculumUsableForMode({ ...source, kind: "OFFERING" }, "SIMULATION"),
+    ).toBe(false);
   });
 });

@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from check_stack import Chain, classify_planning, step_record
+from check_stack import Chain, classify_planning, step_audit, step_planning, step_record
 from smoke_stack import case_bad_input, case_java_unwired, case_no_auth, case_no_time_claim
 from stack_checks import (
     BLOCKED,
@@ -159,6 +160,33 @@ def test_classify_planning_accepts_verified_recommendations():
     assert classify_planning(planning_answer("RECOMMENDATIONS", recommendations=[rec]))[0] == PASS
 
 
+def test_fake_model_recommendation_is_not_reported_as_real_pass():
+    answer = planning_answer("RECOMMENDATIONS", recommendations=[{"items": [], "verification": {}}])
+    answer["unknowns"] = [{"code": "FAKE_MODEL"}]
+    assert classify_planning(answer)[0] == DEGRADED
+
+
+def test_chain_forwards_actual_record_and_test_snapshot():
+    rec = {"items": [{"courseCode": "CS101"}], "verification": {"verdict": "UNKNOWN"}}
+    transport = FakeTransport(
+        {
+            "academic-records": Response(201, envelope(data={"academicRecordId": "session:actual"})),
+            "requirements/audit": Response(200, envelope(data={})),
+            "planning": Response(200, envelope(data=planning_answer("RECOMMENDATIONS", [rec]))),
+        }
+    )
+    chain = make_chain(transport, java_ready=True)
+    chain.values["CP_TEST_CURRICULUM_SNAPSHOT_ID"] = "PLAN_CS_2025"
+    assert step_record(chain).verdict == PASS
+    assert step_audit(chain).verdict == PASS
+    assert step_planning(chain).verdict == PASS
+    for _, _, _, body in transport.calls:
+        assert body["curriculumSnapshotId"] == "PLAN_CS_2025"
+    assert transport.calls[0][3]["sourceKind"] == "SYNTHETIC"
+    assert transport.calls[1][3]["academicRecordId"] == "session:actual"
+    assert transport.calls[2][3]["academicRecordId"] == "session:actual"
+
+
 def test_record_step_degrades_when_java_is_not_wired():
     transport = FakeTransport(
         {"academic-records": Response(503, envelope("ERROR", issues=[{"code": "TOOL_UNAVAILABLE"}]))}
@@ -254,3 +282,132 @@ def test_java_unwired_passes_when_service_reports_tool_unavailable():
     assert result.verdict == PASS
     fabricated = FakeTransport({"requirements/audit": Response(200, envelope(data={"requirements": []}))})
     assert case_java_unwired(make_chain(fabricated, java_ready=False)).verdict == FAIL
+
+
+def test_bad_input_accepts_the_contract_invalid_input_status():
+    """422 的 envelope status 用 INVALID_INPUT 也算合规。
+
+    domain.schema.json 的 Envelope.status 枚举里 INVALID_INPUT 是合法值，网关 422 返的
+    就是它。原来只接受 ERROR，会把合规实现判成失败。
+    """
+    transport = FakeTransport(
+        {"planning": Response(422, envelope("INVALID_INPUT", issues=[{"code": "INVALID_INPUT", "message": "bad"}]))}
+    )
+    assert case_bad_input(make_chain(transport)).verdict == PASS
+
+
+def test_smoke_cases_use_a_record_that_belongs_to_the_session():
+    """java_unwired 不能拿契约样例的 record:demo 去打。
+
+    那个 id 不属于本会话，Java 的对象级授权会正确地返回 404 NOT_VISIBLE，
+    于是这条用例测的变成了授权而不是「Java 未接线」。
+    """
+    transport = FakeTransport({"requirements/audit": Response(200, envelope(data={}))})
+    chain = make_chain(transport, java_ready=True)
+    chain.record_id = "session:mine"
+    case_java_unwired(chain)
+    body = transport.calls[0][3]
+    assert body["academicRecordId"] == "session:mine", "必须用本会话的记录 id"
+    assert "record:demo" not in json.dumps(body), "不能把契约样例的 id 发出去"
+
+
+def test_placeholder_model_id_with_a_real_endpoint_is_an_error():
+    """配了地址和密钥却没换模型名，必须在配置校验就报 error。
+
+    否则 api 服务会在启动时抛 ModelConfigError，判定只看到 TCP 不可达，
+    真原因要去翻 runs/stack/api.log。
+    """
+    from stack_config import SPECS, errors, validate
+
+    assert any(s.key == "CP_MODEL_ID" for s in SPECS), "CP_MODEL_ID 必须登记，否则 resolve 会忽略它"
+
+    base = {s.key: (s.default or "") for s in SPECS}
+    base.update(
+        {
+            "CP_MODEL_BASE_URL": "https://api.deepseek.com",
+            "CP_MODEL_API_KEY": "k",
+            "CP_MODEL_ID": "DEPLOYMENT_MODEL_PLACEHOLDER",
+        }
+    )
+    assert any(key == "CP_MODEL_ID" for _, key, _ in errors(validate(base)))
+
+    base["CP_MODEL_ID"] = "deepseek-chat"
+    assert not any(key == "CP_MODEL_ID" for _, key, _ in errors(validate(base)))
+
+
+def test_api_child_process_gets_the_model_config():
+    """网关的 Settings 用 env_prefix="CP_" 读环境变量；不注入就拿不到。"""
+    from start_stack import SERVICES, child_env
+
+    api = next(s for s in SERVICES if s["name"] == "api")
+    values = {
+        "CP_JAVA_BASE_URL": "http://127.0.0.1:8081",
+        "CP_SERVICE_KEY": "k",
+        "CP_CORS_ORIGINS": "http://127.0.0.1:5173",
+        "CP_MODEL_BASE_URL": "https://api.deepseek.com",
+        "CP_MODEL_API_KEY": "secret",
+        "CP_MODEL_ID": "deepseek-chat",
+    }
+    env = child_env(api, values)
+    for key, expected in values.items():
+        assert env[key] == expected, f"{key} 没传给 api 子进程"
+
+
+def test_replan_without_a_previous_plan_checks_the_ownership_rule_instead_of_failing():
+    """上一步先澄清时，重规划不该拿写死的假 planId 去打。
+
+    那个方案不属于本会话，被 404 拒掉是 docs/04「previousPlanId 必须属当前会话」
+    要求的正确行为。判 FAIL 等于把正确行为报成产品缺陷。本轮改为就地验证这条
+    拒绝规则，判 DEGRADED 说明正常分支没验到。
+    """
+    from check_stack import step_replan
+
+    transport = FakeTransport(
+        {"planning": Response(404, envelope("NOT_FOUND", issues=[{"code": "NOT_FOUND", "message": "不在会话"}]))}
+    )
+    chain = make_chain(transport, java_ready=True)
+    chain.answer = planning_answer("CLARIFY")  # 没有 recommendations
+    result = step_replan(chain)
+    assert result.verdict == DEGRADED
+    sent = transport.calls[0][3]
+    assert sent["previousPlanId"] == "plan:not-in-this-session"
+
+    # 若服务反而放行了别人的方案，必须判失败——这条检查不能失去牙齿。
+    lax = FakeTransport({"planning": Response(200, envelope(data=planning_answer("RECOMMENDATIONS")))})
+    lax_chain = make_chain(lax, java_ready=True)
+    lax_chain.answer = planning_answer("CLARIFY")
+    assert step_replan(lax_chain).verdict == FAIL
+
+
+def test_replan_uses_the_plan_id_from_the_previous_step():
+    from check_stack import step_replan
+
+    rec = {
+        "planId": "plan:real-one",
+        "items": [{"courseCode": "CS101"}],
+        "explanation": "x",
+        "verification": {"verdict": "VALID"},
+    }
+    transport = FakeTransport(
+        {
+            "planning": [
+                Response(200, envelope(data=planning_answer("RECOMMENDATIONS", [rec]))),
+                Response(200, envelope(data=planning_answer("RECOMMENDATIONS", [rec]))),
+            ]
+        }
+    )
+    chain = make_chain(transport, java_ready=True)
+    chain.answer = planning_answer("RECOMMENDATIONS", [rec])
+    step_replan(chain)
+    assert transport.calls[0][3]["previousPlanId"] == "plan:real-one"
+
+
+def test_http_timeout_outlives_the_service_run_budget():
+    """客户端超时必须大于服务的运行预算（docs/04：总 45 秒）。
+
+    客户端先超时，一次合规的慢响应就会折算成 status=0「服务未响应」判 FAIL。
+    真模型规划实测 4-5 秒，但偶发更久；原来的 10 秒会把它掐断成假失败。
+    """
+    from stack_checks import UrllibTransport
+
+    assert UrllibTransport().timeout > 45.0

@@ -1,51 +1,64 @@
 package com.coursepilot.verifier.application;
 
-import com.coursepilot.verifier.persistence.entity.AcademicRecord;
-import com.coursepilot.verifier.persistence.entity.Course;
 import com.coursepilot.verifier.persistence.entity.Requirement;
-import com.coursepilot.verifier.persistence.repo.AcademicRecordRepository;
-import com.coursepilot.verifier.persistence.repo.CourseRepository;
+import com.coursepilot.verifier.persistence.entity.Transcript;
+import com.coursepilot.verifier.persistence.entity.Course;
+import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
+import com.coursepilot.verifier.persistence.entity.CurriculumUnmodeledRule;
+import com.coursepilot.verifier.persistence.repo.CurriculumUnmodeledRuleRepository;
+import com.coursepilot.verifier.persistence.repo.CurriculumCourseRepository;
 import com.coursepilot.verifier.persistence.repo.RequirementRepository;
+import com.coursepilot.verifier.persistence.repo.TranscriptRepository;
+import com.coursepilot.verifier.web.SnapshotMismatch;
 import com.coursepilot.verifier.web.dto.AuditDtos;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
 
 /**
  * 把学业核对结果摆成契约的 AuditResult。
  *
- * 算法和 AuditEvaluator 一致（重修去重、学分未知不当 0、有缺口优先于未知），
- * 区别只在于这里逐条产出 AuditItem，而不是把数字拼成一句中文。C 模块按
- * contracts/java.openapi.json 调用 POST /api/v1/requirements/audit，拿到的就是这个结构。
+ * 数据源是学业记录聚合 Transcript（经 AcademicLedger 折算），算法与 AuditEvaluator 共用。
+ * 本类只负责按契约摆形状，逐条产出 AuditItem。C 模块按 contracts/java.openapi.json
+ * 调用 POST /api/v1/requirements/audit，拿到的就是这个结构。
  *
- * 当前模型的已知落差，统一记进 unknowns，不猜也不填假值：
- *   - 还没有培养快照与学业记录聚合实体，暂以 planId / studentId 承担两个 ID；
- *   - Requirement 没有 courseCodes 与 sourceRefIds，返回空数组并记未知；
- *   - 没有记录完整性与修订号，transcriptComplete 返回 false、recordRevision 返回 1。
+ * 仍然未知、统一记进 unknowns，不猜也不填假值：
+ *   - Requirement 没有 courseCodes 与 sourceRefIds，courseCodes 只由已修记录反推，sourceRefIds 指向培养快照；
+ *   - 学业记录未声明完整（transcriptComplete = false）时，记 TRANSCRIPT_COMPLETENESS_UNKNOWN，
+ *     未满足的要求判 UNKNOWN；
+ *   - 没有学业记录时，所有要求判 UNKNOWN，recordRevision 按契约最小值 1 占位，并记 ACADEMIC_RECORD_EMPTY；
+ *   - UNKNOWN 的要求 gapCredits 为 null（契约允许），不给确定缺口数字。
  */
 @Service
 public class AuditResultAssembler {
 
     private final RequirementRepository requirementRepo;
-    private final AcademicRecordRepository recordRepo;
-    private final CourseRepository courseRepo;
+    private final TranscriptRepository transcriptRepo;
+    private final CurriculumCourseRepository curriculumCourses;
+    private final CurriculumUnmodeledRuleRepository unmodeledRules;
 
     public AuditResultAssembler(RequirementRepository requirementRepo,
-                                AcademicRecordRepository recordRepo,
-                                CourseRepository courseRepo) {
+                                TranscriptRepository transcriptRepo,
+                                CurriculumCourseRepository curriculumCourses,
+                                CurriculumUnmodeledRuleRepository unmodeledRules) {
         this.requirementRepo = requirementRepo;
-        this.recordRepo = recordRepo;
-        this.courseRepo = courseRepo;
+        this.transcriptRepo = transcriptRepo;
+        this.curriculumCourses = curriculumCourses;
+        this.unmodeledRules = unmodeledRules;
     }
 
     public AuditDtos.AuditResult assemble(String curriculumSnapshotId, String academicRecordId) {
+        Transcript transcript = transcriptRepo.findByStudentId(academicRecordId).orElse(null);
+        if (transcript != null && !curriculumSnapshotId.equals(transcript.getCurriculumSnapshotId())) {
+            throw new SnapshotMismatch(transcript.getCurriculumSnapshotId(), curriculumSnapshotId);
+        }
+        // 契约 recordRevision 最小为 1。没有学业记录时没有真实修订号，这里用 1 占位，
+        // 并在 unknowns 里说明，消费方不能把它当成真实版本。
+        int recordRevision = transcript == null ? 1 : transcript.getRevision();
+        boolean transcriptComplete = transcript != null && transcript.isTranscriptComplete();
+
         List<AuditDtos.Issue> unknowns = new ArrayList<>();
         List<Requirement> requirements = requirementRepo.findByPlanId(curriculumSnapshotId);
 
@@ -53,90 +66,71 @@ public class AuditResultAssembler {
             unknowns.add(new AuditDtos.Issue("CURRICULUM_NOT_FOUND",
                 "培养方案 " + curriculumSnapshotId + " 没有类别要求，无法核对",
                 "curriculumSnapshotId", false));
-            return emptyResult(curriculumSnapshotId, academicRecordId, unknowns);
+            return new AuditDtos.AuditResult(curriculumSnapshotId, academicRecordId,
+                recordRevision, transcriptComplete, List.of(), List.of(), List.copyOf(unknowns));
         }
 
-        // 重修去重：同一课程只取第一次通过的记录。
-        Map<String, AcademicRecord> firstPassed = new LinkedHashMap<>();
-        recordRepo.findByStudentId(academicRecordId).stream()
-            .filter(AcademicRecord::isPassed)
-            .sorted(Comparator.comparingInt(AcademicRecord::getAttemptNo))
-            .forEach(r -> firstPassed.putIfAbsent(r.getCourseCode(), r));
+        Map<String, Course> snapshotCatalog = transcript == null ? Map.of()
+            : curriculumCourses.findBySnapshot_SnapshotIdAndCourse_CourseCodeIn(
+                    curriculumSnapshotId, transcript.getCompletedCourses().stream()
+                        .map(c -> c.getCourseCode()).distinct().toList())
+                .stream()
+                // 同一编号对应多门课（占位编号）时无法认定，整组排除，按未知处理。
+                .collect(java.util.stream.Collectors.groupingBy(cc -> cc.getCourse().getCourseCode()))
+                .values().stream().filter(group -> group.size() == 1).map(group -> group.getFirst())
+                .filter(cc -> hasUsableFacts(cc, curriculumSnapshotId))
+                .collect(java.util.stream.Collectors.toMap(
+                    cc -> cc.getCourse().getCourseCode(),
+                    cc -> new Course(cc.getCourse().getCourseCode(), cc.getName(), cc.getCredits(), cc.getCategory())));
+        AcademicLedger ledger = AcademicLedger.of(transcript,
+            code -> java.util.Optional.ofNullable(snapshotCatalog.get(code)));
+        unknowns.addAll(ledger.issues());
+        // 未建模规则不参与核验，但显式带出，让人看见哪些规则没有被算进去。
+        var unmodeled = unmodeledRules.findBySnapshot_SnapshotIdAndDispositionOrderBySourceRowAsc(
+            curriculumSnapshotId, CurriculumUnmodeledRule.Disposition.UNMODELED);
+        if (!unmodeled.isEmpty()) {
+            unknowns.add(new AuditDtos.Issue(UnmodeledRuleNotice.CODE,
+                UnmodeledRuleNotice.message(unmodeled), "curriculumSnapshotId", false));
+        }
 
-        if (firstPassed.isEmpty()) {
+        if (transcript == null) {
             unknowns.add(new AuditDtos.Issue("ACADEMIC_RECORD_EMPTY",
-                "学业记录 " + academicRecordId + " 没有已通过的课程，缺口无法计算",
+                "学业记录 " + academicRecordId + " 尚不存在，没有任何已修课程，各要求判 UNKNOWN、缺口不给值，"
+                    + "recordRevision 为占位值 1",
                 "academicRecordId", false));
-        }
-
-        Map<String, Double> earned = new LinkedHashMap<>();
-        Map<String, Set<String>> courseCodesByCategory = new LinkedHashMap<>();
-        Set<String> unknownCategories = new HashSet<>();
-
-        for (AcademicRecord record : firstPassed.values()) {
-            Course course = courseRepo.findById(record.getCourseCode()).orElse(null);
-            if (course == null) {
-                unknowns.add(new AuditDtos.Issue("COURSE_NOT_IN_CATALOG",
-                    "课程 " + record.getCourseCode() + " 不在课程库中，无法归类",
-                    "completedCourses", false));
-                continue;
-            }
-            String category = course.getCategory();
-            if (category == null || category.isBlank()) {
-                unknowns.add(new AuditDtos.Issue("COURSE_CATEGORY_MISSING",
-                    "课程 " + course.getCourseCode() + " 类别为空", "completedCourses", false));
-                continue;
-            }
-            courseCodesByCategory
-                .computeIfAbsent(category, k -> new TreeSet<>())
-                .add(course.getCourseCode());
-
-            Double credits = record.getCreditsEarned() != null
-                ? record.getCreditsEarned() : course.getCredits();
-            if (credits == null) {
-                unknownCategories.add(category);
-                unknowns.add(new AuditDtos.Issue("CREDITS_UNKNOWN",
-                    "课程 " + course.getCourseCode() + " 学分未知", "completedCourses", false));
-                continue;
-            }
-            earned.merge(category, credits, Double::sum);
         }
 
         List<AuditDtos.AuditItem> items = new ArrayList<>();
         for (Requirement req : requirements) {
-            String category = req.getCategory();
-            double required = req.getRequiredCredits();
-            double got = earned.getOrDefault(category, 0.0);
-
-            AuditDtos.State state;
-            if (unknownCategories.contains(category)) {
-                // 该类别里有学分未知的课程，缺口算不准，不能说满足也不能说差多少。
-                state = AuditDtos.State.UNKNOWN;
-            } else if (got >= required) {
-                state = AuditDtos.State.SATISFIED;
-            } else {
-                state = AuditDtos.State.UNSATISFIED;
-            }
-
+            AuditDtos.State state = ledger.stateFor(req);
+            // UNKNOWN 的要求不给确定缺口：null 表示无法确定（契约 gapCredits 可为 null）。
+            Double gap = state == AuditDtos.State.UNKNOWN
+                ? null
+                : Math.max(0.0, req.getRequiredCredits() - ledger.earned(req.getCategory()));
             items.add(new AuditDtos.AuditItem(
                 requirementId(req),
-                List.copyOf(courseCodesByCategory.getOrDefault(category, Set.of())),
-                required,
-                got,
-                Math.max(0.0, required - got),
+                req.getCategory(),
+                ledger.courseCodes(req.getCategory()),
+                req.getRequiredCredits(),
+                ledger.earned(req.getCategory()),
+                gap,
                 state,
-                sourceRefIds(curriculumSnapshotId)));
+                sourceRefIds(req, curriculumSnapshotId)));
         }
 
-        unknowns.add(new AuditDtos.Issue("REQUIREMENT_SOURCE_REFS_MISSING",
-            "当前 Requirement 没有记录课程清单与来源引用，courseCodes 仅由已修记录反推，sourceRefIds 为空",
-            "requirements", false));
-        unknowns.add(new AuditDtos.Issue("TRANSCRIPT_COMPLETENESS_UNKNOWN",
-            "当前模型不记录学业记录完整性与修订号，transcriptComplete 按未确认处理",
-            "transcriptComplete", false));
+        if (!transcriptComplete) {
+            unknowns.add(new AuditDtos.Issue("TRANSCRIPT_COMPLETENESS_UNKNOWN",
+                "学业记录未声明完整：已修学分只是下界，未满足的要求判 UNKNOWN、缺口不给确定值；已满足的要求不受影响",
+                "transcriptComplete", false));
+        }
+        if (requirements.stream().anyMatch(req -> !hasRequirementSource(req, curriculumSnapshotId))) {
+            unknowns.add(new AuditDtos.Issue("REQUIREMENT_SOURCE_REFS_MISSING",
+                "部分类别要求没有绑定到当前培养快照的来源引用，courseCodes 仅由已修记录反推",
+                "requirements", false));
+        }
 
         return new AuditDtos.AuditResult(
-            curriculumSnapshotId, academicRecordId, 1, false,
+            curriculumSnapshotId, academicRecordId, recordRevision, transcriptComplete,
             items, List.of(), List.copyOf(unknowns));
     }
 
@@ -153,14 +147,34 @@ public class AuditResultAssembler {
      * 即结论必须可追溯。当前判断完全来自该培养快照里的类别学分要求，
      * 所以引用快照本身；等 Requirement 记录了原表行号后换成更细的引用。
      */
-    private List<String> sourceRefIds(String curriculumSnapshotId) {
+    private List<String> sourceRefIds(Requirement requirement, String curriculumSnapshotId) {
+        var source = requirement.getSourceReference();
+        if (source != null && hasRequirementSource(requirement, curriculumSnapshotId)) {
+            return List.of(source.getRefId());
+        }
+        // Legacy rows have no row-level provenance. Preserve the contract shape while adding
+        // REQUIREMENT_SOURCE_REFS_MISSING to unknowns; do not treat this fallback as a source.
         return List.of("curriculum:" + curriculumSnapshotId);
     }
 
-    private AuditDtos.AuditResult emptyResult(String curriculumSnapshotId,
-                                              String academicRecordId,
-                                              List<AuditDtos.Issue> unknowns) {
-        return new AuditDtos.AuditResult(curriculumSnapshotId, academicRecordId, 1, false,
-            List.of(), List.of(), List.copyOf(unknowns));
+    private boolean hasRequirementSource(Requirement requirement, String curriculumSnapshotId) {
+        var source = requirement.getSourceReference();
+        return source != null
+            && source.getRefId() != null
+            && !source.getRefId().isBlank()
+            && curriculumSnapshotId.equals(source.getSnapshotId())
+            && ("CURRICULUM".equals(source.getKind()) || "SYNTHETIC".equals(source.getKind()))
+            && source.getLocator() != null
+            && !source.getLocator().isBlank();
+    }
+
+    private static boolean hasUsableFacts(CurriculumCourse cc, String snapshotId) {
+        var source = cc.getSourceReference();
+        return cc.getName() != null && !cc.getName().isBlank()
+            && cc.getCategory() != null && !cc.getCategory().isBlank()
+            && source != null && source.getRefId() != null && !source.getRefId().isBlank()
+            && snapshotId.equals(source.getSnapshotId())
+            && source.getLocator() != null && !source.getLocator().isBlank()
+            && ("CURRICULUM".equals(source.getKind()) || "SYNTHETIC".equals(source.getKind()));
     }
 }

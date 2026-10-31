@@ -2,6 +2,10 @@
 # The hard cap is enforced by the runner budget (maxToolCalls=6); per-tool caps
 # must never exceed it.
 tools:
+  - name: getSchoolProgress
+    max_calls: 1
+  - name: getAcademicRecord
+    max_calls: 1
   - name: auditRequirements
     max_calls: 1
   - name: listCourses
@@ -16,3 +20,5 @@ tools:
     max_calls: 1
   - name: validatePlan
     max_calls: 2
+  - name: listOfferingSnapshots
+    max_calls: 1

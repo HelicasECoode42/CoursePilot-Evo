@@ -22,6 +22,7 @@ class Course(DomainModel):
     credits: Credits | None
     category: Annotated[str, StringConstraints(min_length=1, max_length=100)]
     sourceRefIds: list[Id] = Field(min_length=1, max_length=20)
+    suggestedTerm: Annotated[str, StringConstraints(max_length=200)] | None = None
 
 
 class SnapshotSummary(DomainModel):
@@ -32,6 +33,7 @@ class SnapshotSummary(DomainModel):
     termId: Id | None
     createdAt: datetime
     sourceValidation: SourceValidation
+    displayName: Annotated[str, StringConstraints(max_length=200)] | None = None
 
 
 class TeacherCourseOption(DomainModel):

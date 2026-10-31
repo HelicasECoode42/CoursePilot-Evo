@@ -65,6 +65,11 @@
     "valid": false
   },
   {
+    "file": "invalid-academic-record-string-credits.json",
+    "definition": "AcademicRecord",
+    "valid": false
+  },
+  {
     "file": "invalid-academic-record-missing-revision.json",
     "definition": "AcademicRecord",
     "valid": false
@@ -72,6 +77,11 @@
   {
     "file": "course-offering.json",
     "definition": "CourseOffering",
+    "valid": true
+  },
+  {
+    "file": "review-note-with-display-name.json",
+    "definition": "ReviewNote",
     "valid": true
   },
   {
@@ -88,5 +98,30 @@
     "file": "invalid-course-offering-unknown-parse-status.json",
     "definition": "CourseOffering",
     "valid": false
+  },
+  {
+    "file": "session-plan-remove-course-request.json",
+    "definition": "SessionPlanCourseRemovalRequest",
+    "valid": true
+  },
+  {
+    "file": "session-plan-edit-empty-result.json",
+    "definition": "SessionPlanEditResult",
+    "valid": true
+  },
+  {
+    "file": "advice-chat-request.json",
+    "definition": "AdviceChatRequest",
+    "valid": true
+  },
+  {
+    "file": "invalid-advice-chat-request-mode.json",
+    "definition": "AdviceChatRequest",
+    "valid": false
+  },
+  {
+    "file": "advice-chat-answer.json",
+    "definition": "AdviceChatAnswer",
+    "valid": true
   }
 ]

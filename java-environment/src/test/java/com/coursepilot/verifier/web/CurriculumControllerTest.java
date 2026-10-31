@@ -95,4 +95,42 @@ class CurriculumControllerTest {
         mvc.perform(get("/api/v1/curriculum-snapshots").header(KEY, "test-key"))
             .andExpect(status().isBadRequest());
     }
+
+    // ---- listOfferingSnapshots（GET /api/v1/offering-snapshots）----
+
+    @Test
+    @DisplayName("开课列表只返回 kind=OFFERING 且 PUBLISHED 的快照，不含培养方案")
+    void offeringsListOnlyPublishedOfferings() throws Exception {
+        mvc.perform(get("/api/v1/offering-snapshots").header(KEY, "test-key").header(SUBJECT, "S001"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("OK"))
+            .andExpect(jsonPath("$.data.items.length()").value(1))
+            .andExpect(jsonPath("$.data.items[0].snapshotId").value("OFFER_2025_FALL"))
+            .andExpect(jsonPath("$.data.items[0].kind").value("OFFERING"))
+            .andExpect(jsonPath("$.data.items[0].state").value("PUBLISHED"))
+            .andExpect(jsonPath("$.data.items[0].termId").value("2025-FALL"))
+            .andExpect(jsonPath("$.data.items[0].sourceKind").value("SYNTHETIC"))
+            .andExpect(jsonPath("$.data.items[0].sourceValidation").value("SYNTHETIC"));
+    }
+
+    @Test
+    @DisplayName("培养列表仍不含开课快照（两个列表互不混入）")
+    void curriculaListStillExcludesOfferings() throws Exception {
+        mvc.perform(get("/api/v1/curriculum-snapshots").header(KEY, "test-key").header(SUBJECT, "S001"))
+            .andExpect(jsonPath("$.data.items[?(@.kind=='OFFERING')]").isEmpty());
+    }
+
+    @Test
+    @DisplayName("开课列表没有服务密钥读不到")
+    void offeringsRequireServiceKey() throws Exception {
+        mvc.perform(get("/api/v1/offering-snapshots").header(SUBJECT, "S001"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("开课列表没有主体身份读不到")
+    void offeringsRequireSubject() throws Exception {
+        mvc.perform(get("/api/v1/offering-snapshots").header(KEY, "test-key"))
+            .andExpect(status().isBadRequest());
+    }
 }

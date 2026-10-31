@@ -7,13 +7,20 @@
  * 纯函数，无 IO，可直接单测。
  */
 
-import type { AcademicRecordInput, PlanningRequest } from "../contracts";
+import type {
+  AcademicRecordInput,
+  AdviceChatRequest,
+  PlanningRequest,
+} from "../contracts";
 
 /**
  * 适用这条规则的请求体。两者都由本地按固定字段顺序构造，所以摘要规则一致。
  * 规划提交和学业记录补录都要走同一条规则，不要各写一份。
  */
-export type IdempotentPayload = PlanningRequest | AcademicRecordInput;
+export type IdempotentPayload =
+  | PlanningRequest
+  | AcademicRecordInput
+  | AdviceChatRequest;
 
 export interface IdempotencyKeyState {
   /** 上次提交的请求内容摘要。 */

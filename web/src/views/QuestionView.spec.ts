@@ -1,7 +1,8 @@
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
+import { api } from "../api";
 import type { SnapshotSummary } from "../contracts";
 import { emptyPlanningDraft } from "../domain/question-flow";
 import { dayKeys, sectionKeys } from "../domain/schedule-grid";
@@ -62,7 +63,7 @@ describe("student question page", () => {
   it("shows every question in order for every student and preserves answers when returning", async () => {
     const wrapper = mountPage();
     expect(wrapper.findAll("h1")).toHaveLength(1);
-    expect(wrapper.text()).toContain("这学期你最在意什么？");
+    expect(wrapper.text()).toContain("下学期你最在意什么？");
     expect(wrapper.text()).toContain("留空即可跳过");
     expect(wrapper.find("#career-notes").exists()).toBe(false);
 
@@ -72,11 +73,9 @@ describe("student question page", () => {
     expect(router.currentRoute.value.path).toBe("/plan/questions/preferences");
     await wrapper.get('input[value="LOWER_HOMEWORK"]').setValue(true);
     await next(wrapper);
-    expect(router.currentRoute.value.path).toBe("/plan/questions/career");
+    expect(router.currentRoute.value.path).toBe("/plan/questions/interest");
 
     await wrapper.get("#career-notes").setValue("数据科学");
-    await next(wrapper);
-    expect(router.currentRoute.value.path).toBe("/plan/questions/interest");
     await next(wrapper);
     expect(router.currentRoute.value.path).toBe("/plan/questions/teacher");
     await next(wrapper);
@@ -88,8 +87,7 @@ describe("student question page", () => {
     expect(router.currentRoute.value.path).toBe("/plan/questions/schedule");
     await back(wrapper);
     await back(wrapper);
-    await back(wrapper);
-    expect(router.currentRoute.value.path).toBe("/plan/questions/career");
+    expect(router.currentRoute.value.path).toBe("/plan/questions/interest");
     expect(
       (wrapper.get("#career-notes").element as HTMLTextAreaElement).value,
     ).toBe("数据科学");
@@ -100,6 +98,58 @@ describe("student question page", () => {
         .checked,
     ).toBe(true);
     expect(store.draft.motives).toEqual(["LOW_WORKLOAD", "CAREER"]);
+  });
+
+  it("uses next-term language for the planning flow", async () => {
+    const wrapper = mountPage();
+    expect(wrapper.text()).toContain("下学期你最在意什么？");
+    expect(wrapper.text()).not.toContain("本学期目标");
+    await next(wrapper);
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      "请至少选择一个下学期的目标。",
+    );
+
+    await router.push("/plan/questions/schedule");
+    await flushPromises();
+    expect(wrapper.text()).toContain("下学期上课时间待确认");
+
+    await router.push("/plan/questions/ready");
+    await flushPromises();
+    expect(wrapper.find(".summary-list").text()).toContain("下学期目标");
+  });
+
+  it("labels the session start as next-term enrollment planning", async () => {
+    store.sessionStatus = "idle";
+    const wrapper = mountPage();
+    expect(wrapper.text()).toContain("下学期选课规划");
+    expect(wrapper.text()).not.toContain("本学期课程规划");
+  });
+
+  it("describes a USER_IMPORT record accurately in simulation mode", async () => {
+    const apiMode = Object.getOwnPropertyDescriptor(api, "mode");
+    Object.defineProperty(api, "mode", {
+      configurable: true,
+      value: "simulation",
+    });
+    store.$patch({
+      records: [
+        {
+          academicRecordId: "record:user-import",
+          revision: 1,
+          curriculumSnapshotId: curriculum.snapshotId,
+          completedCourses: [],
+          transcriptComplete: false,
+          sourceKind: "USER_IMPORT",
+          createdAt: "2026-10-29T00:00:00Z",
+        },
+      ],
+      selectedRecordId: "record:user-import",
+    });
+    await router.push("/plan/questions/ready");
+    const wrapper = mountPage();
+    expect(wrapper.text()).toContain("已选择学业记录");
+    expect(wrapper.text()).not.toContain("已选择虚构学业记录");
+    if (apiMode) Object.defineProperty(api, "mode", apiMode);
   });
 
   it("paints time cells and keeps the chosen strength for the next cell", async () => {
@@ -205,7 +255,7 @@ describe("student question page", () => {
     expect(wrapper.findAll(".choice-card input:checked")).toHaveLength(0);
 
     await next(wrapper);
-    expect(router.currentRoute.value.path).toBe("/plan/questions/career");
+    expect(router.currentRoute.value.path).toBe("/plan/questions/interest");
     expect(store.draft.classPreferences).toEqual([]);
     expect(store.draft.classPreferencesReviewed).toBe(true);
   });
@@ -225,6 +275,7 @@ describe("student question page", () => {
   });
 
   it("asks students to choose when multiple curricula exist without showing internal IDs", async () => {
+    vi.spyOn(api, "getSchoolProgress").mockResolvedValue(null);
     const second = {
       ...curriculum,
       snapshotId: "opaque-snapshot-id-2026",
@@ -356,6 +407,88 @@ describe("student question page", () => {
     await wrapper.get("button.button--primary").trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/plan/questions/ready");
+  });
+
+  it("shows selected course and teacher on the confirmation page", async () => {
+    store.$patch({
+      teacherPickDisplayNames: { "CS101::T_ZHANG": "张老师" },
+      draft: {
+        ...emptyPlanningDraft(),
+        teacherPicks: [
+          { courseCode: "CS101", teacherKey: "T_ZHANG", mode: "MUST" },
+        ],
+      },
+    });
+    await router.replace("/plan/questions/ready");
+    const wrapper = mountPage();
+    expect(wrapper.text()).toContain("CS101 · 张老师 · 必须保留");
+    expect(wrapper.text()).not.toContain("T_ZHANG");
+    expect(wrapper.text()).not.toContain("尚未选择具体课程与教师");
+  });
+
+  it("lists courses chosen in the advice chat on the profile summary with their names", async () => {
+    store.$patch({
+      adviceMessages: [
+        {
+          role: "assistant",
+          text: "回答",
+          answer: {
+            schemaVersion: "1.0",
+            reply: "回答",
+            question: null,
+            courses: [
+              {
+                courseCode: "08306099",
+                name: "Java程序设计(实践)",
+                credits: 4,
+                category: "专业选修课",
+                reason: "偏实践",
+                reviewNoteIds: [],
+                reviews: [],
+                reviewStatus: "NOT_QUERIED",
+              },
+            ],
+            suggestions: [],
+            schoolProgress: null,
+            unknowns: [],
+            usage: {
+              inputTokens: null,
+              outputTokens: null,
+              toolCalls: 0,
+              elapsedMs: 0,
+            },
+          },
+        },
+      ],
+      draft: {
+        ...emptyPlanningDraft(),
+        selectedCourseCodes: ["08306099"],
+        preferredCourseCodes: ["08306098"],
+      },
+    });
+    await router.replace("/plan/questions/ready");
+    const wrapper = mountPage();
+    const text = wrapper.text();
+    expect(text).toContain("已选课程");
+    expect(text).toContain("Java程序设计(实践)（08306099）");
+    expect(text).toContain("已选入，方案中必须保留");
+    expect(text).toContain("优先考虑的课程");
+    expect(text).toContain("08306098");
+    expect(text).toContain("尽量优先");
+  });
+
+  it("always exposes school import and the selected curriculum on the ready page", async () => {
+    store.$patch({
+      curricula: [{ ...curriculum, displayName: "计算机科学与技术培养方案" }],
+    });
+    await router.replace("/plan/questions/ready");
+    const wrapper = mountPage();
+    expect(wrapper.get('[aria-label="规划所用资料"]').text()).toContain(
+      "计算机科学与技术培养方案",
+    );
+    expect(wrapper.get('a[href="/records?import=school"]').text()).toBe(
+      "导入我的学业进度",
+    );
   });
 
   it("uses fill-or-blank wording on the confirmation page for every unanswered item", async () => {

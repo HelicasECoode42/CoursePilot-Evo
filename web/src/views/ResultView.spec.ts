@@ -5,12 +5,16 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import { api } from "../api";
 import { ApiFailure } from "../api/client";
 import type {
+  AcademicRecord,
+  Course,
   CourseOffering,
   Meeting,
   PlanItem,
   PlanningAnswer,
+  PlanningRequest,
   PlanValidation,
   Recommendation,
+  SnapshotSummary,
   SessionOfferingList,
   SessionPlanReplacement,
 } from "../contracts";
@@ -18,6 +22,35 @@ import { usePlanningStore } from "../stores/planning";
 import ResultView from "./ResultView.vue";
 
 const PLAN_ID = "plan-test-1";
+const CLARIFY_ANSWER: PlanningAnswer = {
+  ...{
+    taskId: "task-clarify",
+    traceId: "trace-clarify",
+    decision: "CLARIFY",
+    academicAudit: {
+      curriculumSnapshotId: "curriculum-clarify",
+      academicRecordId: "record-clarify",
+      recordRevision: 1,
+      transcriptComplete: true,
+      requirements: [],
+      suggestedCourseCodes: [],
+      unknowns: [],
+    },
+    recommendations: [],
+    clarification: {
+      questionId: "tradeoff:teacher-vs-schedule",
+      text: "请确认指定教师和硬时间的优先顺序。",
+      choices: [
+        { value: "KEEP_TEACHER", label: "先保留指定教师" },
+        { value: "KEEP_SCHEDULE", label: "先保证硬时间" },
+      ],
+      allowFreeText: false,
+      requiredFor: ["teacher_vs_schedule"],
+    },
+    unknowns: [],
+    usage: { inputTokens: 1, outputTokens: 1, toolCalls: 1, elapsedMs: 1 },
+  },
+};
 const WEEKS = Array.from({ length: 16 }, (_, index) => index + 1);
 const MON_1_2: Meeting = {
   dayOfWeek: 1,
@@ -137,6 +170,53 @@ function replacement(verification: PlanValidation): SessionPlanReplacement {
   };
 }
 
+/** 课程目录（合成数据）：课程名用于卡片大字，课程号只作小字。 */
+const COURSES: Course[] = [
+  {
+    courseCode: "CS102",
+    name: "程序设计基础（测试）",
+    credits: 3,
+    category: "必修",
+    sourceRefIds: [],
+  },
+  {
+    courseCode: "CS103",
+    name: "数据结构（测试）",
+    credits: 3,
+    category: "必修",
+    sourceRefIds: [],
+  },
+];
+
+/** 规划条件（合成数据）：固定了 CS102 的教师，删除 CS102 时这条固定应一并去掉。 */
+const HANDOFF = {
+  schemaVersion: "test",
+  promptText: "尽量不要早八",
+  intent: {
+    motives: [],
+    priorityOrder: [],
+    hardConstraints: [],
+    softPreferences: [],
+    pinnedTeacherCoursePairs: [
+      { courseCode: "CS102", teacherKey: "teacher-li-01", mode: "MUST" },
+    ],
+    interestTags: [],
+    careerDirectionIds: [],
+  },
+  previousPlanId: null,
+} as unknown as PlanningRequest;
+
+function removal(verification: PlanValidation) {
+  return {
+    previousPlanId: PLAN_ID,
+    planId: "plan-after-delete",
+    items: [{ courseCode: "CS103", teacherKey: null, classId: null }],
+    hardConstraints: [],
+    verification,
+    empty: false,
+  };
+}
+
 function stubOfferings(overrides: Record<string, CourseOffering[]> = {}) {
   return vi
     .spyOn(api, "searchSessionOfferings")
@@ -175,10 +255,109 @@ describe("result page course search and replacement", () => {
     });
     await router.push("/plan/result");
     await router.isReady();
+    vi.spyOn(api, "listCourses").mockResolvedValue({
+      items: structuredClone(COURSES),
+      nextCursor: null,
+    });
+    store.$patch({ planningHandoff: HANDOFF });
   });
 
   const mountPage = () =>
     mount(ResultView, { global: { plugins: [router, pinia] } });
+
+  it("shows course-specific reasons and exploration steps", async () => {
+    const result = answer();
+    result.recommendations[0].courseRationales = [
+      { courseCode: "CS102", reason: "适合作为基础课", reviewNoteIds: [] },
+    ];
+    result.recommendations[0].explorationDirections = [
+      {
+        title: "研究方向探索",
+        description: "了解研究问题",
+        steps: ["阅读入门资料"],
+      },
+    ];
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.text()).toContain("下学期选课规划");
+    expect(wrapper.text()).toContain("适合作为基础课");
+    expect(wrapper.text()).toContain("研究方向探索");
+    expect(wrapper.text()).toContain("阅读入门资料");
+    expect(wrapper.text()).toContain("学分");
+  });
+
+  it("renders course source and review status supplied with the recommendation", async () => {
+    const result = answer();
+    result.recommendations[0].courseRationales = [
+      {
+        courseCode: "CS102",
+        reason: "课程内容覆盖基础编程",
+        reviewNoteIds: [],
+        courseSourceRefIds: ["curriculum:cs102"],
+        reviewBasisStatus: "NO_RECORDS",
+        rationaleSource: "COURSE_FACTS",
+      },
+    ];
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.text()).toContain("课程目录事实：课程内容覆盖基础编程");
+    expect(wrapper.text()).toContain("培养方案资料");
+    expect(wrapper.text()).toContain("curriculum:cs102");
+    expect(wrapper.text()).toContain("暂无评价依据。");
+  });
+
+  it("shows plain-language unknowns and keeps raw diagnostics in collapsed details", async () => {
+    const answerRawMessage =
+      "W2 FAKE_MODEL mode=REAL source=SYNTHETIC courseCodes=CS102";
+    const validationRawMessage =
+      "TIME_UNPARSEABLE offeringSnapshot=UNKNOWN mode=REAL courseCode=CS103";
+    const result = answer();
+    result.unknowns = [
+      {
+        code: "FAKE_MODEL",
+        message: answerRawMessage,
+        field: "mode",
+        retryable: false,
+      },
+    ];
+    result.recommendations[0].verification = validation({
+      verdict: "UNKNOWN",
+      scope: "COURSE_ONLY",
+      unknownChecks: [
+        {
+          code: "TIME_UNPARSEABLE",
+          message: validationRawMessage,
+          field: "meetings",
+          retryable: false,
+        },
+      ],
+    });
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const notice = wrapper.get('[aria-label="无法确认的项目"]');
+    expect(notice.text()).toContain("当前建议由演示模型生成。");
+    expect(notice.text()).toContain(
+      "部分班次的上课时间无法识别，无法确认是否冲突。",
+    );
+    expect(notice.text()).not.toContain("FAKE_MODEL");
+    expect(notice.text()).not.toContain("W2");
+    const cardNotice = wrapper.get('.option-section .notice[role="status"]');
+    expect(cardNotice.text()).not.toContain("TIME_UNPARSEABLE");
+    expect(cardNotice.text()).not.toContain("offeringSnapshot");
+    const details = wrapper.get("details.debug-id");
+    expect((details.element as HTMLDetailsElement).open).toBe(false);
+    expect(details.text()).toContain("FAKE_MODEL");
+    expect(details.text()).toContain(answerRawMessage);
+    expect(details.text()).toContain(validationRawMessage);
+    expect(details.text()).toContain("mode");
+  });
 
   const buttonByText = (wrapper: ReturnType<typeof mountPage>, text: string) =>
     wrapper.findAll("button").find((item) => item.text() === text);
@@ -210,6 +389,109 @@ describe("result page course search and replacement", () => {
     await buttonByText(wrapper, "重新核验这份方案")?.trigger("click");
     await flushPromises();
   };
+
+  it("shows the supported tradeoff and resubmits the answered request", async () => {
+    const curriculum: SnapshotSummary = {
+      snapshotId: "curriculum-clarify",
+      kind: "CURRICULUM",
+      state: "PUBLISHED",
+      sourceKind: "CURRICULUM_FILE",
+      termId: null,
+      createdAt: "2026-10-01T00:00:00Z",
+      sourceValidation: "VERIFIED",
+    };
+    const record: AcademicRecord = {
+      academicRecordId: "record-clarify",
+      revision: 1,
+      curriculumSnapshotId: curriculum.snapshotId,
+      completedCourses: [],
+      transcriptComplete: true,
+      sourceKind: "USER_IMPORT",
+      createdAt: "2026-10-01T00:00:00Z",
+    };
+    const calls: Array<{
+      request: import("../contracts").PlanningRequest;
+      key: string;
+    }> = [];
+    const submit = vi
+      .spyOn(api, "submitPlanning")
+      .mockImplementation(async (request, key) => {
+        calls.push({ request, key });
+        return calls.length === 1 ? CLARIFY_ANSWER : answer();
+      });
+    store.$patch({
+      sessionStatus: "ready",
+      sessionId: "session-clarify",
+      expiresAt: "2099-01-01T00:00:00Z",
+      curricula: [curriculum],
+      selectedCurriculumId: curriculum.snapshotId,
+      records: [record],
+      selectedRecordId: record.academicRecordId,
+      draft: {
+        ...store.draft,
+        motives: ["GPA"],
+        priorityOrder: ["GPA"],
+        teacherPicks: [
+          { courseCode: "CS101", teacherKey: "teacher:demo", mode: "MUST" },
+        ],
+        mustSlots: ["5-1"],
+        mustReviewed: true,
+        preferReviewed: true,
+        classPreferencesReviewed: true,
+        prioritiesConfirmed: true,
+      },
+    });
+    await store.submitPlan();
+    const wrapper = mountPage();
+
+    expect(wrapper.text()).toContain("不会取消任何 MUST 教师");
+    expect(wrapper.text()).toContain("若两者冲突");
+    await buttonByText(wrapper, "先保证硬时间并继续规划")?.trigger("click");
+    await flushPromises();
+
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(calls[1].key).not.toBe(calls[0].key);
+    expect(calls[1].request.intent.priorityOrder).toEqual([
+      "GPA",
+      "SCHEDULE",
+      "SPECIFIC_TEACHER",
+    ]);
+    expect(calls[1].request.intent.hardConstraints).toHaveLength(1);
+    expect(calls[1].request.intent.pinnedTeacherCoursePairs).toEqual([
+      { courseCode: "CS101", teacherKey: "teacher:demo", mode: "MUST" },
+    ]);
+    expect(store.planningResult?.decision).toBe("RECOMMENDATIONS");
+  });
+
+  it("submits both the selected clarification option and supplemental text", async () => {
+    store.planningResult = {
+      ...CLARIFY_ANSWER,
+      clarification: {
+        questionId: "clarify:preference",
+        text: "请选择你的偏好",
+        choices: [{ value: "light", label: "课程压力较小" }],
+        allowFreeText: true,
+        requiredFor: [],
+      },
+    };
+    const answerSpy = vi
+      .spyOn(store, "answerClarification")
+      .mockReturnValue(true);
+    const submitSpy = vi.spyOn(store, "submitPlan").mockResolvedValue();
+    const wrapper = mountPage();
+    await wrapper
+      .get("#clarification-choice-clarify\\:preference")
+      .setValue("light");
+    await wrapper
+      .get("#clarification-text-clarify\\:preference")
+      .setValue("周五尽量空闲");
+    await buttonByText(wrapper, "回答并继续规划")?.trigger("click");
+    expect(answerSpy).toHaveBeenCalledWith(
+      "clarify:preference",
+      "light\n周五尽量空闲",
+    );
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+  });
 
   it("shows conflicting, selectable, and unparsed offerings as three distinct states", async () => {
     stubOfferings();
@@ -447,10 +729,10 @@ describe("result page course search and replacement", () => {
     await selectClass(wrapper, "CS103-02");
     await recheck(wrapper);
 
-    expect(wrapper.text()).toContain("这是替换后的新版本");
+    expect(wrapper.text()).toContain("这是调整后重新核验的新版本");
     expect(wrapper.text()).toContain("新方案仍有冲突");
     expect(wrapper.text()).not.toContain("课程层通过，时间待确认");
-    expect(wrapper.text()).toContain(`方案 ${PLAN_ID}-CS103-02`);
+    expect(wrapper.get("h2.sub-label").text()).toBe("方案 1");
   });
 
   it("ignores repeated clicks on re-verify while the request is in flight", async () => {
@@ -501,5 +783,217 @@ describe("result page course search and replacement", () => {
     expect(alert.text()).toContain("班次服务暂时不可用。");
     expect(alert.text()).toContain("可以稍后再试一次");
     expect(wrapper.find("li.offering-row").exists()).toBe(false);
+  });
+
+  it("draws the planned class on the weekly timetable grid", async () => {
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const monday1 = wrapper
+      .findAll("table.timetable tbody tr")[0]
+      .findAll("td")[0];
+    expect(monday1.text()).toContain("CS102");
+    expect(monday1.text()).toContain("CS102-01");
+    // CS103 尚未选班次：它不进课表，并且页面写明原因。
+    expect(wrapper.find(".timetable-gaps").text()).toContain(
+      "CS103：还没有选定班次，时间未知，未纳入课表。",
+    );
+  });
+
+  it("keeps an unparsed planned class out of the grid on the result page", async () => {
+    vi.spyOn(api, "searchSessionOfferings").mockImplementation(
+      async (previousPlanId, courseCode) => ({
+        previousPlanId,
+        courseCode,
+        items:
+          courseCode === "CS102"
+            ? [offering("CS102", "CS102-01", [MON_1_2], "UNPARSED")]
+            : [],
+        status: "OK",
+      }),
+    );
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.find("table.timetable").exists()).toBe(false);
+    expect(wrapper.find(".timetable-gaps").text()).toContain(
+      "CS102（班次 CS102-01）：这门课的时间无法解析，未纳入课表。",
+    );
+  });
+
+  it("shows the unverified-timetable warning when the plan scope is not REAL_TIMETABLE", async () => {
+    stubOfferings();
+    store.$patch({
+      planningResult: {
+        ...answer(),
+        recommendations: [
+          {
+            ...recommendation(),
+            verification: validation({ scope: "SIMULATION" }),
+          },
+        ],
+      },
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      "此课表来自未经核验的班次资料，不代表真实课表，不构成无冲突证明。",
+    );
+  });
+
+  const courseCard = (wrapper: ReturnType<typeof mountPage>, name: string) =>
+    wrapper
+      .findAll("li.course-card")
+      .find((card) => card.text().includes(name));
+
+  it("draws each plan course as a card with its name, code, real teacher and human time", async () => {
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const card = courseCard(wrapper, "程序设计基础（测试）");
+    expect(card).toBeDefined();
+    expect(card!.text()).toContain("CS102");
+    expect(card!.text()).toContain("测试教师（合成）");
+    expect(card!.text()).toContain("周一 第1-2节 · 第1–16周");
+    expect(card!.text()).not.toContain("teacher-li-01");
+    expect(card!.text()).not.toContain("{第");
+  });
+
+  it("shows a plan number instead of the raw plan id, which stays in a collapsed debug section", async () => {
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const heading = wrapper.get("h2.sub-label");
+    expect(heading.text()).toBe("方案 1");
+    expect(heading.attributes("title")).toBe(PLAN_ID);
+    expect(wrapper.get(".debug-id summary").text()).toBe("排查编号与详情");
+    expect(wrapper.get(".debug-id code").text()).toBe(PLAN_ID);
+  });
+
+  it("deleting a course calls deterministic plan removal and shows the returned verdict", async () => {
+    stubOfferings();
+    const submit = vi
+      .spyOn(api, "removeSessionPlanCourse")
+      .mockResolvedValue(
+        removal(validation({ verdict: "VALID", scope: "REAL_TIMETABLE" })),
+      );
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await courseCard(wrapper, "程序设计基础（测试）")!
+      .get("button.course-card__delete")
+      .trigger("click");
+    await flushPromises();
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    const [request, key] = submit.mock.calls[0];
+    expect(request).toEqual({ previousPlanId: PLAN_ID, courseCode: "CS102" });
+    expect(key).toMatch(/^web-/);
+    expect(wrapper.text()).toContain("这是调整后重新核验的新版本");
+    expect(wrapper.get(".notice--success").text()).toContain(
+      "本次快照下核验通过",
+    );
+    expect(courseCard(wrapper, "程序设计基础（测试）")).toBeUndefined();
+    expect(courseCard(wrapper, "数据结构（测试）")?.text()).toContain(
+      "尚未选定班次",
+    );
+    expect(store.editedPlans[PLAN_ID]).toMatchObject({
+      planId: "plan-after-delete",
+      items: [{ courseCode: "CS103" }],
+      verification: { verdict: "VALID" },
+      empty: false,
+    });
+  });
+
+  it("keeps the original plan and its old verdict when deleting fails", async () => {
+    stubOfferings();
+    vi.spyOn(api, "removeSessionPlanCourse").mockRejectedValue(
+      new ApiFailure("服务暂时不可用。", "http", 503),
+    );
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await courseCard(wrapper, "程序设计基础（测试）")!
+      .get("button.course-card__delete")
+      .trigger("click");
+    await flushPromises();
+
+    expect(
+      wrapper
+        .findAll(".notice--error")
+        .map((item) => item.text())
+        .join(""),
+    ).toContain("原方案保留");
+    expect(courseCard(wrapper, "程序设计基础（测试）")).toBeDefined();
+    expect(courseCard(wrapper, "数据结构（测试）")).toBeDefined();
+    expect(wrapper.text()).toContain("课程层通过，时间待确认");
+    expect(wrapper.text()).not.toContain("这是调整后重新核验的新版本");
+  });
+
+  it("shows an UNKNOWN verdict after deleting as unconfirmed, never as a pass", async () => {
+    stubOfferings();
+    vi.spyOn(api, "removeSessionPlanCourse").mockResolvedValue(
+      removal(
+        validation({
+          verdict: "UNKNOWN",
+          scope: "REAL_TIMETABLE",
+          unknownChecks: [
+            {
+              code: "TIME_UNKNOWN",
+              message: "剩余课程的时间无法确认（测试）",
+              field: null,
+              retryable: false,
+            },
+          ],
+        }),
+      ),
+    );
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await courseCard(wrapper, "程序设计基础（测试）")!
+      .get("button.course-card__delete")
+      .trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".notice--success").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("核验通过");
+    expect(wrapper.text()).toContain("剩余课程的时间无法确认（测试）");
+  });
+
+  it("shows a final-course deletion as an empty plan without retaining the old verdict", async () => {
+    stubOfferings();
+    const singleCourseAnswer = answer();
+    singleCourseAnswer.recommendations[0].items = [
+      { courseCode: "CS102", teacherKey: "teacher-li-01", classId: "CS102-01" },
+    ];
+    store.$patch({ planningResult: singleCourseAnswer });
+    vi.spyOn(api, "removeSessionPlanCourse").mockResolvedValue({
+      previousPlanId: PLAN_ID,
+      planId: "plan-empty",
+      items: [],
+      hardConstraints: [],
+      verification: null,
+      empty: true,
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+    await courseCard(wrapper, "程序设计基础（测试）")!
+      .get("button.course-card__delete")
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("空方案，尚无核验结果");
+    expect(wrapper.text()).not.toContain("课程层通过，时间待确认");
+    expect(wrapper.findAll(".course-card")).toHaveLength(0);
+    expect(store.editedPlans[PLAN_ID]).toMatchObject({
+      planId: "plan-empty",
+      items: [],
+      verification: null,
+      empty: true,
+    });
   });
 });

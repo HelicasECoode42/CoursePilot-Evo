@@ -33,7 +33,12 @@ def save_record(
 
     def produce() -> dict:
         context = make_context(request, subject_id, x_request_id, body.curriculumSnapshotId)
-        result = cast(AcademicRecord, tool_client.call("createAcademicRecord", body, context))
+        result = cast(
+            AcademicRecord,
+            tool_client.call(
+                "createAcademicRecord", body, context, idempotency_key=idempotency_key
+            ),
+        )
         return envelope(x_request_id, "OK", result).model_dump(mode="json")
 
     return idempotency.run(subject_id, "academic-records", idempotency_key, body_digest, produce)

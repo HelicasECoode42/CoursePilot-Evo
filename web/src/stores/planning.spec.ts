@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AcademicRecord,
   AcademicRecordInput,
+  AdviceChatAnswer,
   AuditResult,
   CompletedCourse,
   PlanningAnswer,
@@ -10,6 +11,10 @@ import type {
   SnapshotSummary,
 } from "../contracts";
 import { ApiFailure, type CoursePilotApiClient } from "../api/client";
+import type {
+  SchoolProgressImportResult,
+  SchoolProgressSnapshot,
+} from "../domain/school-progress";
 import { createPlanningStore } from "./planning";
 
 const curriculum: SnapshotSummary = {
@@ -33,13 +38,34 @@ function fakeClient(
   return {
     mode: "http",
     createSession: vi.fn(async () => session("session-1")),
+    listCourses: vi.fn(async () => ({ items: [], nextCursor: null })),
+    listCareerDirections: vi.fn(async () => []),
     listCurricula: vi.fn(async () => ({
       items: [curriculum],
+      unknownMessages: [],
+    })),
+    listOfferingSnapshots: vi.fn(async () => ({
+      items: [],
       unknownMessages: [],
     })),
     clearSession: vi.fn(),
     fixtureAcademicRecordId: vi.fn(() => null),
     listSessionRecords: vi.fn(async () => ({ items: [] })),
+    removeSessionPlanCourse: vi.fn(async (body) => ({
+      previousPlanId: body.previousPlanId,
+      planId: "plan-empty",
+      items: [],
+      hardConstraints: [],
+      verification: null,
+      empty: true,
+    })),
+    saveSchoolProgress: vi.fn(async () => {
+      throw new Error("not used in this test");
+    }),
+    importSchoolProgress: vi.fn(async () => {
+      throw new Error("not used in this test");
+    }),
+    getSchoolProgress: vi.fn(async () => null),
     saveSessionRecord: vi.fn(async (input) => ({
       academicRecordId: "record-1",
       revision: 1,
@@ -62,6 +88,9 @@ function fakeClient(
     ),
     submitPlanning: vi.fn(async () => {
       throw new ApiFailure("stub 未实现规划", "invalid_response");
+    }),
+    adviceChat: vi.fn(async () => {
+      throw new ApiFailure("stub 未实现对话", "invalid_response");
     }),
     // E4 方法在这份 store 测试里用不到，统一给出明确的未实现错误。
     searchSessionOfferings: vi.fn(async () => {
@@ -117,6 +146,420 @@ describe("planning session store", () => {
     await first;
     expect(store.sessionStatus).toBe("ready");
     expect(store.selectedCurriculumId).toBe(curriculum.snapshotId);
+  });
+
+  it("sends a chat message and adopts interest and preferred courses only after explicit confirmation", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "可先了解这门课程。",
+      question: null,
+      courses: [
+        {
+          courseCode: "CS201",
+          name: "数据分析",
+          credits: 3,
+          category: "专业选修课",
+          reason: "与方向相关",
+          reviewNoteIds: [],
+          reviews: [],
+          reviewStatus: "NONE",
+        },
+      ],
+      suggestions: [
+        {
+          suggestionId: "s-interest",
+          kind: "INTEREST",
+          label: "采用兴趣",
+          value: "数据分析",
+        },
+        {
+          suggestionId: "s-prefer",
+          kind: "PREFER_COURSE",
+          label: "优先考虑课程",
+          value: "CS201",
+        },
+      ],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: 10,
+        outputTokens: 20,
+        toolCalls: 1,
+        elapsedMs: 100,
+      },
+    };
+    const adviceChat = vi.fn(async () => answer);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    expect(await store.sendAdviceMessage("想了解数据分析方向")).toBe(true);
+    expect(store.adviceMessages.map((item) => item.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+    expect(store.adviceMessages[1]?.text).toBe(answer.reply);
+    expect(store.draft.careerText).toBe("");
+    expect(store.draft.preferredCourseCodes).toEqual([]);
+    expect(store.adoptAdviceSuggestion(answer, "s-interest")).toBe(true);
+    expect(store.adoptAdviceSuggestion(answer, "s-interest")).toBe(true);
+    expect(store.draft.careerText).toBe("数据分析");
+    expect(store.adoptAdviceSuggestion(answer, "s-prefer")).toBe(true);
+    expect(store.adoptAdviceSuggestion(answer, "s-prefer")).toBe(true);
+    expect(store.draft.preferredCourseCodes).toEqual(["CS201"]);
+    expect(store.draft.selectedCourseCodes).toEqual([]);
+  });
+
+  it("retries a failed identical chat request with the same idempotency key", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "已收到。",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
+    const adviceChat = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiFailure("连接失败", "network", null, null, true),
+      )
+      .mockResolvedValueOnce(answer);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    expect(await store.sendAdviceMessage("原问题")).toBe(false);
+    expect(store.adviceFailure?.retryMode).toBe("same-key");
+    expect(store.adviceBusy).toBe(false);
+    expect(store.advicePendingMessage).toBe("");
+    expect(await store.retryAdviceMessage()).toBe(true);
+    expect(adviceChat).toHaveBeenCalledTimes(2);
+    expect(adviceChat.mock.calls[0]?.[1]).toBe(adviceChat.mock.calls[1]?.[1]);
+    expect(adviceChat.mock.calls[0]?.[0]).toEqual(
+      adviceChat.mock.calls[1]?.[0],
+    );
+  });
+
+  it("tells the student the session advice budget is spent and offers no retry that cannot succeed", async () => {
+    const adviceChat = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiFailure(
+          "本会话累计 output token 已达上限，请新建会话",
+          "http",
+          503,
+          "BUDGET_EXCEEDED",
+        ),
+      );
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    expect(await store.sendAdviceMessage("再问一个问题")).toBe(false);
+    expect(store.adviceFailure?.retryMode).toBe("none");
+    expect(store.adviceError).toContain("对话额度已用完");
+    expect(store.adviceError).not.toContain("重新生成");
+    expect(await store.retryAdviceMessage()).toBe(false);
+    expect(await store.regenerateAdviceMessage()).toBe(false);
+    expect(adviceChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a new explicit key to regenerate terminal model failures and preserves adopted preferences", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "建议数据分析方向。",
+      question: null,
+      courses: [],
+      suggestions: [
+        {
+          suggestionId: "interest-data",
+          kind: "INTEREST",
+          label: "采用数据分析兴趣",
+          value: "数据分析",
+        },
+      ],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
+    const repaired: AdviceChatAnswer = { ...answer, reply: "重新生成的回答" };
+    const terminalFailure = new ApiFailure(
+      "旧的接口通用文案",
+      "http",
+      422,
+      "MODEL_INVALID_OUTPUT",
+    );
+    const adviceChat = vi
+      .fn()
+      .mockResolvedValueOnce(answer)
+      .mockRejectedValueOnce(terminalFailure)
+      .mockRejectedValueOnce(terminalFailure)
+      .mockResolvedValueOnce(repaired);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    await store.sendAdviceMessage("先聊兴趣");
+    expect(store.adoptAdviceSuggestion(answer, "interest-data")).toBe(true);
+    expect(await store.sendAdviceMessage("接口输出失败的问题")).toBe(false);
+    expect(store.adviceFailure?.retryMode).toBe("regenerate");
+    expect(store.adviceError).toContain("可重新生成回答");
+    expect(store.adviceError).not.toContain("没有写入任何方案");
+    expect(store.adviceBusy).toBe(false);
+    expect(store.advicePendingMessage).toBe("");
+    expect(store.adviceMessages.map((item) => item.text)).not.toContain(
+      "接口输出失败的问题",
+    );
+
+    expect(await store.sendAdviceMessage("接口输出失败的问题")).toBe(false);
+    expect(adviceChat).toHaveBeenCalledTimes(2);
+    expect(await store.retryAdviceMessage()).toBe(false);
+    expect(adviceChat).toHaveBeenCalledTimes(3);
+    expect(adviceChat.mock.calls[1]?.[1]).toBe(adviceChat.mock.calls[2]?.[1]);
+    expect(store.adviceFailure?.retryMode).toBe("regenerate");
+
+    expect(await store.regenerateAdviceMessage()).toBe(true);
+    expect(adviceChat).toHaveBeenCalledTimes(4);
+    expect(adviceChat.mock.calls[2]?.[1]).not.toBe(
+      adviceChat.mock.calls[3]?.[1],
+    );
+    expect(adviceChat.mock.calls[2]?.[0]).toEqual(
+      adviceChat.mock.calls[3]?.[0],
+    );
+    expect(store.draft.careerText).toBe("数据分析");
+    expect(store.adviceFailure).toBeNull();
+    expect(store.adviceMessages.map((item) => item.text)).toEqual([
+      "先聊兴趣",
+      "建议数据分析方向。",
+      "接口输出失败的问题",
+      "重新生成的回答",
+    ]);
+  });
+
+  it("sends an edited failed question as a new request without adding the failed text to history", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "修改后的回答",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
+    const adviceChat = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiFailure("模型校验失败", "http", 422, "MODEL_INVALID_OUTPUT"),
+      )
+      .mockResolvedValueOnce(answer);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    await store.sendAdviceMessage("原始问题");
+    expect(await store.sendAdviceMessage("修改后的问题")).toBe(true);
+    expect(adviceChat.mock.calls[0]?.[1]).not.toBe(
+      adviceChat.mock.calls[1]?.[1],
+    );
+    expect(adviceChat.mock.calls[1]?.[0].message).toBe("修改后的问题");
+    expect(adviceChat.mock.calls[1]?.[0].history).toEqual([]);
+  });
+
+  it("ignores duplicate send clicks while one chat request is pending", async () => {
+    const pending = deferred<AdviceChatAnswer>();
+    const adviceChat = vi.fn(() => pending.promise);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    const first = store.sendAdviceMessage("单条问题");
+    expect(await store.sendAdviceMessage("单条问题")).toBe(false);
+    expect(adviceChat).toHaveBeenCalledTimes(1);
+    pending.resolve({
+      schemaVersion: "1.0",
+      reply: "回答",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    });
+    expect(await first).toBe(true);
+  });
+
+  it("does not adopt a course that the subsequently loaded record marks passed or in progress", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "课程建议",
+      question: null,
+      courses: [
+        {
+          courseCode: "CS201",
+          name: "数据分析",
+          credits: 3,
+          category: "专业选修课",
+          reason: "方向相关",
+          reviewNoteIds: [],
+          reviews: [],
+          reviewStatus: "NONE",
+        },
+      ],
+      suggestions: [
+        {
+          suggestionId: "s-select",
+          kind: "SELECT_COURSE",
+          label: "选入",
+          value: "CS201",
+        },
+      ],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
+    const store = createPlanningStore(
+      fakeClient({ adviceChat: vi.fn(async () => answer) }),
+    )();
+    await store.startSession();
+    await store.sendAdviceMessage("问题");
+    store.$patch({
+      selectedRecordId: "record-current",
+      records: [
+        {
+          academicRecordId: "record-current",
+          revision: 1,
+          curriculumSnapshotId: curriculum.snapshotId,
+          completedCourses: [
+            {
+              courseCode: "CS201",
+              earnedCredits: 3,
+              outcome: "IN_PROGRESS",
+              completedTerm: null,
+            },
+          ],
+          transcriptComplete: true,
+          sourceKind: "USER_IMPORT",
+          createdAt: "2026-10-01T00:00:00Z",
+        },
+      ],
+    });
+    expect(store.adoptAdviceSuggestion(answer, "s-select")).toBe(false);
+    expect(store.draft.selectedCourseCodes).toEqual([]);
+    expect(store.adviceError).toContain("正在修读");
+    expect(store.adviceMessages).toHaveLength(2);
+  });
+
+  it("clears chat history and adopted choices when the curriculum changes", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "回答",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
+    const store = createPlanningStore(
+      fakeClient({
+        adviceChat: vi.fn(async () => answer),
+      }),
+    )();
+    await store.startSession();
+    await store.sendAdviceMessage("问题");
+    store.$patch({
+      curricula: [
+        ...store.curricula,
+        { ...curriculum, snapshotId: "other-curriculum" },
+      ],
+    });
+    store.chooseCurriculum("other-curriculum");
+    expect(store.adviceMessages).toEqual([]);
+    expect(store.adoptedAdviceSuggestions).toEqual([]);
+  });
+
+  it("ignores a late answer from the previous curriculum without clearing the new request state", async () => {
+    const first = deferred<AdviceChatAnswer>();
+    const second = deferred<AdviceChatAnswer>();
+    const adviceChat = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    const requestA = store.sendAdviceMessage("问题 A");
+    store.$patch({
+      curricula: [
+        ...store.curricula,
+        { ...curriculum, snapshotId: "other-curriculum" },
+      ],
+    });
+    store.chooseCurriculum("other-curriculum");
+    const requestB = store.sendAdviceMessage("问题 B");
+
+    first.resolve({
+      schemaVersion: "1.0",
+      reply: "回答 A",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    });
+    await requestA;
+    expect(store.adviceBusy).toBe(true);
+    expect(store.adviceMessages).toEqual([]);
+    expect(store.advicePendingMessage).toBe("问题 B");
+
+    second.resolve({
+      schemaVersion: "1.0",
+      reply: "回答 B",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    });
+    await requestB;
+    expect(store.adviceBusy).toBe(false);
+    expect(store.adviceMessages.map((item) => item.text)).toEqual([
+      "问题 B",
+      "回答 B",
+    ]);
   });
 
   it("shows session creation failure and allows a fresh retry without fixture fallback", async () => {
@@ -194,6 +637,10 @@ describe("planning session store", () => {
         signalListStarted();
         return lateCurricula.promise;
       }),
+      listOfferingSnapshots: vi.fn(async () => ({
+        items: [],
+        unknownMessages: [],
+      })),
       clearSession: vi.fn(() => {
         bearer = null;
       }),
@@ -516,6 +963,26 @@ describe("planning session store", () => {
     expect(realStore.planningHandoff).toBeNull();
   });
 
+  it("keeps teacher display names out of the draft and clears them with the session", () => {
+    const store = createPlanningStore(fakeClient())();
+    store.$patch({
+      sessionStatus: "ready",
+      sessionId: "session-display-name",
+    });
+    store.setTeacherPickDisplayName("CS101", "T_ZHANG", "张老师");
+    store.updateDraft("teacherPicks", [
+      { courseCode: "CS101", teacherKey: "T_ZHANG", mode: "MUST" },
+    ]);
+
+    expect(store.teacherPickDisplayNames["CS101::T_ZHANG"]).toBe("张老师");
+    expect(store.draft.teacherPicks).toEqual([
+      { courseCode: "CS101", teacherKey: "T_ZHANG", mode: "MUST" },
+    ]);
+
+    store.invalidateSession("会话已过期。");
+    expect(store.teacherPickDisplayNames).toEqual({});
+  });
+
   it("clears stale handoff missing labels when planning inputs or the session change", () => {
     const store = createPlanningStore(fakeClient())();
     const invalidations = [
@@ -617,6 +1084,285 @@ describe("planning session store", () => {
       });
       return { mock, calls };
     }
+
+    it("retries a supported tradeoff with a new key and preserves hard requirements", async () => {
+      const clarify: PlanningAnswer = {
+        ...answer,
+        decision: "CLARIFY",
+        clarification: {
+          questionId: "tradeoff:teacher-vs-schedule",
+          text: "请确认教师与硬时间的优先顺序。",
+          choices: [
+            { value: "KEEP_TEACHER", label: "先保留指定教师" },
+            { value: "KEEP_SCHEDULE", label: "先保证硬时间" },
+          ],
+          allowFreeText: false,
+          requiredFor: ["teacher_vs_schedule"],
+        },
+      };
+      const calls: Array<{ request: PlanningRequest; key: string }> = [];
+      const submitPlanning = vi.fn(
+        async (request: PlanningRequest, key: string) => {
+          calls.push({ request, key });
+          return calls.length === 1 ? clarify : answer;
+        },
+      );
+      const store = submittableStore({ submitPlanning });
+      store.$patch({
+        draft: {
+          ...store.draft,
+          teacherPicks: [
+            { courseCode: "CS101", teacherKey: "teacher:demo", mode: "MUST" },
+          ],
+          mustSlots: ["5-1"],
+        },
+      });
+
+      await store.submitPlan();
+      expect(store.planningResult?.decision).toBe("CLARIFY");
+      expect(
+        store.answerTradeoffClarification(
+          "tradeoff:teacher-vs-schedule",
+          "KEEP_SCHEDULE",
+        ),
+      ).toBe(true);
+      expect(
+        store.answerTradeoffClarification(
+          "tradeoff:teacher-vs-schedule",
+          "KEEP_SCHEDULE",
+        ),
+      ).toBe(false);
+      await store.submitPlan();
+
+      expect(calls).toHaveLength(2);
+      expect(calls[1].key).not.toBe(calls[0].key);
+      expect(calls[1].request.intent.priorityOrder).toEqual([
+        "GPA",
+        "SCHEDULE",
+        "SPECIFIC_TEACHER",
+      ]);
+      expect(calls[1].request.intent.pinnedTeacherCoursePairs).toEqual([
+        { courseCode: "CS101", teacherKey: "teacher:demo", mode: "MUST" },
+      ]);
+      expect(calls[1].request.intent.hardConstraints).toHaveLength(1);
+      expect(calls[1].request.intent.hardConstraints[0].kind).toBe(
+        "BLOCK_SLOT",
+      );
+      expect(store.planningResult).toEqual(answer);
+    });
+
+    it("submits a general clarification answer in promptText with a new key and keeps hard constraints", async () => {
+      const clarify: PlanningAnswer = {
+        ...answer,
+        decision: "CLARIFY",
+        clarification: {
+          questionId: "clarify:attendance",
+          text: "你更倾向哪种上课安排？",
+          choices: [
+            { value: "few_days", label: "集中在较少天数" },
+            { value: "short_days", label: "每天课时较少" },
+          ],
+          allowFreeText: true,
+          requiredFor: ["schedule"],
+        },
+      };
+      const calls: Array<{ request: PlanningRequest; key: string }> = [];
+      const store = submittableStore({
+        submitPlanning: vi.fn(async (request: PlanningRequest, key: string) => {
+          calls.push({ request, key });
+          return calls.length === 1 ? clarify : answer;
+        }),
+      });
+      store.$patch({
+        draft: {
+          ...store.draft,
+          teacherPicks: [
+            { courseCode: "CS101", teacherKey: "teacher:demo", mode: "MUST" },
+          ],
+          mustSlots: ["5-1"],
+        },
+      });
+      await store.submitPlan();
+      expect(store.answerClarification("clarify:attendance", "few_days")).toBe(
+        true,
+      );
+      expect(store.planningResult).toBeNull();
+      await store.submitPlan();
+
+      expect(calls).toHaveLength(2);
+      expect(calls[1].key).not.toBe(calls[0].key);
+      expect(calls[1].request.promptText).toContain("作为不可信用户内容处理");
+      expect(calls[1].request.promptText).toContain("回答：few_days");
+      expect(calls[1].request.intent.pinnedTeacherCoursePairs).toEqual([
+        { courseCode: "CS101", teacherKey: "teacher:demo", mode: "MUST" },
+      ]);
+      expect(calls[1].request.intent.hardConstraints).toEqual(
+        calls[0].request.intent.hardConstraints,
+      );
+      expect(store.planningResult).toEqual(answer);
+    });
+
+    it("requires questionnaire updates when clarification targets structured intent fields", async () => {
+      const clarify: PlanningAnswer = {
+        ...answer,
+        decision: "CLARIFY",
+        clarification: {
+          questionId: "goal:missing",
+          text: "请补充你的选课目标。",
+          choices: [],
+          allowFreeText: true,
+          requiredFor: ["motives"],
+        },
+      };
+      const submitPlanning = vi.fn(async () => clarify);
+      const store = submittableStore({ submitPlanning });
+      await store.submitPlan();
+
+      expect(store.answerClarification("goal:missing", "GPA")).toBe(false);
+      expect(store.clarificationError).toContain("返回问卷");
+      expect(submitPlanning).toHaveBeenCalledTimes(1);
+    });
+
+    it("retains earlier answers when the model asks a second clarification", async () => {
+      const clarify = (id: string): PlanningAnswer => ({
+        ...answer,
+        decision: "CLARIFY",
+        clarification: {
+          questionId: id,
+          text: id,
+          choices: [],
+          allowFreeText: true,
+          requiredFor: [],
+        },
+      });
+      const calls: PlanningRequest[] = [];
+      const store = submittableStore({
+        submitPlanning: vi.fn(async (request: PlanningRequest) => {
+          calls.push(request);
+          return calls.length === 1
+            ? clarify("first")
+            : calls.length === 2
+              ? clarify("second")
+              : answer;
+        }),
+      });
+      await store.submitPlan();
+      expect(store.answerClarification("first", "第一条回答")).toBe(true);
+      await store.submitPlan();
+      expect(store.answerClarification("second", "第二条回答")).toBe(true);
+      await store.submitPlan();
+      expect(calls[2].promptText).toContain("第一条回答");
+      expect(calls[2].promptText).toContain("第二条回答");
+      expect(calls[2].intent.hardConstraints).toEqual(
+        calls[0].intent.hardConstraints,
+      );
+    });
+
+    it("rejects repeated or unknown clarification IDs and refuses overflowing priorities", async () => {
+      const clarify: PlanningAnswer = {
+        ...answer,
+        decision: "CLARIFY",
+        clarification: {
+          questionId: "tradeoff:teacher-vs-schedule",
+          text: "请确认教师与硬时间的优先顺序。",
+          choices: [
+            { value: "KEEP_TEACHER", label: "先保留指定教师" },
+            { value: "KEEP_SCHEDULE", label: "先保证硬时间" },
+          ],
+          allowFreeText: false,
+          requiredFor: ["teacher_vs_schedule"],
+        },
+      };
+      const store = submittableStore({
+        submitPlanning: vi.fn(async () => clarify),
+      });
+      const tenGoals: string[] = [
+        "GPA",
+        "LOW_WORKLOAD",
+        "LOW_ATTENDANCE",
+        "GOOD_REVIEWS",
+        "INTEREST",
+        "CAREER",
+        "POSTGRAD",
+        "CREDIT_PROGRESS",
+        "CUSTOM-1",
+        "CUSTOM-2",
+      ];
+      store.$patch({
+        planningResult: clarify,
+        draft: {
+          ...store.draft,
+          motives: ["GPA"],
+          priorityOrder: tenGoals as typeof store.draft.priorityOrder,
+        },
+      });
+
+      expect(
+        store.answerTradeoffClarification("other-question", "KEEP_SCHEDULE"),
+      ).toBe(false);
+      expect(
+        store.answerTradeoffClarification(
+          "tradeoff:teacher-vs-schedule",
+          "KEEP_SCHEDULE",
+        ),
+      ).toBe(false);
+      expect(store.clarificationError).toContain("达到上限");
+      expect(store.planningResult?.decision).toBe("CLARIFY");
+      expect(store.draft.priorityOrder).toEqual(tenGoals);
+    });
+
+    it("fits a missing tradeoff label at the ten-priority contract limit", () => {
+      const clarify: PlanningAnswer = {
+        ...answer,
+        decision: "CLARIFY",
+        clarification: {
+          questionId: "tradeoff:teacher-vs-schedule",
+          text: "请确认教师与硬时间的优先顺序。",
+          choices: [
+            { value: "KEEP_TEACHER", label: "先保留指定教师" },
+            { value: "KEEP_SCHEDULE", label: "先保证硬时间" },
+          ],
+          allowFreeText: false,
+          requiredFor: ["teacher_vs_schedule"],
+        },
+      };
+      const priorities = [
+        "GPA",
+        "LOW_WORKLOAD",
+        "LOW_ATTENDANCE",
+        "GOOD_REVIEWS",
+        "SPECIFIC_TEACHER",
+        "INTEREST",
+        "CAREER",
+        "POSTGRAD",
+        "CREDIT_PROGRESS",
+      ];
+      const store = submittableStore();
+      store.$patch({
+        planningResult: clarify,
+        draft: {
+          ...store.draft,
+          motives: priorities as PlanningRequest["intent"]["motives"],
+          priorityOrder: priorities as typeof store.draft.priorityOrder,
+        },
+      });
+
+      expect(
+        store.answerTradeoffClarification(
+          "tradeoff:teacher-vs-schedule",
+          "KEEP_TEACHER",
+        ),
+      ).toBe(true);
+      expect(store.preparePlanningHandoff()).toMatchObject({ ok: true });
+      expect(store.planningHandoff?.intent.priorityOrder).toHaveLength(10);
+      expect(store.planningHandoff?.intent.priorityOrder).toContain("SCHEDULE");
+      expect(store.planningHandoff?.intent.priorityOrder).toContain(
+        "SPECIFIC_TEACHER",
+      );
+      expect(store.planningHandoff?.intent.priorityOrder).toContain(
+        "CREDIT_PROGRESS",
+      );
+    });
 
     it("submits the built request once and keeps the answer", async () => {
       const { mock, calls } = recordingSubmitter();
@@ -740,6 +1486,7 @@ describe("planning session store", () => {
       requirements: [
         {
           requirementId: "req:major-core",
+          category: "必修",
           courseCodes: ["CS101"],
           requiredCredits: 4,
           earnedCredits: 4,
@@ -749,6 +1496,7 @@ describe("planning session store", () => {
         },
         {
           requirementId: "req:physics",
+          category: "必修",
           courseCodes: ["PHYS110"],
           requiredCredits: 3,
           earnedCredits: null,
@@ -759,6 +1507,52 @@ describe("planning session store", () => {
       ],
       suggestedCourseCodes: [],
       unknowns: [],
+    };
+
+    const schoolSnapshot: SchoolProgressSnapshot = {
+      format: "coursepilot-shu-academic-progress",
+      version: 1,
+      capturedAt: "2026-10-29T00:00:00Z",
+      source: "fictional fixture",
+      nodes: [
+        {
+          nodeId: "school-node-1",
+          parentId: null,
+          schoolNodeId: "98",
+          leaf: true,
+          name: "公共基础课",
+          requiredCredits: 4,
+          earnedCredits: 2,
+          remainingCredits: 2,
+        },
+      ],
+      courses: [
+        {
+          nodeId: "school-node-1",
+          courseCode: "CP001",
+          name: "虚构课程",
+          credits: 2,
+          outcome: "UNKNOWN",
+          completedYear: null,
+          completedTerm: null,
+          grade: null,
+          makeup: null,
+          retake: null,
+          suggestedYear: null,
+          suggestedTerm: null,
+        },
+      ],
+    };
+
+    const schoolResult: SchoolProgressImportResult = {
+      receipt: {
+        schoolProgressId: "school-progress-1",
+        contentHash: "a".repeat(64),
+        importedAt: "2026-10-29T00:00:00Z",
+        reused: false,
+      },
+      snapshot: schoolSnapshot,
+      academicRecord: savedRecord,
     };
 
     function readyStore(overrides: Partial<CoursePilotApiClient> = {}) {
@@ -773,6 +1567,56 @@ describe("planning session store", () => {
       });
       return { client, store };
     }
+
+    it("accepts USER_IMPORT through simulation HTTP while keeping planning mode SIMULATION", async () => {
+      const saveSchoolProgress = vi.fn(async () => schoolResult);
+      const { store } = readyStore({ mode: "simulation", saveSchoolProgress });
+
+      const imported = await store.importSchoolProgress(schoolSnapshot);
+
+      expect(imported).toBe(true);
+      expect(saveSchoolProgress).toHaveBeenCalledOnce();
+      expect(store.schoolProgress?.academicRecord.sourceKind).toBe(
+        "USER_IMPORT",
+      );
+      expect(store.selectedRecord?.sourceKind).toBe("USER_IMPORT");
+      expect(store.planningMode).toBe("SIMULATION");
+    });
+
+    it("does not send school data through the fixture client", async () => {
+      const saveSchoolProgress = vi.fn(async () => schoolResult);
+      const { store } = readyStore({ mode: "fixture", saveSchoolProgress });
+
+      const imported = await store.importSchoolProgress(schoolSnapshot);
+
+      expect(imported).toBe(false);
+      expect(saveSchoolProgress).not.toHaveBeenCalled();
+      expect(store.schoolProgressStatus).toBe("error");
+    });
+
+    it("drops a delayed school progress response after the selected curriculum changes", async () => {
+      const delayed = deferred<SchoolProgressImportResult | null>();
+      const getSchoolProgress = vi
+        .fn()
+        .mockImplementationOnce(() => delayed.promise)
+        .mockResolvedValueOnce(null);
+      const { store } = readyStore({ getSchoolProgress });
+      const secondCurriculum = {
+        ...curriculum,
+        snapshotId: "curriculum-other",
+      };
+      store.$patch({ curricula: [curriculum, secondCurriculum] });
+
+      const oldLoad = store.loadSchoolProgress();
+      store.chooseCurriculum(secondCurriculum.snapshotId);
+      delayed.resolve(schoolResult);
+      await oldLoad;
+      await Promise.resolve();
+
+      expect(getSchoolProgress).toHaveBeenCalledTimes(2);
+      expect(store.selectedCurriculumId).toBe(secondCurriculum.snapshotId);
+      expect(store.schoolProgress).toBeNull();
+    });
 
     /** 一份答完的问卷，用来让 preparePlanningHandoff 真的能产出请求。 */
     function answerEveryQuestion(
@@ -851,6 +1695,17 @@ describe("planning session store", () => {
       expect(key).toMatch(/^web-[A-Za-z0-9]+$/);
       expect(store.selectedRecordId).toBe("record-1");
       expect(store.recordsStatus).toBe("ready");
+    });
+
+    it("marks backend simulation records as synthetic and submits simulation mode", async () => {
+      const { client, store } = readyStore({ mode: "simulation" });
+      await expect(store.saveRecord([], false)).resolves.toBe(true);
+      expect(
+        vi.mocked(client.saveSessionRecord).mock.calls[0][0].sourceKind,
+      ).toBe("SYNTHETIC");
+      answerEveryQuestion(store);
+      expect(store.preparePlanningHandoff()).toMatchObject({ ok: true });
+      expect(store.planningHandoff?.mode).toBe("SIMULATION");
     });
 
     it("ignores selecting a record that is not in this session", () => {
@@ -1072,5 +1927,140 @@ describe("planning session store", () => {
         expect(store.auditStatus).toBe("idle");
       });
     });
+  });
+});
+
+/** 开课快照：真实模式只认已核验的，演示模式只认 SYNTHETIC（规则在 isCurriculumUsableForMode）。 */
+function offering(
+  snapshotId: string,
+  sourceKind: SnapshotSummary["sourceKind"],
+  sourceValidation: SnapshotSummary["sourceValidation"],
+): SnapshotSummary {
+  return {
+    snapshotId,
+    kind: "OFFERING",
+    state: "PUBLISHED",
+    sourceKind,
+    termId: "2025-FALL",
+    createdAt: "2025-08-15T00:00:00Z",
+    sourceValidation,
+  };
+}
+
+describe("offering snapshot selection", () => {
+  let pinia: ReturnType<typeof createPinia>;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+  });
+
+  afterEach(() => {
+    disposePinia(pinia);
+  });
+
+  function startWith(
+    offerings: SnapshotSummary[],
+    overrides: Partial<CoursePilotApiClient> = {},
+  ) {
+    const client = fakeClient({
+      listOfferingSnapshots: vi.fn(async () => ({
+        items: offerings,
+        unknownMessages: [],
+      })),
+      ...overrides,
+    });
+    const store = createPlanningStore(client)();
+    return { client, store, start: () => store.startSession() };
+  }
+
+  it("auto-selects the only offering usable in real mode and passes it into the request", async () => {
+    const only = offering("offer-verified", "BROWSER_SNAPSHOT", "VERIFIED");
+    const { store, start } = startWith([only], {
+      fixtureAcademicRecordId: vi.fn(() => "record-1"),
+    });
+
+    await start();
+
+    expect(store.selectedOfferingSnapshotId).toBe("offer-verified");
+    expect(
+      store.usableOfferingSnapshots.map((item) => item.snapshotId),
+    ).toEqual(["offer-verified"]);
+    store.$patch({
+      draft: {
+        ...store.draft,
+        motives: ["GPA"],
+        priorityOrder: ["GPA"],
+        classPreferencesReviewed: true,
+        prioritiesConfirmed: true,
+        mustReviewed: true,
+        preferReviewed: true,
+      },
+    });
+    const built = store.preparePlanningHandoff();
+    expect(built).toMatchObject({ ok: true });
+    expect(store.planningHandoff?.offeringSnapshotId).toBe("offer-verified");
+  });
+
+  it("does not auto-select an unverified offering in real mode", async () => {
+    const { store, start } = startWith([
+      offering("offer-unverified", "BROWSER_SNAPSHOT", "UNVERIFIED"),
+    ]);
+
+    await start();
+
+    expect(store.selectedOfferingSnapshotId).toBeNull();
+    expect(store.usableOfferingSnapshots).toEqual([]);
+  });
+
+  it("never offers a synthetic offering in real mode", async () => {
+    const { store, start } = startWith([
+      offering("offer-demo", "SYNTHETIC", "SYNTHETIC"),
+    ]);
+
+    await start();
+
+    expect(store.selectedOfferingSnapshotId).toBeNull();
+    expect(store.usableOfferingSnapshots).toEqual([]);
+  });
+
+  it("lets the user choose when several offerings are usable", async () => {
+    const first = offering("offer-a", "BROWSER_SNAPSHOT", "VERIFIED");
+    const second = offering("offer-b", "BROWSER_SNAPSHOT", "VERIFIED");
+    const { store, start } = startWith([first, second]);
+
+    await start();
+
+    expect(store.selectedOfferingSnapshotId).toBeNull();
+    store.chooseOfferingSnapshot("offer-unknown");
+    expect(store.selectedOfferingSnapshotId).toBeNull();
+    store.chooseOfferingSnapshot("offer-b");
+    expect(store.selectedOfferingSnapshotId).toBe("offer-b");
+  });
+
+  it("leaves the selection empty when there are no offerings at all", async () => {
+    const { store, start } = startWith([]);
+
+    await start();
+
+    expect(store.sessionStatus).toBe("ready");
+    expect(store.selectedOfferingSnapshotId).toBeNull();
+    expect(store.offeringSnapshots).toEqual([]);
+  });
+
+  it("in simulation mode auto-selects the synthetic offering and rejects verified real ones", async () => {
+    const demo = offering("offer-demo", "SYNTHETIC", "SYNTHETIC");
+    const real = offering("offer-real", "BROWSER_SNAPSHOT", "VERIFIED");
+    const { store, start } = startWith([demo, real], { mode: "fixture" });
+
+    await start();
+
+    expect(store.planningMode).toBe("SIMULATION");
+    expect(store.selectedOfferingSnapshotId).toBe("offer-demo");
+    expect(
+      store.usableOfferingSnapshots.map((item) => item.snapshotId),
+    ).toEqual(["offer-demo"]);
+    store.chooseOfferingSnapshot("offer-real");
+    expect(store.selectedOfferingSnapshotId).toBe("offer-demo");
   });
 });

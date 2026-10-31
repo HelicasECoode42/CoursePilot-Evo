@@ -7,7 +7,7 @@ import java.util.List;
  * contracts/schemas/domain.schema.json 的 AuditRequest / AuditResult / AuditItem，
  * 不在这里另造一套命名。
  *
- * 这是外层壳：核对算法仍在 AuditEvaluator，本文件只负责把算出来的数按契约摆好。
+ * 这是外层壳：核对算法在 AcademicLedger（与 AuditEvaluator 共用），本文件只负责把算出来的数按契约摆好。
  */
 public final class AuditDtos {
 
@@ -22,13 +22,15 @@ public final class AuditDtos {
     /** contracts: AuditItem.state */
     public enum State { SATISFIED, UNSATISFIED, UNKNOWN }
 
-    /** contracts: AuditItem */
+    /** contracts: AuditItem。gapCredits 在 state=UNKNOWN 时为 null，表示缺口无法确定。 */
     public record AuditItem(
         String requirementId,
+        /** 类别名（必修 / 通识 …）。没有这个字段，前端只能显示「培养要求 1」。 */
+        String category,
         List<String> courseCodes,
         double requiredCredits,
         double earnedCredits,
-        double gapCredits,
+        Double gapCredits,
         State state,
         List<String> sourceRefIds) {}
 

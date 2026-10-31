@@ -1,8 +1,9 @@
 name: integration-checks
 
 # D2（Issue #12 / D-F3）：组合启动与集成检查入口。
-# 挂法 B：只手动触发 + 每天定时，不进 PR 门禁。现在会红是因为 Java/MySQL 尚未落地，
-# 缺服务不该反过来挡住别人的 PR；等各模块到位后再提为必过。
+# 挂法 B：只手动触发 + 每天定时，不进 PR 门禁，免得一个模块的整栈问题挡住别人的 PR。
+# Java 核验服务（H2 文件库，8081）与 Python 网关、Vue 页面都已有实现；真实链路是否全通，以本作业的结果为准。
+# 任何必需服务缺失或步骤不是 PASS，本作业就失败，不把 SKIP 当通过。
 # 判定语义：任一必需服务缺失、步骤不是 PASS，job 就失败；不允许 SKIP 算通过。
 
 on:
@@ -103,12 +104,19 @@ jobs:
           python integration/start_stack.py --stop || true
           exit $code
 
+      # 本仓库是公开仓库：Actions 工件对任何人可下载。所以这里只留排查必需的内容，
+      # 并排除会外泄本机信息的文件；保留期也收短。真实学生数据不得在 CI 里跑，
+      # CI 只用 SYNTHETIC 种子（AGENTS.md：REAL 不能用 synthetic，反之同样不许混）。
       - name: 证据留存（五段式失败块、服务日志与截图）
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: stack-evidence
-          path: runs/stack/
+          # pids.json 里是 runner 上的绝对路径与 argv，排查用不到，却会暴露目录结构。
+          path: |
+            runs/stack/
+            !runs/stack/pids.json
+          retention-days: 7
           if-no-files-found: warn
 
       - name: 门禁：任一检查未通过即失败

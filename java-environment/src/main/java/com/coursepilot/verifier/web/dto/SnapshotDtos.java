@@ -23,12 +23,17 @@ public final class SnapshotDtos {
         String sourceKind,
         String termId,
         String createdAt,
-        String sourceValidation) {}
+        String sourceValidation,
+        String displayName) {}
 
     /** listCurricula 的 data 是 { items: [...] }，不是裸数组。 */
     public record SnapshotList(List<SnapshotSummary> items) {}
 
     public static SnapshotSummary of(CurriculumSnapshot snapshot) {
+        return of(snapshot, null);
+    }
+
+    public static SnapshotSummary of(CurriculumSnapshot snapshot, String displayName) {
         return new SnapshotSummary(
             snapshot.getSnapshotId(),
             snapshot.getKind().name(),
@@ -38,6 +43,7 @@ public final class SnapshotDtos {
             // 契约要求 format: date-time，固定按 UTC 的 ISO-8601 输出，
             // 不跟随运行机器的时区，否则同一条记录在不同机器上文本不同。
             DateTimeFormatter.ISO_INSTANT.format(snapshot.getCreatedAt()),
-            snapshot.getSourceValidation().name());
+            snapshot.getSourceValidation().name(),
+            displayName);
     }
 }

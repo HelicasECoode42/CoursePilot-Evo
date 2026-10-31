@@ -3,12 +3,8 @@
 每一步断言三样东西：HTTP 状态码、Envelope 结构（errors.py 约定每个响应都是同一个信封）、
 该步的业务字段。任一步 FAIL 或没就绪一律非零退出，缺服务不允许 SKIP 算过。
 
-现在能真跑到哪一步（以代码为准）
-  Python（agent-runtime）与 Web 已有实现，可以真发请求。
-  Java 已有实现（java-environment 有 33 个 .java 文件、5 个测试类，本机记录 54 个测试全过），
-  其中 POST /api/v1/requirements/audit 已实现；但 POST /api/v1/academic-records 在 Java 侧没有，
-  所以 record 的 createAcademicRecord 这一步仍会失败。MySQL 未落地（当前是 H2）。
-  受控缺口（如 Java 接线缺失）判 DEGRADED，整轮不算通过，并在输出里点名缺谁。
+检查使用虚构契约样例。可用 CP_TEST_CURRICULUM_SNAPSHOT_ID 指定已发布的测试快照；
+不指定时使用样例中的快照 ID。假模型和受控缺口判 DEGRADED，整轮不算通过。
 
 用法
   python integration/check_stack.py --plan     # 只判定与打印计划，不连服务；退出码与真跑一致
@@ -21,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -62,6 +59,18 @@ class Chain:
     token: str = ""
     record_id: str = ""
     answer: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def curriculum_id(self) -> str:
+        # 回退到 os.environ：check_stack 的入口会把这个键注入 values，但 smoke_stack
+        # 另建 Chain，stack_config.resolve 只收登记过的键，于是冒烟永远拿到契约样例里的
+        # curr:demo —— 那个快照不存在，Java 返 422 SNAPSHOT_NOT_FOUND。读一次环境变量
+        # 就让两个入口一致，不在各入口重复注入。
+        return (
+            self.values.get("CP_TEST_CURRICULUM_SNAPSHOT_ID")
+            or os.environ.get("CP_TEST_CURRICULUM_SNAPSHOT_ID")
+            or load_contract_example("academic-record.json")["curriculumSnapshotId"]
+        )
 
     @property
     def api(self) -> str:
@@ -106,6 +115,8 @@ def classify_planning(payload: Any) -> tuple[str, str]:
         for item in recommendations:
             if not isinstance(item, dict) or "verification" not in item or "items" not in item:
                 return FAIL, "推荐缺少 items/verification 字段"
+        if any(isinstance(issue, dict) and issue.get("code") == "FAKE_MODEL" for issue in payload["unknowns"]):
+            return DEGRADED, "规划链路返回推荐，但使用假模型，不能作为真实模型验收"
         return PASS, f"给出 {len(recommendations)} 条带核验的推荐"
     return FAIL, f"decision 取值不在契约枚举内：{decision!r}"
 
@@ -139,6 +150,8 @@ def step_record(chain: Chain) -> StepResult:
     url = chain.api + "/api/v1/academic-records"
     headers = chain.headers(request_id, auth=True, idempotency=request_id)
     body = record_input_from_example()
+    body["curriculumSnapshotId"] = chain.curriculum_id
+    body["sourceKind"] = "SYNTHETIC"
     expect = "201 + Envelope(OK, AcademicRecord)；Java 未接线时必须是 503 envelope=ERROR issue=TOOL_UNAVAILABLE"
     attempts = [Attempt("201 已修记录入库", 201, "OK")]
     if not chain.java_ready:
@@ -163,7 +176,7 @@ def step_audit(chain: Chain) -> StepResult:
     example = load_contract_example("academic-record.json")
     body = {
         "schemaVersion": "1.0",
-        "curriculumSnapshotId": example["curriculumSnapshotId"],
+        "curriculumSnapshotId": chain.curriculum_id,
         "academicRecordId": chain.record_id or example["academicRecordId"],
     }
     expect = "200 + Envelope(OK, AuditResult)；Java 未接线时必须是 503 envelope=ERROR issue=TOOL_UNAVAILABLE"
@@ -196,10 +209,43 @@ def _planning_call(chain: Chain, step: str, body: dict[str, Any], idempotency: s
 
 def step_planning(chain: Chain) -> StepResult:
     body = load_contract_example("planning-request.json")
+    body["curriculumSnapshotId"] = chain.curriculum_id
+    body["academicRecordId"] = chain.record_id or body["academicRecordId"]
     result, response = _planning_call(chain, "planning", body, chain.next_request_id("planning-idem"))
     if isinstance(response.payload, dict) and isinstance(response.payload.get("data"), dict):
         chain.answer = response.payload["data"]
     return result
+
+
+def _replan_without_a_previous_plan(chain: Chain, step: str, request_id: str, url: str) -> StepResult:
+    """没有可改的方案时，验证「别人的 planId 必须被拒」并判 DEGRADED。"""
+    body = load_contract_example("planning-request.json")
+    body["curriculumSnapshotId"] = chain.curriculum_id
+    body["academicRecordId"] = chain.record_id or body["academicRecordId"]
+    body["previousPlanId"] = "plan:not-in-this-session"
+    headers = chain.headers(request_id, auth=True, idempotency=request_id)
+    expect = "上一步没有产出方案：不属于本会话的 previousPlanId 必须被 404 拒绝"
+    response = chain.transport.request("POST", url, headers, body)
+    repro = repro_curl("POST", url, headers, body)
+    result = evaluate(
+        step,
+        request_id,
+        expect,
+        response,
+        [Attempt("404 方案不属于本会话", 404, "NOT_FOUND", "NOT_FOUND", degraded=True)],
+        repro,
+    )
+    if result.verdict == FAIL:
+        return result
+    return StepResult(
+        step,
+        DEGRADED,
+        request_id,
+        expect,
+        response.describe(),
+        detail="上一步先澄清或拒答，没有方案可改；已验证他人方案 id 被 404 拒绝",
+        repro=repro,
+    )
 
 
 def step_replan(chain: Chain) -> StepResult:
@@ -208,11 +254,19 @@ def step_replan(chain: Chain) -> StepResult:
     request_id = chain.next_request_id(step)
     url = chain.api + "/api/v1/planning"
     body = load_contract_example("planning-request.json")
+    body["curriculumSnapshotId"] = chain.curriculum_id
+    body["academicRecordId"] = chain.record_id or body["academicRecordId"]
     recommendations = chain.answer.get("recommendations") or []
+    previous_plan_id = None
     if recommendations and isinstance(recommendations[0], dict):
-        body["previousPlanId"] = recommendations[0].get("planId")
-    else:
-        body["previousPlanId"] = "plan:previous"
+        previous_plan_id = recommendations[0].get("planId")
+    if not previous_plan_id:
+        # 上一步先澄清或拒答时没有方案可改，重规划的正常分支本轮验证不了。
+        # 这时不拿写死的假 id 去打——那个方案不属于本会话，被 404 拒掉是
+        # docs/04「previousPlanId 必须属当前会话」要求的正确行为，判 FAIL 等于
+        # 把正确行为报成缺陷。改为就地验证这条拒绝规则，并判 DEGRADED 说明原因。
+        return _replan_without_a_previous_plan(chain, step, request_id, url)
+    body["previousPlanId"] = previous_plan_id
     idempotency = request_id
     headers = chain.headers(request_id, auth=True, idempotency=idempotency)
     expect = "200 + Envelope(OK)；同 Idempotency-Key 重复提交必须返回同一份结果（不双跑）"
@@ -262,6 +316,7 @@ def readiness(plan_only: bool) -> dict[str, str]:
 
 def run_chain(plan_only: bool, transport: Any = None) -> tuple[list[StepResult], dict[str, str], str | None]:
     values, _sources, _used_file = resolve(None)
+    values["CP_TEST_CURRICULUM_SNAPSHOT_ID"] = os.environ.get("CP_TEST_CURRICULUM_SNAPSHOT_ID", "")
     problems = errors(validate(values))
     if problems:
         return [], {}, f"配置校验未通过（{len(problems)} 条 error），先修配置：{problems[0][1]} {problems[0][2]}"

@@ -1,0 +1,29 @@
+{
+  "caseId": "SYN-001",
+  "provenance": "SYNTHETIC_FICTION",
+  "kind": "planning-request",
+  "description": "仅检查唯一 PlanningRunner、类型化假工具和假模型的本地链路；不评估课程事实质量。",
+  "request": {
+    "schemaVersion": "1.0",
+    "curriculumSnapshotId": "PLAN_CS_2025",
+    "offeringSnapshotId": null,
+    "academicRecordId": "SYN-STUDENT-001",
+    "previousPlanId": null,
+    "mode": "SIMULATION",
+    "promptText": "这是虚构演示。请给出候选课程；没有本学期班次资料时要如实保留未知。",
+    "intent": {
+      "motives": ["SCHEDULE"],
+      "priorityOrder": ["SCHEDULE"],
+      "hardConstraints": [],
+      "softPreferences": [],
+      "pinnedTeacherCoursePairs": [],
+      "interestTags": [],
+      "careerDirectionIds": []
+    }
+  },
+  "syntheticExpectations": {
+    "decision": "RECOMMENDATIONS",
+    "verifierVerdict": "UNKNOWN",
+    "requiredUnknownCodes": ["FAKE_MODEL"]
+  }
+}

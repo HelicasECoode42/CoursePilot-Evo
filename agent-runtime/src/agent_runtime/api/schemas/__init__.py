@@ -16,6 +16,7 @@ from .academic import (
     Outcome,
     RecordSourceKind,
 )
+from .advice_chat import AdviceChatAnswer, AdviceChatRequest
 from .answer import (
     Choice,
     Decision,
@@ -69,17 +70,27 @@ from .offering import (
     Week,
 )
 from .review import MatchStatus, ReviewDimension, ReviewImport, ReviewNote, ReviewSourceKind
+from .school_progress import (
+    SchoolProgressImport,
+    SchoolProgressImportResult,
+    SchoolProgressReceipt,
+    SchoolProgressSnapshot,
+)
 from .trace import EventType, TraceEvent
 from .validation import (
     PlanItem,
     PlanValidation,
     PlanValidationRequest,
     Scope,
+    SessionPlanCourseRemovalRequest,
+    SessionPlanEditResult,
     ValidationMode,
     Verdict,
 )
 
 __all__ = [
+    "AdviceChatAnswer",
+    "AdviceChatRequest",
     "AcademicRecord",
     "AcademicRecordInput",
     "AuditItem",
@@ -117,6 +128,8 @@ __all__ = [
     "PlanItem",
     "PlanValidation",
     "PlanValidationRequest",
+    "SessionPlanCourseRemovalRequest",
+    "SessionPlanEditResult",
     "PlanningAnswer",
     "PlanningMode",
     "PlanningRequest",
@@ -130,6 +143,10 @@ __all__ = [
     "ReviewImport",
     "ReviewNote",
     "ReviewSourceKind",
+    "SchoolProgressImport",
+    "SchoolProgressImportResult",
+    "SchoolProgressReceipt",
+    "SchoolProgressSnapshot",
     "RunDecision",
     "RunManifest",
     "RunReport",
@@ -156,6 +173,8 @@ __all__ = [
 # positive/negative examples against the Python DTOs. ``Envelope`` is generic and
 # intentionally not listed (no example validates it bare).
 SCHEMA_DEFS: dict[str, type[DomainModel]] = {
+    "AdviceChatRequest": AdviceChatRequest,
+    "AdviceChatAnswer": AdviceChatAnswer,
     "SourceRef": SourceRef,
     "Issue": Issue,
     "CompletedCourse": CompletedCourse,
@@ -174,6 +193,8 @@ SCHEMA_DEFS: dict[str, type[DomainModel]] = {
     "PlanItem": PlanItem,
     "PlanValidationRequest": PlanValidationRequest,
     "PlanValidation": PlanValidation,
+    "SessionPlanCourseRemovalRequest": SessionPlanCourseRemovalRequest,
+    "SessionPlanEditResult": SessionPlanEditResult,
     "ReviewNote": ReviewNote,
     "ReviewImport": ReviewImport,
     "Question": Question,

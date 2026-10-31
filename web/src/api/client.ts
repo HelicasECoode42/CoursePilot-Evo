@@ -6,7 +6,11 @@ import type {
   AcademicRecord,
   AcademicRecordInput,
   AcademicRecordList,
+  AdviceChatAnswer,
+  AdviceChatRequest,
   AuditResult,
+  CareerDirection,
+  Course,
   Envelope,
   PlanningAnswer,
   PlanningRequest,
@@ -14,11 +18,17 @@ import type {
   RunReport,
   SessionOfferingList,
   SessionPlanReplaceInput,
+  SessionPlanEditInput,
+  SessionPlanEditResult,
   SessionPlanReplacement,
   SessionResult,
   SnapshotSummary,
   TeacherCourseOption,
 } from "../contracts";
+import type {
+  SchoolProgressImportRequest,
+  SchoolProgressImportResult,
+} from "../domain/school-progress";
 
 export type ApiFailureKind =
   | "network"
@@ -50,6 +60,9 @@ export interface CurriculumResult {
   unknownMessages: string[];
 }
 
+/** 开课快照列表。与培养方案结果同形，但语义不同：只含 kind=OFFERING 的快照。 */
+export type OfferingSnapshotResult = CurriculumResult;
+
 /**
  * envelope 的业务状态，只有 OK 和 UNKNOWN（docs/04）。UNKNOWN 表示快照缺失或非当前，
  * 是无法确认；这时列表为空也不能说成「确定没有」。
@@ -67,15 +80,31 @@ export type TeacherCourseOptionSearch = {
   items: TeacherCourseOption[];
   status: BusinessStatus;
 };
+export type CourseSearch = {
+  items: Course[];
+  nextCursor: string | null;
+};
 export type ReviewNoteSearch = {
   items: ReviewNote[];
   status: BusinessStatus;
 };
 
 export interface CoursePilotApiClient {
-  readonly mode: "http" | "fixture";
+  readonly mode: "http" | "fixture" | "simulation";
   createSession(signal?: AbortSignal): Promise<SessionView>;
   listCurricula(signal?: AbortSignal): Promise<CurriculumResult>;
+  /** 已发布的开课快照（班次来源）。是否可用于当前模式由调用方用 isCurriculumUsableForMode 判断。 */
+  listOfferingSnapshots(signal?: AbortSignal): Promise<OfferingSnapshotResult>;
+  /**
+   * 课程目录分页。query 同时匹配课程号和课程名（后端实现），为空则列全部。
+   * limit 固定 100（契约上限），翻页用 nextCursor。
+   */
+  listCourses(
+    curriculumSnapshotId: string,
+    cursor?: string | null,
+    signal?: AbortSignal,
+    query?: string | null,
+  ): Promise<CourseSearch>;
   /** E2 / E-F1：列出本会话已有的学业记录。items 为空数组是正常业务状态。 */
   listSessionRecords(signal?: AbortSignal): Promise<AcademicRecordList>;
   /** E2 / E-F1：缺记录时才补录。academicRecordId 由服务端生成并返回。 */
@@ -96,6 +125,11 @@ export interface CoursePilotApiClient {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<PlanningAnswer>;
+  adviceChat(
+    body: AdviceChatRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<AdviceChatAnswer>;
   /**
    * E4：本会话方案中某门课可替换的开课班次。items 为空是正常状态，候选不构成核验结论。
    * status 为 UNKNOWN 时班次资料无法确认，空数组不代表这门课没有班次。
@@ -114,6 +148,24 @@ export interface CoursePilotApiClient {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<SessionPlanReplacement>;
+  removeSessionPlanCourse(
+    body: SessionPlanEditInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult>;
+  saveSchoolProgress(
+    body: SchoolProgressImportRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult>;
+  importSchoolProgress(
+    body: SchoolProgressImportRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult>;
+  getSchoolProgress(
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult | null>;
   /**
    * E4：查询教师与课程的对应。契约要求 curriculumSnapshotId；courseCode 传 null 表示
    * 不按课程过滤。只返回第一页（契约默认 limit），nextCursor 暂不翻页。
@@ -123,6 +175,7 @@ export interface CoursePilotApiClient {
     curriculumSnapshotId: string,
     courseCode: string | null,
     signal?: AbortSignal,
+    query?: string | null,
   ): Promise<TeacherCourseOptionSearch>;
   /**
    * E4：检索课程（可选教师）的评价证据。teacherKey 传 null 表示不按教师过滤。
@@ -133,6 +186,11 @@ export interface CoursePilotApiClient {
     teacherKey: string | null,
     signal?: AbortSignal,
   ): Promise<ReviewNoteSearch>;
+  /**
+   * 职业方向列表。Java 与网关早就实现了，网页此前没用上。
+   * 只读不写；返回空数组是正常业务状态，不是错误。
+   */
+  listCareerDirections(signal?: AbortSignal): Promise<CareerDirection[]>;
   /** E4：受限的老师运行报告。服务端还要求管理密钥，浏览器端拿不到时会得到 403，页面需要照实说明。 */
   getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport>;
   clearSession(): void;
@@ -158,6 +216,12 @@ const validateAuditResult = ajv.getSchema(
 const validatePlanningAnswer = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/PlanningAnswer",
 );
+const validateAdviceChatRequest = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/AdviceChatRequest",
+);
+const validateAdviceChatAnswer = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/AdviceChatAnswer",
+);
 const validateCourseOffering = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/CourseOffering",
 );
@@ -171,12 +235,33 @@ const validatePlanValidation = ajv.getSchema(
 const validateTeacherCourseOption = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/TeacherCourseOption",
 );
+const validateCourse = ajv.getSchema("coursepilot-domain-v1#/$defs/Course");
+const validateCareerDirection = ajv.getSchema(
+  "coursepilot-domain-v1#/$defs/CareerDirection",
+);
 const validateReviewNote = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/ReviewNote",
 );
 const validateRunReport = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/RunReport",
 );
+
+/**
+ * 按 issue code 给出照实的说明。
+ *
+ * 2026-10-29 实测：真实模型两次规划都失败，页面只说「服务没有完成请求，请稍后
+ * 重试」。真实原因是输出被 2000 token 的输出预算截断（finish_reason=length），
+ * 重试多少次都一样。这类失败必须说清楚，不能用「稍后重试」糊过去。
+ */
+const EXPLAINED_ISSUE_CODES: Record<string, string> = {
+  MODEL_OUTPUT_TRUNCATED:
+    "模型的回复被输出预算截断了，没写完所以用不了。重试不会有帮助——" +
+    "需要调高输出预算，或者减少一次要规划的课程数量。",
+  MODEL_INVALID_OUTPUT:
+    "模型这次返回的内容不符合接口约定，已经被拦下，没有写入任何方案。",
+  MODEL_RATE_LIMITED: "模型服务正在限流，请过一会儿再试。",
+  RATE_LIMITED: "操作太频繁了，请过几分钟再试。",
+};
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -251,9 +336,14 @@ function errorForResponse(
     status === 429 ||
     status === 503 ||
     status === 504;
-  const fallback = retryable
-    ? "服务暂时不可用，请稍后重试。"
-    : "服务没有完成请求，请稍后重试。";
+  // 有些失败「请稍后重试」是错的建议：重试一定还是同样的结果。
+  // 这几条要照实说清楚，否则学生只会一直点重试。
+  const explained = EXPLAINED_ISSUE_CODES[issue?.code ?? ""];
+  const fallback =
+    explained ??
+    (retryable
+      ? "服务暂时不可用，请稍后重试。"
+      : "服务没有完成请求，请稍后重试。");
   return new ApiFailure(
     fallback,
     "http",
@@ -284,7 +374,7 @@ function businessStatus(envelope: Envelope<unknown>): BusinessStatus {
 const PLANNING_TIMEOUT_MS = 50_000;
 
 export class HttpApiClient implements CoursePilotApiClient {
-  readonly mode = "http" as const;
+  readonly mode: "http" | "simulation";
   private readonly baseUrl: string;
   private readonly fetcher: typeof fetch;
   private sessionToken: string | null = null;
@@ -293,7 +383,9 @@ export class HttpApiClient implements CoursePilotApiClient {
     baseUrl: string,
     fetcher: typeof fetch = globalThis.fetch,
     private readonly timeoutMs = 8_000,
+    mode: "http" | "simulation" = "http",
   ) {
+    this.mode = mode;
     // 浏览器的 window.fetch 是原生方法，调用时会校验 this 必须是 window。
     // 存成实例字段后用 this.fetcher(...) 调用，this 变成本实例，浏览器直接抛
     // TypeError: Illegal invocation，请求根本发不出去。Node 与 mock 都不做这个
@@ -381,10 +473,14 @@ export class HttpApiClient implements CoursePilotApiClient {
         item.sourceKind === "SYNTHETIC" ||
         item.sourceValidation === "SYNTHETIC",
     );
-    const items = publishedCurricula.filter(
-      (item) =>
-        item.sourceKind !== "SYNTHETIC" &&
-        item.sourceValidation !== "SYNTHETIC",
+    const items = publishedCurricula.filter((item) =>
+      this.mode === "simulation"
+        ? (item.sourceKind === "SYNTHETIC" &&
+            item.sourceValidation === "SYNTHETIC") ||
+          (item.sourceKind === "CURRICULUM_FILE" &&
+            item.sourceValidation === "UNVERIFIED")
+        : item.sourceKind !== "SYNTHETIC" &&
+          item.sourceValidation !== "SYNTHETIC",
     );
     return {
       items,
@@ -392,9 +488,98 @@ export class HttpApiClient implements CoursePilotApiClient {
         ...(envelope.status === "UNKNOWN"
           ? ["部分培养方案资料暂不可用，当前只列出可用资料。"]
           : []),
-        ...(containsSynthetic ? ["演示培养方案不会用于真实服务模式。"] : []),
+        ...(containsSynthetic && this.mode === "http" && items.length === 0
+          ? ["演示培养方案不会用于真实服务模式。"]
+          : []),
       ],
     };
+  }
+
+  /**
+   * 列出已发布的开课快照。只按 kind/state 过滤，不按模式取舍：
+   * 「演示只用 SYNTHETIC、真实只用已核验」由 store 统一用 isCurriculumUsableForMode 判断，
+   * 客户端不再另写一套规则（两处分开写会漂移）。
+   * 没有开课快照时 items 为空，调用方据此让课表留空并说明原因，不编造。
+   */
+  async listOfferingSnapshots(
+    signal?: AbortSignal,
+  ): Promise<OfferingSnapshotResult> {
+    if (!this.sessionToken) {
+      throw new ApiFailure("请先建立本次会话。", "http", 401, "UNAUTHORIZED");
+    }
+    const { response, envelope } = await this.request(
+      "/api/v1/offering-snapshots",
+      {
+        method: "GET",
+        sessionToken: this.sessionToken,
+        signal,
+      },
+    );
+    if (!response.ok) throw errorForResponse(response.status, envelope);
+    if (envelope.status !== "OK" && envelope.status !== "UNKNOWN") {
+      throw errorForResponse(response.status, envelope);
+    }
+    if (!isObject(envelope.data) || !Array.isArray(envelope.data.items)) {
+      throw new ApiFailure(
+        "服务返回的开课快照列表格式不完整。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    if (
+      !envelope.data.items.every((item) => Boolean(validateSnapshot?.(item)))
+    ) {
+      throw new ApiFailure(
+        "服务返回的开课快照信息不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    const items = (envelope.data.items as SnapshotSummary[]).filter(
+      (item) => item.kind === "OFFERING" && item.state === "PUBLISHED",
+    );
+    return {
+      items,
+      unknownMessages:
+        envelope.status === "UNKNOWN"
+          ? ["部分开课快照暂不可用，当前只列出可用资料。"]
+          : [],
+    };
+  }
+
+  async listCourses(
+    curriculumSnapshotId: string,
+    cursor: string | null = null,
+    signal?: AbortSignal,
+    query: string | null = null,
+  ): Promise<CourseSearch> {
+    const trimmed = query?.trim() ?? "";
+    const { response, envelope } = await this.request(
+      withQuery("/api/v1/courses", {
+        curriculumSnapshotId,
+        query: trimmed === "" ? null : trimmed,
+        limit: "100",
+        cursor,
+      }),
+      { method: "GET", sessionToken: this.requireSession(), signal },
+    );
+    if (!isSuccessEnvelope(envelope)) {
+      throw errorForResponse(response.status, envelope);
+    }
+    const data = envelope.data;
+    if (
+      !isObject(data) ||
+      !Array.isArray(data.items) ||
+      !everyValid(data.items, validateCourse) ||
+      (data.nextCursor !== null && typeof data.nextCursor !== "string")
+    ) {
+      throw new ApiFailure(
+        "服务返回的课程列表不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return { items: data.items as Course[], nextCursor: data.nextCursor };
   }
 
   private requireSession(): string {
@@ -517,6 +702,34 @@ export class HttpApiClient implements CoursePilotApiClient {
     return envelope.data as PlanningAnswer;
   }
 
+  async adviceChat(
+    body: AdviceChatRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<AdviceChatAnswer> {
+    if (!validateAdviceChatRequest?.(body)) {
+      throw new ApiFailure("对话请求不符合当前接口约定。", "invalid_response");
+    }
+    const { response, envelope } = await this.request("/api/v1/advice/chat", {
+      method: "POST",
+      sessionToken: this.requireSession(),
+      signal,
+      body,
+      idempotencyKey,
+      timeoutMs: PLANNING_TIMEOUT_MS,
+    });
+    if (!isSuccessEnvelope(envelope))
+      throw errorForResponse(response.status, envelope);
+    if (!validateAdviceChatAnswer?.(envelope.data)) {
+      throw new ApiFailure(
+        "服务返回的对话结果不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as AdviceChatAnswer;
+  }
+
   async searchSessionOfferings(
     previousPlanId: string,
     courseCode: string,
@@ -589,15 +802,123 @@ export class HttpApiClient implements CoursePilotApiClient {
     return envelope.data as SessionPlanReplacement;
   }
 
+  async removeSessionPlanCourse(
+    body: SessionPlanEditInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult> {
+    const { response, envelope } = await this.request(
+      "/api/v1/session-plans/remove-course",
+      {
+        method: "POST",
+        sessionToken: this.requireSession(),
+        signal,
+        body,
+        idempotencyKey,
+      },
+    );
+    if (!isSuccessEnvelope(envelope))
+      throw errorForResponse(response.status, envelope);
+    const data = envelope.data;
+    if (
+      !isObject(data) ||
+      data.previousPlanId !== body.previousPlanId ||
+      typeof data.planId !== "string" ||
+      !Array.isArray(data.items) ||
+      !everyValid(data.items, validatePlanItem) ||
+      !Array.isArray(data.hardConstraints) ||
+      !everyValid(data.hardConstraints, validateConstraint) ||
+      typeof data.empty !== "boolean" ||
+      data.empty !== (data.items.length === 0) ||
+      (data.verification !== null &&
+        !validatePlanValidation?.(data.verification))
+    ) {
+      throw new ApiFailure(
+        "服务返回的方案编辑结果不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return data as unknown as SessionPlanEditResult;
+  }
+
+  async saveSchoolProgress(
+    body: SchoolProgressImportRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult> {
+    const { response, envelope } = await this.request(
+      "/api/v1/school-progress",
+      {
+        method: "PUT",
+        sessionToken: this.requireSession(),
+        signal,
+        body,
+        idempotencyKey,
+      },
+    );
+    if (!isSuccessEnvelope(envelope))
+      throw errorForResponse(response.status, envelope);
+    if (
+      !isObject(envelope.data) ||
+      !isObject(envelope.data.receipt) ||
+      !isObject(envelope.data.academicRecord)
+    ) {
+      throw new ApiFailure(
+        "服务返回的学业进度保存结果不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as unknown as SchoolProgressImportResult;
+  }
+
+  async importSchoolProgress(
+    body: SchoolProgressImportRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult> {
+    return this.saveSchoolProgress(body, idempotencyKey, signal);
+  }
+
+  async getSchoolProgress(
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult | null> {
+    const { response, envelope } = await this.request(
+      "/api/v1/school-progress",
+      { method: "GET", sessionToken: this.requireSession(), signal },
+    );
+    if (!isSuccessEnvelope(envelope)) {
+      if (response.status === 404) return null;
+      throw errorForResponse(response.status, envelope);
+    }
+    if (
+      !isObject(envelope.data) ||
+      !isObject(envelope.data.receipt) ||
+      !isObject(envelope.data.snapshot) ||
+      !Array.isArray(envelope.data.snapshot.nodes) ||
+      !Array.isArray(envelope.data.snapshot.courses)
+    ) {
+      throw new ApiFailure(
+        "服务返回的学业进度不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return envelope.data as unknown as SchoolProgressImportResult;
+  }
+
   async listTeacherCourseOptions(
     curriculumSnapshotId: string,
     courseCode: string | null,
     signal?: AbortSignal,
+    query?: string | null,
   ): Promise<TeacherCourseOptionSearch> {
     const { response, envelope } = await this.request(
       withQuery("/api/v1/teacher-course-options", {
         curriculumSnapshotId,
         courseCode,
+        query: query?.trim() || null,
       }),
       { method: "GET", sessionToken: this.requireSession(), signal },
     );
@@ -627,8 +948,44 @@ export class HttpApiClient implements CoursePilotApiClient {
     teacherKey: string | null,
     signal?: AbortSignal,
   ): Promise<ReviewNoteSearch> {
+    const items: ReviewNote[] = [];
+    let cursor: string | null = null;
+    let status: BusinessStatus = "OK";
+    for (let page = 0; page < 200; page += 1) {
+      const { response, envelope } = await this.request(
+        withQuery("/api/v1/reviews/search", { courseCode, teacherKey, cursor }),
+        { method: "GET", sessionToken: this.requireSession(), signal },
+      );
+      if (!isSuccessEnvelope(envelope))
+        throw errorForResponse(response.status, envelope);
+      const data = envelope.data;
+      if (
+        !isObject(data) ||
+        !Array.isArray(data.items) ||
+        !everyValid(data.items, validateReviewNote) ||
+        (data.nextCursor != null && typeof data.nextCursor !== "string")
+      ) {
+        throw new ApiFailure(
+          "服务返回的评价证据不符合当前接口约定。",
+          "invalid_response",
+          response.status,
+        );
+      }
+      items.push(...(data.items as ReviewNote[]));
+      if (businessStatus(envelope) === "UNKNOWN") status = "UNKNOWN";
+      cursor = (data.nextCursor as string | null | undefined) ?? null;
+      if (cursor === null) return { items, status };
+    }
+    throw new ApiFailure(
+      "评价数量超过读取上限，无法统计完整结果。",
+      "invalid_response",
+      502,
+    );
+  }
+
+  async listCareerDirections(signal?: AbortSignal): Promise<CareerDirection[]> {
     const { response, envelope } = await this.request(
-      withQuery("/api/v1/reviews/search", { courseCode, teacherKey }),
+      "/api/v1/career-directions",
       { method: "GET", sessionToken: this.requireSession(), signal },
     );
     if (!isSuccessEnvelope(envelope)) {
@@ -638,18 +995,15 @@ export class HttpApiClient implements CoursePilotApiClient {
     if (
       !isObject(data) ||
       !Array.isArray(data.items) ||
-      !everyValid(data.items, validateReviewNote)
+      !everyValid(data.items, validateCareerDirection)
     ) {
       throw new ApiFailure(
-        "服务返回的评价证据不符合当前接口约定。",
+        "服务返回的职业方向列表不符合当前接口约定。",
         "invalid_response",
         response.status,
       );
     }
-    return {
-      items: data.items as ReviewNote[],
-      status: businessStatus(envelope),
-    };
+    return data.items as CareerDirection[];
   }
 
   async getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport> {
@@ -673,7 +1027,7 @@ export class HttpApiClient implements CoursePilotApiClient {
   private async request(
     path: string,
     options: {
-      method: "GET" | "POST";
+      method: "GET" | "POST" | "PUT";
       sessionToken?: string;
       signal?: AbortSignal;
       body?: unknown;
