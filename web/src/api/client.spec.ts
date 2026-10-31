@@ -350,6 +350,15 @@ describe("HTTP API client", () => {
     });
   });
 
+  it("uses the site's API proxy by default", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(response(201, envelope("OK", session)));
+    const client = createApiClient("http", { fetcher });
+    await client.createSession();
+    expect(fetcher.mock.calls[0][0]).toBe("/api/v1/sessions");
+  });
+
   it("gives the planning request a timeout longer than the 45s server budget", async () => {
     // C 的 Budget.deadline_ms 是 45000。页面若沿用默认 8 秒，真实规划会被自己掐断，
     // 而且症状看起来像后端太慢。这里断言规划请求用的是更长的超时。

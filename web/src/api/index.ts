@@ -19,7 +19,8 @@ export function createApiClient(
     }
     return new FixtureApiClient();
   }
-  const baseUrl = options.baseUrl?.trim() || "http://127.0.0.1:8000";
+  // Route through the website's /api proxy unless an explicit backend is configured.
+  const baseUrl = options.baseUrl?.trim() || "/";
   return new HttpApiClient(baseUrl, options.fetcher, options.timeoutMs, mode);
 }
 
