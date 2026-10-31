@@ -7,9 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
-import java.math.BigDecimal;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -47,37 +47,47 @@ class A1WorkbookImporterTest {
   @Test
   void validatesCourseCodePatternAndPersistenceLength() throws Exception {
     for (String code : new String[] {"CS 101", "中文101"}) {
-      var draft = new A1WorkbookImporter().prepare(
-          workbookWithCourse(code, "Valid name", "核心课程"), "cs-general");
+      var draft =
+          new A1WorkbookImporter()
+              .prepare(workbookWithCourse(code, "Valid name", "核心课程"), "cs-general");
       assertFalse(draft.publishable());
-      assertTrue(draft.issues().stream()
-          .anyMatch(issue -> issue.code() == ImportModels.IssueCode.INVALID_COURSE_CODE));
+      assertTrue(
+          draft.issues().stream()
+              .anyMatch(issue -> issue.code() == ImportModels.IssueCode.INVALID_COURSE_CODE));
     }
 
-    var tooLong = new A1WorkbookImporter().prepare(
-        workbookWithCourse("A".repeat(33), "Valid name", "核心课程"), "cs-general");
+    var tooLong =
+        new A1WorkbookImporter()
+            .prepare(workbookWithCourse("A".repeat(33), "Valid name", "核心课程"), "cs-general");
     assertFalse(tooLong.publishable());
-    assertTrue(tooLong.issues().stream()
-        .anyMatch(issue -> issue.code() == ImportModels.IssueCode.COURSE_CODE_TOO_LONG));
+    assertTrue(
+        tooLong.issues().stream()
+            .anyMatch(issue -> issue.code() == ImportModels.IssueCode.COURSE_CODE_TOO_LONG));
   }
 
   @Test
   void courseNameAndCategoryRespectDtoAndMembershipBoundaries() throws Exception {
-    var maximum = new A1WorkbookImporter().prepare(
-        workbookWithCourse("A".repeat(32), "N".repeat(200), "C".repeat(100)), "cs-general");
+    var maximum =
+        new A1WorkbookImporter()
+            .prepare(
+                workbookWithCourse("A".repeat(32), "N".repeat(200), "C".repeat(100)), "cs-general");
     assertTrue(maximum.publishable(), maximum.issues().toString());
 
-    var longName = new A1WorkbookImporter().prepare(
-        workbookWithCourse("COURSE1", "N".repeat(201), "核心课程"), "cs-general");
+    var longName =
+        new A1WorkbookImporter()
+            .prepare(workbookWithCourse("COURSE1", "N".repeat(201), "核心课程"), "cs-general");
     assertFalse(longName.publishable());
-    assertTrue(longName.issues().stream()
-        .anyMatch(issue -> issue.code() == ImportModels.IssueCode.INVALID_ROW));
+    assertTrue(
+        longName.issues().stream()
+            .anyMatch(issue -> issue.code() == ImportModels.IssueCode.INVALID_ROW));
 
-    var longCategory = new A1WorkbookImporter().prepare(
-        workbookWithCourse("COURSE1", "Valid name", "C".repeat(101)), "cs-general");
+    var longCategory =
+        new A1WorkbookImporter()
+            .prepare(workbookWithCourse("COURSE1", "Valid name", "C".repeat(101)), "cs-general");
     assertFalse(longCategory.publishable());
-    assertTrue(longCategory.issues().stream()
-        .anyMatch(issue -> issue.code() == ImportModels.IssueCode.INVALID_ROW));
+    assertTrue(
+        longCategory.issues().stream()
+            .anyMatch(issue -> issue.code() == ImportModels.IssueCode.INVALID_ROW));
   }
 
   @Test
@@ -96,13 +106,16 @@ class A1WorkbookImporterTest {
     assertEquals("raw note", rule.originalNote());
     assertEquals("原表注释/规则", rule.sourceType());
     // 发布路径仍然可用：未建模规则不再被当作阻断。
-    var published = new A1WorkbookImporter().publish(draft, ignored -> new ImportModels.PublishResult("SNAP", false));
+    var published =
+        new A1WorkbookImporter()
+            .publish(draft, ignored -> new ImportModels.PublishResult("SNAP", false));
     assertEquals("SNAP", published.snapshotId());
   }
 
   @Test
   void excludedSourceRowIsKeptWithDispositionExcluded() throws Exception {
-    var draft = new A1WorkbookImporter().prepare(workbookWithRule("原表课程行", "Java EE开发技术"), "cs-general");
+    var draft =
+        new A1WorkbookImporter().prepare(workbookWithRule("原表课程行", "Java EE开发技术"), "cs-general");
 
     assertTrue(draft.publishable(), draft.blockingIssues().toString());
     assertEquals(1, draft.unmodeledRules().size());
@@ -119,7 +132,8 @@ class A1WorkbookImporterTest {
     var draft =
         new A1WorkbookImporter()
             .prepare(
-                detailWorkbook(new String[][] {{"微积分(1-3)", "01014125~127", "核心课程", "16", "第一学年", "课程明细"}}),
+                detailWorkbook(
+                    new String[][] {{"微积分(1-3)", "01014125~127", "核心课程", "16", "第一学年", "课程明细"}}),
                 "cs-general");
 
     assertEquals(
@@ -135,7 +149,8 @@ class A1WorkbookImporterTest {
     var draft =
         new A1WorkbookImporter()
             .prepare(
-                detailWorkbook(new String[][] {{"大学物理(1-2)", "01034117~118", "核心课程", "9", "第一学年", "课程明细"}}),
+                detailWorkbook(
+                    new String[][] {{"大学物理(1-2)", "01034117~118", "核心课程", "9", "第一学年", "课程明细"}}),
                 "cs-general");
 
     assertFalse(draft.publishable());
@@ -149,7 +164,8 @@ class A1WorkbookImporterTest {
     var draft =
         new A1WorkbookImporter()
             .prepare(
-                detailWorkbook(new String[][] {{"未知连号课", "01014100~101", "核心课程", "4", "第一学年", "课程明细"}}),
+                detailWorkbook(
+                    new String[][] {{"未知连号课", "01014100~101", "核心课程", "4", "第一学年", "课程明细"}}),
                 "cs-general");
 
     assertTrue(draft.entries().stream().allMatch(e -> e.credits() == null));
@@ -264,7 +280,8 @@ class A1WorkbookImporterTest {
     var draft =
         new A1WorkbookImporter()
             .prepare(
-                detailWorkbook(new String[][] {{"微积分(1-3)", "01014125~127", "核心课程", "16", "第一学年", "课程明细"}}),
+                detailWorkbook(
+                    new String[][] {{"微积分(1-3)", "01014125~127", "核心课程", "16", "第一学年", "课程明细"}}),
                 "cs-general");
 
     assertEquals(
@@ -288,8 +305,7 @@ class A1WorkbookImporterTest {
   @Test
   void rejectsMalformedRangeSpans() {
     assertEquals(List.of("08305140", "08305141"), A1WorkbookImporter.expandRange("08305140~141"));
-    assertEquals(
-        List.of("0830A030", "0830A031"), A1WorkbookImporter.expandRange("0830A030~031"));
+    assertEquals(List.of("0830A030", "0830A031"), A1WorkbookImporter.expandRange("0830A030~031"));
     assertNull(A1WorkbookImporter.expandRange("01014127~125"));
     assertNull(A1WorkbookImporter.expandRange("01014125~1270"));
     assertNull(A1WorkbookImporter.expandRange("01014100~199"));
@@ -301,11 +317,12 @@ class A1WorkbookImporterTest {
     var draft =
         new A1WorkbookImporter()
             .prepare(
-                detailWorkbook(new String[][] {
-                  {"体育1", "008532xx", "公共基础课", "1", "第一学年 第1学期", "课程明细"},
-                  {"体育2", "008532xx", "公共基础课", "1", "第一学年 第2学期", "课程明细"},
-                  {"体育3", "008532xx", "公共基础课", "1", "第一学年 第3学期", "课程明细"}
-                }),
+                detailWorkbook(
+                    new String[][] {
+                      {"体育1", "008532xx", "公共基础课", "1", "第一学年 第1学期", "课程明细"},
+                      {"体育2", "008532xx", "公共基础课", "1", "第一学年 第2学期", "课程明细"},
+                      {"体育3", "008532xx", "公共基础课", "1", "第一学年 第3学期", "课程明细"}
+                    }),
                 "cs-general");
 
     assertEquals(
@@ -325,10 +342,11 @@ class A1WorkbookImporterTest {
     var draft =
         new A1WorkbookImporter()
             .prepare(
-                detailWorkbook(new String[][] {
-                  {"体育1", "008532xx", "公共基础课", "1", "第一学年 第1学期", "课程明细"},
-                  {"体育1", "008532xx", "公共基础课", "1", "第一学年 第1学期", "课程明细"}
-                }),
+                detailWorkbook(
+                    new String[][] {
+                      {"体育1", "008532xx", "公共基础课", "1", "第一学年 第1学期", "课程明细"},
+                      {"体育1", "008532xx", "公共基础课", "1", "第一学年 第1学期", "课程明细"}
+                    }),
                 "cs-general");
 
     assertFalse(draft.publishable());
@@ -342,9 +360,8 @@ class A1WorkbookImporterTest {
     var badCredits =
         new A1WorkbookImporter()
             .prepare(
-                detailWorkbook(new String[][] {
-                  {"体育1", "008532xx", "公共基础课", "一", "第一学年 第1学期", "课程明细"}
-                }),
+                detailWorkbook(
+                    new String[][] {{"体育1", "008532xx", "公共基础课", "一", "第一学年 第1学期", "课程明细"}}),
                 "cs-general");
     assertFalse(badCredits.publishable());
     assertTrue(
@@ -354,9 +371,7 @@ class A1WorkbookImporterTest {
     var missingCategory =
         new A1WorkbookImporter()
             .prepare(
-                detailWorkbook(new String[][] {
-                  {"体育2", "008532xx", "", "1", "第一学年 第2学期", "课程明细"}
-                }),
+                detailWorkbook(new String[][] {{"体育2", "008532xx", "", "1", "第一学年 第2学期", "课程明细"}}),
                 "cs-general");
     assertFalse(missingCategory.publishable());
     assertTrue(
@@ -369,10 +384,11 @@ class A1WorkbookImporterTest {
     var draft =
         new A1WorkbookImporter()
             .prepare(
-                detailWorkbook(new String[][] {
-                  {"通识课课程组（具体选修课见附表）", "", "通识课", "12", "", "课程组/要求行（非单门课程）"},
-                  {"形势与政策", "16583109", "公共基础课", "1", "", "课程明细"}
-                }),
+                detailWorkbook(
+                    new String[][] {
+                      {"通识课课程组（具体选修课见附表）", "", "通识课", "12", "", "课程组/要求行（非单门课程）"},
+                      {"形势与政策", "16583109", "公共基础课", "1", "", "课程明细"}
+                    }),
                 "cs-general");
 
     assertEquals(1, draft.entries().size());
@@ -383,10 +399,7 @@ class A1WorkbookImporterTest {
             .anyMatch(i -> i.code() == ImportModels.IssueCode.GROUP_REQUIREMENT_ROW));
   }
 
-  /**
-   * 合成一个只含一段课程明细的工作簿（计科学页签）。每个课程行为
-   * {名称, 课程号, 类别, 学分文本, 建议学期, 记录性质}。
-   */
+  /** 合成一个只含一段课程明细的工作簿（计科学页签）。每个课程行为 {名称, 课程号, 类别, 学分文本, 建议学期, 记录性质}。 */
   private Path detailWorkbook(String[][] courseRows) throws Exception {
     Path path = tempDir.resolve("detail-" + System.nanoTime() + ".xlsx");
     try (XSSFWorkbook workbook = new XSSFWorkbook()) {
@@ -476,7 +489,8 @@ class A1WorkbookImporterTest {
   private Path workbookWithCourse(String code, String name, String category) throws Exception {
     Path original = workbook(false);
     Path modified = tempDir.resolve("course-properties.xlsx");
-    try (var input = Files.newInputStream(original); XSSFWorkbook workbook = new XSSFWorkbook(input)) {
+    try (var input = Files.newInputStream(original);
+        XSSFWorkbook workbook = new XSSFWorkbook(input)) {
       var course = workbook.getSheet("计科学").getRow(17);
       course.getCell(1).setCellValue(name);
       course.getCell(2).setCellValue(code);

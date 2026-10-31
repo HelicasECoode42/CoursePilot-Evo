@@ -17,8 +17,8 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,13 +44,14 @@ public final class A1WorkbookImporter {
           "cybersecurity", "网安全",
           "ai-engineering-direct", "人智能直招",
           "ai-engineering", "人智能");
+
   /** contracts/schemas/domain.schema.json Course.courseCode pattern. */
   private static final Pattern COURSE_CODE = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$");
+
   /**
-   * 连号课程组的逐门学分拆分。来源：用户 2026-10-29 确认（工作簿只给整组学分）。
-   * 键是工作簿原文课程号，值是按连号顺序各门的学分，总和必须等于工作簿整组学分。
-   * 注意：这不是「总分÷门数」的推导规则，微积分(1-3) 按 6+6+4 拆是用户明确纠正的例外。
-   * 表外的连号课程仍记为学分未知（null），并记 CREDITS_UNSPLIT，不要自行推算。
+   * 连号课程组的逐门学分拆分。来源：用户 2026-10-29 确认（工作簿只给整组学分）。 键是工作簿原文课程号，值是按连号顺序各门的学分，总和必须等于工作簿整组学分。
+   * 注意：这不是「总分÷门数」的推导规则，微积分(1-3) 按 6+6+4 拆是用户明确纠正的例外。 表外的连号课程仍记为学分未知（null），并记
+   * CREDITS_UNSPLIT，不要自行推算。
    */
   static final Map<String, List<BigDecimal>> CONFIRMED_RANGE_CREDITS =
       Map.ofEntries(
@@ -178,7 +179,7 @@ public final class A1WorkbookImporter {
         statedTotal = credits;
       } else {
         categoryTotal = categoryTotal.add(credits);
-            requirements.add(
+        requirements.add(
             new CategoryRequirement(
                 category,
                 credits,
@@ -244,7 +245,8 @@ public final class A1WorkbookImporter {
         if (confirmed == null) {
           issues.add(new ImportIssue(CREDITS_UNSPLIT, track, r + 1, 5));
         } else if (confirmed.size() != codes.size()
-            || confirmed.stream().reduce(BigDecimal.ZERO, BigDecimal::add).compareTo(credits) != 0) {
+            || confirmed.stream().reduce(BigDecimal.ZERO, BigDecimal::add).compareTo(credits)
+                != 0) {
           // 已确认的拆分与工作簿整组学分或门数对不上，视为结构冲突，阻断。
           issues.add(new ImportIssue(INVALID_CREDITS, track, r + 1, 5));
           continue;
@@ -312,9 +314,7 @@ public final class A1WorkbookImporter {
               text(row, 3, formatter),
               text(row, 4, formatter),
               sourceType,
-              excluded
-                  ? UnmodeledRule.Disposition.EXCLUDED
-                  : UnmodeledRule.Disposition.UNMODELED));
+              excluded ? UnmodeledRule.Disposition.EXCLUDED : UnmodeledRule.Disposition.UNMODELED));
       if (!excluded) {
         issues.add(new ImportIssue(UNKNOWN_RULE, track, r + 1, 3));
       }
@@ -372,10 +372,7 @@ public final class A1WorkbookImporter {
     return -1;
   }
 
-  /**
-   * memberIndex 区分同一工作簿行展开出来的多门课：第 0 门保持原 refId，之后追加 :mN，
-   * 保证 SourceReference 主键唯一。
-   */
+  /** memberIndex 区分同一工作簿行展开出来的多门课：第 0 门保持原 refId，之后追加 :mN， 保证 SourceReference 主键唯一。 */
   private SourceRef source(
       String hash,
       String trackId,
@@ -408,8 +405,7 @@ public final class A1WorkbookImporter {
   }
 
   /**
-   * 把 "01014125~127" 展开为 01014125、01014126、01014127。
-   * 写法：~ 左边是完整课程号，右边是末尾同宽的数字，表示连号的终点。
+   * 把 "01014125~127" 展开为 01014125、01014126、01014127。 写法：~ 左边是完整课程号，右边是末尾同宽的数字，表示连号的终点。
    * 不是合法连号（右边过宽、终点小于起点、跨度超过 10 门）时返回 null。
    */
   static List<String> expandRange(String raw) {
@@ -445,7 +441,8 @@ public final class A1WorkbookImporter {
     if (value == null || value.isBlank()) return null;
     try {
       BigDecimal parsed = new BigDecimal(value.trim());
-      return parsed.scale() <= 2 && parsed.signum() >= 0
+      return parsed.scale() <= 2
+              && parsed.signum() >= 0
               && parsed.compareTo(new BigDecimal("1000")) <= 0
           ? parsed
           : null;
