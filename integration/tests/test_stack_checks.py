@@ -9,7 +9,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from check_stack import Chain, classify_planning, step_audit, step_planning, step_record
+from check_stack import (
+    Chain,
+    classify_chain_planning,
+    classify_planning,
+    configure_controlled_model_request,
+    step_audit,
+    step_planning,
+    step_record,
+    run_chain,
+)
 from smoke_stack import case_bad_input, case_java_unwired, case_no_auth, case_no_time_claim
 from stack_checks import (
     BLOCKED,
@@ -166,6 +175,31 @@ def test_fake_model_recommendation_is_not_reported_as_real_pass():
     assert classify_planning(answer)[0] == DEGRADED
 
 
+def test_controlled_model_requires_simulation_and_explicit_pinned_course(monkeypatch):
+    monkeypatch.setenv("CP_TEST_PINNED_COURSE_CODE", "CS102")
+    chain = make_chain(FakeTransport({}), java_ready=True)
+    chain.controlled_model = True
+    body = load_contract_example("planning-request.json")
+    configure_controlled_model_request(chain, body)
+    assert body["mode"] == "SIMULATION"
+    pin = body["intent"]["hardConstraints"][-1]
+    assert pin["kind"] == "PIN_COURSE" and pin["courseCode"] == "CS102"
+
+    answer = planning_answer(
+        "RECOMMENDATIONS",
+        recommendations=[{"planId": "p", "items": [{"courseCode": "CS102"}], "verification": {}}],
+    )
+    answer["unknowns"] = [{"code": "FAKE_MODEL"}]
+    assert classify_planning(answer)[0] == DEGRADED
+    assert classify_chain_planning(chain, answer)[0] == PASS
+    answer["recommendations"][0]["items"] = [{"courseCode": "CS101"}]
+    assert classify_chain_planning(chain, answer)[0] == FAIL
+    clarify = planning_answer(
+        "CLARIFY", clarification={"questionId": "q1", "text": "请说明", "choices": [], "allowFreeText": True}
+    )
+    assert classify_chain_planning(chain, clarify)[0] == DEGRADED
+
+
 def test_chain_forwards_actual_record_and_test_snapshot():
     rec = {"items": [{"courseCode": "CS101"}], "verification": {"verdict": "UNKNOWN"}}
     transport = FakeTransport(
@@ -200,6 +234,45 @@ def test_record_step_passes_when_java_returns_record():
     chain = make_chain(transport, java_ready=True)
     assert step_record(chain).verdict == PASS
     assert chain.record_id == "record-9"
+
+
+def test_chain_stops_after_record_is_degraded_and_never_uses_example_id(monkeypatch):
+    import check_stack
+
+    transport = FakeTransport(
+        {
+            "sessions": Response(
+                201,
+                envelope(
+                    data={
+                        "sessionId": "session-1",
+                        "sessionToken": "token-1",
+                        "expiresAt": "2099-01-01T00:00:00Z",
+                    }
+                ),
+            ),
+            "academic-records": Response(
+                503,
+                envelope("ERROR", issues=[{"code": "TOOL_UNAVAILABLE", "message": "Java unavailable"}]),
+            ),
+        }
+    )
+    monkeypatch.setattr(check_stack, "resolve", lambda _: ({"CP_API_BASE_URL": API}, {}, None))
+    monkeypatch.setattr(check_stack, "errors", lambda _: [])
+    monkeypatch.setattr(check_stack, "validate", lambda _: [])
+    monkeypatch.setattr(check_stack, "readiness", lambda _: {"api": "READY", "java": "MISSING"})
+    results, _, _ = run_chain(plan_only=False, transport=transport)
+    assert [result.step for result in results] == ["sessions", "record"]
+    assert results[-1].verdict == DEGRADED
+    assert [call[0] for call in transport.calls] == ["POST", "POST"]
+
+
+def test_audit_and_planning_block_without_a_session_record():
+    transport = FakeTransport({})
+    chain = make_chain(transport, java_ready=True)
+    assert step_audit(chain).verdict == BLOCKED
+    assert step_planning(chain).verdict == BLOCKED
+    assert transport.calls == []
 
 
 def test_no_time_claim_fails_on_fabricated_timetable():
@@ -366,6 +439,7 @@ def test_replan_without_a_previous_plan_checks_the_ownership_rule_instead_of_fai
         {"planning": Response(404, envelope("NOT_FOUND", issues=[{"code": "NOT_FOUND", "message": "不在会话"}]))}
     )
     chain = make_chain(transport, java_ready=True)
+    chain.record_id = "session:mine"
     chain.answer = planning_answer("CLARIFY")  # 没有 recommendations
     result = step_replan(chain)
     assert result.verdict == DEGRADED
@@ -375,6 +449,7 @@ def test_replan_without_a_previous_plan_checks_the_ownership_rule_instead_of_fai
     # 若服务反而放行了别人的方案，必须判失败——这条检查不能失去牙齿。
     lax = FakeTransport({"planning": Response(200, envelope(data=planning_answer("RECOMMENDATIONS")))})
     lax_chain = make_chain(lax, java_ready=True)
+    lax_chain.record_id = "session:mine"
     lax_chain.answer = planning_answer("CLARIFY")
     assert step_replan(lax_chain).verdict == FAIL
 
@@ -397,6 +472,7 @@ def test_replan_uses_the_plan_id_from_the_previous_step():
         }
     )
     chain = make_chain(transport, java_ready=True)
+    chain.record_id = "session:mine"
     chain.answer = planning_answer("RECOMMENDATIONS", [rec])
     step_replan(chain)
     assert transport.calls[0][3]["previousPlanId"] == "plan:real-one"

@@ -52,6 +52,9 @@ jobs:
       CP_CORS_ORIGINS: http://127.0.0.1:5173
       CP_MODEL_BASE_URL: ""
       CP_MODEL_API_KEY: ""
+      CP_TEST_CURRICULUM_SNAPSHOT_ID: PLAN_CS_2025
+      CP_TEST_PINNED_COURSE_CODE: CS102
+      VITE_COURSEPILOT_MODE: simulation
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -89,20 +92,10 @@ jobs:
           python -m pip install playwright
           python -m playwright install --with-deps chromium
 
-      - name: 全链路检查（配置校验 → 组合启动 → 主链路 → 异常覆盖 → 浏览器）
+      - name: 受控模型回归（真实 Java/API + 隔离浏览器响应场景）
         id: stack
         continue-on-error: true
-        run: python integration/check_all.py --driver playwright
-
-      - name: 浏览器检查（受控上游：页面能否进入引导第一问）
-        id: web-stub
-        continue-on-error: true
-        run: |
-          python integration/start_stack.py --only web --keep || true
-          code=0
-          python integration/check_web.py --driver playwright --with-stub || code=$?
-          python integration/start_stack.py --stop || true
-          exit $code
+        run: python integration/check_all.py --driver playwright --web-with-stub --controlled-model
 
       # 本仓库是公开仓库：Actions 工件对任何人可下载。所以这里只留排查必需的内容，
       # 并排除会外泄本机信息的文件；保留期也收短。真实学生数据不得在 CI 里跑，
@@ -123,7 +116,7 @@ jobs:
         if: always()
         run: |
           failed=""
-          for pair in "浏览器安装:${{ steps.browser.outcome }}" "全链路检查:${{ steps.stack.outcome }}" "受控上游浏览器:${{ steps.web-stub.outcome }}"; do
+          for pair in "浏览器安装:${{ steps.browser.outcome }}" "全链路检查:${{ steps.stack.outcome }}"; do
             name="${pair%%:*}"
             outcome="${pair#*:}"
             if [ "$outcome" != "success" ]; then
@@ -138,9 +131,7 @@ jobs:
           fi
           echo "全链路检查通过。"
 
-      - name: 收尾：兜底停止可能残留的服务（check_all 正常跑完会自己 --stop）
+      - name: 收尾：兜底停止可能残留的服务
         if: always()
         run: |
-          python integration/start_stack.py --stop || true
-          pkill -f "uvicorn agent_runtime" || true
-          pkill -f "vite" || true
+          python integration/start_stack.py --stop

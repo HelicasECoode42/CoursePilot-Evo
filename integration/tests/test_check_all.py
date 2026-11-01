@@ -20,7 +20,14 @@ HERE = Path(__file__).resolve().parents[1]
 
 
 def ns(**over) -> argparse.Namespace:
-    base = {"plan": False, "keep": False, "driver": "auto", "stub_url": None}
+    base = {
+        "plan": False,
+        "keep": False,
+        "driver": "auto",
+        "stub_url": None,
+        "web_with_stub": False,
+        "controlled_model": False,
+    }
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -39,6 +46,59 @@ def test_real_run_keeps_services_and_passes_driver():
     assert web[-2:] == ["--driver", "playwright"]
     with_stub = build_argv("check_web.py", (), ns(stub_url="http://127.0.0.1:8099"))
     assert with_stub[-2:] == ["--stub-url", "http://127.0.0.1:8099"]
+
+
+def test_browser_stub_mode_is_explicitly_forwarded():
+    web = build_argv("check_web.py", (), ns(driver="playwright", web_with_stub=True))
+    assert web[-3:] == ["--driver", "playwright", "--with-stub"]
+
+
+def test_controlled_model_mode_is_only_forwarded_to_model_checks():
+    args = ns(controlled_model=True)
+    assert build_argv("check_stack.py", (), args)[-1] == "--controlled-model"
+    assert build_argv("smoke_stack.py", (), args)[-1] == "--controlled-model"
+    assert "--controlled-model" not in build_argv("check_web.py", (), args)
+
+
+def test_smoke_stops_after_record_failure_instead_of_using_example_id(monkeypatch):
+    import smoke_stack
+    from stack_checks import FAIL, PASS, StepResult
+
+    monkeypatch.setattr(smoke_stack, "resolve", lambda _: ({"CP_API_BASE_URL": "http://127.0.0.1:8000"}, {}, None))
+    monkeypatch.setattr(smoke_stack, "errors", lambda _: [])
+    monkeypatch.setattr(smoke_stack, "validate", lambda _: [])
+    monkeypatch.setattr(smoke_stack, "readiness", lambda _: {"api": "READY", "java": "READY"})
+    monkeypatch.setattr(
+        smoke_stack,
+        "step_sessions",
+        lambda chain: StepResult("sessions", PASS, "s1", "201", "HTTP 201"),
+    )
+    monkeypatch.setattr(
+        smoke_stack,
+        "step_record",
+        lambda chain: StepResult("record", FAIL, "r1", "201", "HTTP 503"),
+    )
+    results, _, _ = smoke_stack.run_smoke(plan_only=False, transport=object())
+    assert [result.step for result in results] == ["record"]
+    assert results[0].verdict == FAIL
+
+
+def test_entry_does_not_run_dependent_checks_after_stack_start_failure(monkeypatch, capsys):
+    import check_all
+
+    called = []
+
+    def fake_run(argv, capture):
+        script = Path(argv[1]).name
+        called.append(script)
+        return (2 if script == "start_stack.py" else 0), ""
+
+    monkeypatch.setattr(check_all, "run_step", fake_run)
+    assert check_all.main(["--json", "--keep"]) == 1
+    output = capsys.readouterr().out
+    payload = json.loads(output[output.index("{\n"):])
+    assert called == ["stack_config.py", "start_stack.py"]
+    assert payload["failed"] == ["组合启动", "主链路检查", "异常与未知覆盖", "受控假响应", "浏览器检查"]
 
 
 def test_entry_scripts_exist_and_are_runnable():

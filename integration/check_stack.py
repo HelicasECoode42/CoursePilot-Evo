@@ -55,6 +55,7 @@ class Chain:
     values: dict[str, str]
     transport: Any
     java_ready: bool
+    controlled_model: bool = False
     counter: int = 0
     token: str = ""
     record_id: str = ""
@@ -89,7 +90,7 @@ class Chain:
         return head
 
 
-def classify_planning(payload: Any) -> tuple[str, str]:
+def classify_planning(payload: Any, controlled_model: bool = False) -> tuple[str, str]:
     """按 PlanningAnswer 的契约判一次规划响应：返回 (判定, 说明)。"""
     if not isinstance(payload, dict):
         return FAIL, "data 不是对象，拿不到 PlanningAnswer"
@@ -116,9 +117,48 @@ def classify_planning(payload: Any) -> tuple[str, str]:
             if not isinstance(item, dict) or "verification" not in item or "items" not in item:
                 return FAIL, "推荐缺少 items/verification 字段"
         if any(isinstance(issue, dict) and issue.get("code") == "FAKE_MODEL" for issue in payload["unknowns"]):
+            if controlled_model:
+                return PASS, "受控模型返回结构有效的推荐；此结果只证明接线与规则回归，不代表真实模型质量"
             return DEGRADED, "规划链路返回推荐，但使用假模型，不能作为真实模型验收"
         return PASS, f"给出 {len(recommendations)} 条带核验的推荐"
     return FAIL, f"decision 取值不在契约枚举内：{decision!r}"
+
+
+def configure_controlled_model_request(chain: Chain, body: dict[str, Any]) -> None:
+    """CI 的受控回归请求使用合成学业数据与显式课程选择。"""
+    if not chain.controlled_model:
+        return
+    course_code = os.environ.get("CP_TEST_PINNED_COURSE_CODE", "CS102")
+    body["mode"] = "SIMULATION"
+    body["intent"]["hardConstraints"].append(
+        {
+            "kind": "PIN_COURSE",
+            "courseCode": course_code,
+            "teacherKey": None,
+            "dayOfWeek": None,
+            "section": None,
+            "value": None,
+            "sourceText": "CI 受控回归显式选择课程",
+        }
+    )
+
+
+def classify_chain_planning(chain: Chain, payload: Any) -> tuple[str, str]:
+    verdict, detail = classify_planning(payload, controlled_model=chain.controlled_model)
+    if verdict != PASS or not chain.controlled_model:
+        return verdict, detail
+    course_code = os.environ.get("CP_TEST_PINNED_COURSE_CODE", "CS102")
+    recommendations = payload.get("recommendations", []) if isinstance(payload, dict) else []
+    included = {
+        item.get("courseCode")
+        for recommendation in recommendations
+        if isinstance(recommendation, dict)
+        for item in recommendation.get("items", [])
+        if isinstance(item, dict)
+    }
+    if course_code not in included:
+        return FAIL, f"受控模型回归未返回明确选择的课程 {course_code}"
+    return verdict, detail + f"；已包含明确选择的课程 {course_code}"
 
 
 def step_sessions(chain: Chain) -> StepResult:
@@ -165,19 +205,37 @@ def step_record(chain: Chain) -> StepResult:
         data = response.payload.get("data")
         if isinstance(data, dict) and isinstance(data.get("academicRecordId"), str):
             chain.record_id = data["academicRecordId"]
+        if not chain.record_id:
+            return StepResult(
+                step,
+                FAIL,
+                request_id,
+                expect,
+                response.describe(),
+                detail="201 响应没有有效 academicRecordId，不能继续依赖检查",
+                repro=result.repro,
+            )
     return result
 
 
 def step_audit(chain: Chain) -> StepResult:
     step = "audit"
+    if not chain.record_id:
+        return StepResult(
+            step,
+            BLOCKED,
+            "-",
+            "依赖本会话内已成功写入的学业记录",
+            "没有有效 academicRecordId",
+            detail="记录写入未成功；不使用契约示例 ID 发起依赖请求",
+        )
     request_id = chain.next_request_id(step)
     url = chain.api + "/api/v1/requirements/audit"
     headers = chain.headers(request_id, auth=True)
-    example = load_contract_example("academic-record.json")
     body = {
         "schemaVersion": "1.0",
         "curriculumSnapshotId": chain.curriculum_id,
-        "academicRecordId": chain.record_id or example["academicRecordId"],
+        "academicRecordId": chain.record_id,
     }
     expect = "200 + Envelope(OK, AuditResult)；Java 未接线时必须是 503 envelope=ERROR issue=TOOL_UNAVAILABLE"
     attempts = [Attempt("200 学业核对完成", 200, "OK")]
@@ -201,16 +259,28 @@ def _planning_call(chain: Chain, step: str, body: dict[str, Any], idempotency: s
     )
     if result.verdict == FAIL:
         return result, response
-    verdict, detail = classify_planning(response.payload.get("data") if isinstance(response.payload, dict) else None)
+    verdict, detail = classify_chain_planning(
+        chain, response.payload.get("data") if isinstance(response.payload, dict) else None
+    )
     return StepResult(
         step, verdict, request_id, expect, response.describe(), detail=detail, repro=result.repro
     ), response
 
 
 def step_planning(chain: Chain) -> StepResult:
+    if not chain.record_id:
+        return StepResult(
+            "planning",
+            BLOCKED,
+            "-",
+            "依赖本会话内已成功写入的学业记录",
+            "没有有效 academicRecordId",
+            detail="记录写入未成功；不使用契约示例 ID 发起依赖请求",
+        )
     body = load_contract_example("planning-request.json")
     body["curriculumSnapshotId"] = chain.curriculum_id
-    body["academicRecordId"] = chain.record_id or body["academicRecordId"]
+    body["academicRecordId"] = chain.record_id
+    configure_controlled_model_request(chain, body)
     result, response = _planning_call(chain, "planning", body, chain.next_request_id("planning-idem"))
     if isinstance(response.payload, dict) and isinstance(response.payload.get("data"), dict):
         chain.answer = response.payload["data"]
@@ -221,7 +291,8 @@ def _replan_without_a_previous_plan(chain: Chain, step: str, request_id: str, ur
     """没有可改的方案时，验证「别人的 planId 必须被拒」并判 DEGRADED。"""
     body = load_contract_example("planning-request.json")
     body["curriculumSnapshotId"] = chain.curriculum_id
-    body["academicRecordId"] = chain.record_id or body["academicRecordId"]
+    body["academicRecordId"] = chain.record_id
+    configure_controlled_model_request(chain, body)
     body["previousPlanId"] = "plan:not-in-this-session"
     headers = chain.headers(request_id, auth=True, idempotency=request_id)
     expect = "上一步没有产出方案：不属于本会话的 previousPlanId 必须被 404 拒绝"
@@ -251,11 +322,21 @@ def _replan_without_a_previous_plan(chain: Chain, step: str, request_id: str, ur
 def step_replan(chain: Chain) -> StepResult:
     """改条件重算一次，并验证同一次请求重复提交不会被跑第二遍（幂等）。"""
     step = "replan"
+    if not chain.record_id:
+        return StepResult(
+            step,
+            BLOCKED,
+            "-",
+            "依赖本会话内已成功写入的学业记录",
+            "没有有效 academicRecordId",
+            detail="记录写入未成功；不使用契约示例 ID 发起依赖请求",
+        )
     request_id = chain.next_request_id(step)
     url = chain.api + "/api/v1/planning"
     body = load_contract_example("planning-request.json")
     body["curriculumSnapshotId"] = chain.curriculum_id
-    body["academicRecordId"] = chain.record_id or body["academicRecordId"]
+    body["academicRecordId"] = chain.record_id
+    configure_controlled_model_request(chain, body)
     recommendations = chain.answer.get("recommendations") or []
     previous_plan_id = None
     if recommendations and isinstance(recommendations[0], dict):
@@ -276,7 +357,9 @@ def step_replan(chain: Chain) -> StepResult:
     )
     if result.verdict == FAIL:
         return result
-    verdict, detail = classify_planning(first.payload.get("data") if isinstance(first.payload, dict) else None)
+    verdict, detail = classify_chain_planning(
+        chain, first.payload.get("data") if isinstance(first.payload, dict) else None
+    )
     second = chain.transport.request("POST", url, headers, body)
     if second.status != first.status or second.payload != first.payload:
         return StepResult(
@@ -314,7 +397,9 @@ def readiness(plan_only: bool) -> dict[str, str]:
     return {svc["name"]: judge(svc, values, probe=not plan_only)["status"] for svc in SERVICES}
 
 
-def run_chain(plan_only: bool, transport: Any = None) -> tuple[list[StepResult], dict[str, str], str | None]:
+def run_chain(
+    plan_only: bool, transport: Any = None, controlled_model: bool = False
+) -> tuple[list[StepResult], dict[str, str], str | None]:
     values, _sources, _used_file = resolve(None)
     values["CP_TEST_CURRICULUM_SNAPSHOT_ID"] = os.environ.get("CP_TEST_CURRICULUM_SNAPSHOT_ID", "")
     problems = errors(validate(values))
@@ -337,11 +422,13 @@ def run_chain(plan_only: bool, transport: Any = None) -> tuple[list[StepResult],
             for step in STEP_ORDER
         ]
         return planned, states, None
-    chain = Chain(values, transport or UrllibTransport(), java_ready)
+    chain = Chain(values, transport or UrllibTransport(), java_ready, controlled_model=controlled_model)
     results: list[StepResult] = []
     for step in STEP_ORDER:
         result = RUNNERS[step](chain)
         results.append(result)
+        if step == "record" and (result.verdict != PASS or not chain.record_id):
+            break
         if result.verdict in (FAIL, BLOCKED):
             break
     return results, states, None
@@ -351,9 +438,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="D2 主链路集成检查")
     ap.add_argument("--plan", action="store_true", help="只判定与打印计划，不连服务")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
+    ap.add_argument(
+        "--controlled-model",
+        action="store_true",
+        help="仅将带 FAKE_MODEL 的有效 RECOMMENDATIONS 作为受控回归通过；不代表真实模型验收",
+    )
     args = ap.parse_args(argv)
 
-    results, states, blocked_reason = run_chain(plan_only=args.plan)
+    results, states, blocked_reason = run_chain(plan_only=args.plan, controlled_model=args.controlled_model)
     code = exit_code(results) if results else 1
 
     if args.json:
@@ -361,6 +453,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     "mode": "plan" if args.plan else "run",
+                    "modelMode": "controlled" if args.controlled_model else "strict",
                     "services": states,
                     "blocked": blocked_reason,
                     "steps": [r.as_dict() for r in results],
@@ -374,6 +467,7 @@ def main(argv: list[str] | None = None) -> int:
         return code
 
     print("D2 主链路集成检查：" + ("计划模式（不连服务）" if args.plan else "真跑"))
+    print("模型口径：" + ("受控模型回归（不代表真实模型验收）" if args.controlled_model else "严格模式（FAKE_MODEL 判 DEGRADED）"))
     print("服务就绪：" + ("、".join(f"{k}={v}" for k, v in states.items()) or "未判定"))
     print()
     print(f"{'步骤':<10} {'判定':<10} 期望摘要")

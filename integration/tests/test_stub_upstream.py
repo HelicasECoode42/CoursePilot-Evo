@@ -62,6 +62,21 @@ def test_normal_scenario_stays_course_only(stub):
     assert all(item["verification"]["offeringSnapshotId"] is None for item in answer["recommendations"])
 
 
+@pytest.mark.parametrize("stub", ["planning_unknown"], indirect=True)
+def test_planning_unknown_scenario_keeps_real_navigation_inputs_and_returns_unknown(stub):
+    url, _state = stub
+    response = TRANSPORT.request("GET", url + "/api/v1/curriculum-snapshots", auth(url))
+    assert response.status == 200
+    assert response.envelope_status == "OK"
+    assert response.payload["data"]["items"][0]["sourceValidation"] == "SYNTHETIC"
+    assert response.payload["data"]["items"][0]["sourceKind"] == "SYNTHETIC"
+    record = TRANSPORT.request("GET", url + "/api/v1/academic-records", auth(url))
+    assert record.payload["data"]["items"][0]["sourceKind"] == "SYNTHETIC"
+    answer = TRANSPORT.request("POST", url + "/api/v1/planning", auth(url), {"schemaVersion": "1.0"})
+    assert answer.payload["data"]["decision"] == "UNABLE_TO_VERIFY"
+    assert answer.payload["data"]["recommendations"] == []
+
+
 @pytest.mark.parametrize("stub", ["tool_unavailable"], indirect=True)
 def test_unavailable_scenario_reports_503(stub):
     url, _state = stub

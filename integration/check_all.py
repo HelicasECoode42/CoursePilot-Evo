@@ -44,12 +44,16 @@ def build_argv(script: str, extra: tuple[str, ...], args: argparse.Namespace) ->
     argv = [sys.executable, str(HERE / script), *extra]
     if script in ("stack_config.py", "check_stub.py"):
         return argv  # 这两个没有 --plan/--keep 语义
+    if script in ("check_stack.py", "smoke_stack.py") and args.controlled_model:
+        argv.append("--controlled-model")
     if args.plan:
         argv.append("--plan")
     elif script == "start_stack.py":
         argv.append("--keep")
     if script == "check_web.py":
         argv += ["--driver", args.driver]
+        if args.web_with_stub:
+            argv.append("--with-stub")
         if args.stub_url:
             argv += ["--stub-url", args.stub_url]
     return argv
@@ -70,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keep", action="store_true", help="真跑时保留已启动的服务（默认跑完 --stop 收尾）")
     ap.add_argument("--driver", choices=("auto", "http", "playwright"), default="auto", help="浏览器检查的驱动")
     ap.add_argument("--stub-url", default=None, help="受控假响应页面地址，透传给浏览器检查")
+    ap.add_argument("--web-with-stub", action="store_true", help="浏览器检查使用隔离的受控响应服务")
+    ap.add_argument("--controlled-model", action="store_true", help="启用受控模型与合成数据回归，不代表真实模型验收")
     ap.add_argument("--json", action="store_true", help="把每一步的退出码与输出打成 JSON")
     args = ap.parse_args(argv)
 
@@ -78,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     print()
 
     outcomes: list[dict] = []
+    prerequisite_failed = False
     for name, owner, script, extra, plan_runs in STEPS:
         step_argv = build_argv(script, extra, args)
         if args.plan and not plan_runs:
@@ -94,11 +101,27 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[{name}] 计划模式跳过：本检查不依赖外部服务，真跑时会执行")
                 print()
             continue
+        if prerequisite_failed and script != "stack_config.py":
+            outcomes.append(
+                {
+                    "name": name,
+                    "owner": owner,
+                    "argv": step_argv[1:],
+                    "exitCode": 1,
+                    "note": "依赖配置校验或组合启动未通过，未执行",
+                }
+            )
+            if not args.json:
+                print(f"[{name}] BLOCKED：依赖配置校验或组合启动未通过，未执行")
+                print()
+            continue
         print(f"[{name}] " + " ".join(step_argv[1:]))
         code, output = run_step(step_argv, capture=args.json)
         outcomes.append({"name": name, "owner": owner, "argv": step_argv[1:], "exitCode": code})
         if args.json:
             outcomes[-1]["output"] = output
+        if script in ("stack_config.py", "start_stack.py") and code != 0:
+            prerequisite_failed = True
         else:
             print(f"  → 退出码 {code}" + ("" if code == 0 else f"（未通过，归属 {owner}）"))
         print()

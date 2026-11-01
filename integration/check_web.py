@@ -50,24 +50,23 @@ def service_states(plan_only: bool) -> tuple[dict[str, str], dict[str, str]]:
     return values, {svc["name"]: judge(svc, values, probe=not plan_only)["status"] for svc in SERVICES}
 
 
-def start_controlled_stub(args: argparse.Namespace, values: dict) -> tuple[bool, str | None, object | None]:
-    """--with-stub：在 Python 端口（默认 8000）起受控假响应当页面上游；起不来就给出原因。"""
+def start_controlled_stub(
+    args: argparse.Namespace, values: dict, scenario: str = "planning_unknown"
+) -> tuple[bool, str | None, object | None]:
+    """--with-stub：在系统分配的独立端口启动受控假响应，避免占用真实 API 端口。"""
     if not args.with_stub or args.plan:
         return True, None, None
-    from urllib.parse import urlparse
-
     from stub_upstream import serve
 
-    parsed = urlparse(args.api_url or values["CP_API_BASE_URL"])
-    host, port = parsed.hostname or "127.0.0.1", parsed.port or 80
+    host = "127.0.0.1"
     try:
-        server, url, _state = serve(port=port, host=host, scenario="normal")
+        server, url, _state = serve(port=0, host=host, scenario=scenario)
     except OSError as exc:
-        return False, f"受控假响应起不来（{host}:{port} 被占用：{exc}）→ 先停掉占用该端口的服务再跑本检查", None
+        return False, f"受控假响应起不来：{exc}", None
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    print(f"受控假响应已启动：{url}（场景 normal；仅用于驱动页面，不作为 C 服务的证据）")
-    return True, None, server
+    print(f"受控假响应已启动：{url}（场景 {scenario}；仅用于驱动页面，不作为 C 服务的证据）")
+    return True, url, server
 
 
 def blocked_rows(detail: str, repro: str) -> list[StepResult]:
@@ -88,7 +87,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--api-url", default=None, help="Python 地址，默认取配置 CP_API_BASE_URL")
     ap.add_argument("--stub-url", default=None, help="受控假响应页面地址，用于「答未知」分支")
     ap.add_argument(
-        "--with-stub", action="store_true", help="在 Python 端口起受控假响应当上游，检查页面能否进入引导第一问"
+        "--with-stub",
+        action="store_true",
+        help="在独立随机端口启动受控假响应，并验证完整引导与规划未知结果",
     )
     args = ap.parse_args(argv)
 
@@ -100,7 +101,10 @@ def main(argv: list[str] | None = None) -> int:
 
     web_url = args.web_url or values["CP_WEB_BASE_URL"]
     api_reachable = states.get("api") == "READY"
-    stub_ready, stub_blocked_reason, stub_server = start_controlled_stub(args, values)
+    stub_ready, stub_url, stub_server = start_controlled_stub(args, values)
+    path_stub_ready, path_stub_url, path_stub_server = (
+        start_controlled_stub(args, values, "normal") if args.with_stub and not args.plan else (True, None, None)
+    )
     driver = pick_driver(args.driver, channel=args.browser_channel)
     available, why = driver.available()
 
@@ -112,14 +116,21 @@ def main(argv: list[str] | None = None) -> int:
             else blocked_rows(f"服务 web 状态 {web_state}", "python integration/start_stack.py --plan")
         )
         blocked_reason = None if web_state in ("READY", "PLAN") else f"web 未就绪（{web_state}）"
-    elif args.with_stub and not stub_ready:
-        results = blocked_rows(stub_blocked_reason or "受控假响应未就绪", "python integration/check_web.py --with-stub")
-        blocked_reason = stub_blocked_reason
+    elif args.with_stub and (not stub_ready or not path_stub_ready):
+        results = blocked_rows(stub_url or "受控假响应未就绪", "python integration/check_web.py --with-stub")
+        blocked_reason = stub_url or path_stub_url
     elif web_state != "READY":
         results = blocked_rows(f"服务 web 状态 {web_state}，浏览器检查无法开始", START_HINT)
         blocked_reason = f"web 未就绪（{web_state}）"
     else:
-        results = run_web_checks(driver, web_url, api_reachable, args.stub_url, with_stub=args.with_stub)
+        results = run_web_checks(
+            driver,
+            web_url,
+            api_reachable and not args.with_stub,
+            args.stub_url or (stub_url if args.with_stub else None),
+            with_stub=args.with_stub,
+            stub_path_url=path_stub_url,
+        )
         blocked_reason = None
 
     if hasattr(driver, "close"):
@@ -129,6 +140,10 @@ def main(argv: list[str] | None = None) -> int:
         stub_server.shutdown()
         stub_server.server_close()
         print("受控假响应已停止。")
+    if path_stub_server is not None:
+        path_stub_server.shutdown()
+        path_stub_server.server_close()
+        print("引导场景受控假响应已停止。")
 
     code = exit_code(results) if results else 1
 
