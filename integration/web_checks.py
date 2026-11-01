@@ -288,7 +288,9 @@ class PlaywrightDriver:
                 Path(screenshot).parent.mkdir(parents=True, exist_ok=True)
                 page.screenshot(path=screenshot, full_page=True)
                 shot = screenshot
-            return LoadedPage(url, 200, html=html, text=text, console_errors=console_errors, page_errors=page_errors, screenshot=shot)
+            return LoadedPage(
+                url, 200, html=html, text=text, console_errors=console_errors, page_errors=page_errors, screenshot=shot
+            )
         except Exception as exc:  # noqa: BLE001
             return LoadedPage(url, 0, console_errors=console_errors, page_errors=[f"{type(exc).__name__}: {exc}"])
         finally:

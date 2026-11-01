@@ -467,7 +467,10 @@ def main(argv: list[str] | None = None) -> int:
         return code
 
     print("D2 主链路集成检查：" + ("计划模式（不连服务）" if args.plan else "真跑"))
-    print("模型口径：" + ("受控模型回归（不代表真实模型验收）" if args.controlled_model else "严格模式（FAKE_MODEL 判 DEGRADED）"))
+    print(
+        "模型口径："
+        + ("受控模型回归（不代表真实模型验收）" if args.controlled_model else "严格模式（FAKE_MODEL 判 DEGRADED）")
+    )
     print("服务就绪：" + ("、".join(f"{k}={v}" for k, v in states.items()) or "未判定"))
     print()
     print(f"{'步骤':<10} {'判定':<10} 期望摘要")

@@ -96,7 +96,7 @@ def test_entry_does_not_run_dependent_checks_after_stack_start_failure(monkeypat
     monkeypatch.setattr(check_all, "run_step", fake_run)
     assert check_all.main(["--json", "--keep"]) == 1
     output = capsys.readouterr().out
-    payload = json.loads(output[output.index("{\n"):])
+    payload = json.loads(output[output.index("{\n") :])
     assert called == ["stack_config.py", "start_stack.py"]
     assert payload["failed"] == ["组合启动", "主链路检查", "异常与未知覆盖", "受控假响应", "浏览器检查"]
 
