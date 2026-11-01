@@ -1238,7 +1238,7 @@ async function goBackToQuestions() {
             {{ deleteNotes[entry.recommendation.planId] }}
           </p>
 
-          <div class="timetable-block">
+          <div v-if="entry.plan.items.length > 0" class="timetable-block">
             <h3 class="sub-label">一周课表</h3>
             <PlanTimetable
               v-if="entry.plan.verification && sourcesOf(entry.plan.planId)"

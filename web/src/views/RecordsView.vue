@@ -34,6 +34,7 @@ import {
   saveSchoolProgressPayload,
   schoolImportMessage,
   schoolImporting,
+  schoolImportSucceeded,
 } from "../school-progress-wiring";
 
 const store = usePlanningStore();
@@ -68,6 +69,9 @@ watch(
   },
   { immediate: true },
 );
+watch(schoolImportSucceeded, (succeeded) => {
+  if (succeeded) closeSchoolImport();
+});
 
 function closeSchoolImport() {
   schoolImportDialog.value?.close();
@@ -103,6 +107,7 @@ async function readSchoolProgress(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
+  schoolImportSucceeded.value = false;
   try {
     if (!canImport.value)
       throw new Error("请先建立会话并选择培养方案，再导入学校学业进度。");
@@ -595,8 +600,10 @@ async function goToCredits() {
         :disabled="schoolImporting || !canImport"
         @change="readSchoolProgress"
       />
-      <p role="status">{{ schoolImportMessage }}</p>
       <p>导入后会保存学校类别树和课程状态，并更新当前学业记录。</p>
+      <p v-if="schoolImportMessage && !schoolImportSucceeded" role="status">
+        {{ schoolImportMessage }}
+      </p>
       <button
         class="button button--quiet"
         type="button"
@@ -605,6 +612,9 @@ async function goToCredits() {
         关闭
       </button>
     </dialog>
+    <p v-if="schoolImportMessage && schoolImportSucceeded" role="status">
+      {{ schoolImportMessage }}
+    </p>
     <div v-if="store.schoolProgress" class="option-section">
       <h2 class="sub-label">学校学业情况</h2>
       <p class="microcopy">

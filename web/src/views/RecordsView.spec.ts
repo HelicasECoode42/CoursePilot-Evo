@@ -123,6 +123,7 @@ describe("学业资料", () => {
       sessionStatus: "ready",
       sessionId: "session-test",
       selectedCurriculumId: "curr-test",
+      auditStatus: "error",
     });
     vi.spyOn(store, "loadRecords").mockResolvedValue();
     vi.spyOn(store, "loadSchoolProgress").mockResolvedValue();
@@ -229,6 +230,32 @@ describe("学业资料", () => {
     expect(wrapper.text()).toContain("状态待确认");
     expect(wrapper.text()).toContain("学校汇总不替代 Java 核验结果");
     expect(importSpy).toHaveBeenCalledOnce();
+    expect(
+      wrapper.get('[aria-labelledby="school-import-title"]').attributes("open"),
+    ).toBeUndefined();
+    expect(wrapper.get('[role="status"]').text()).toContain(
+      "已保存 1 条课程记录和 2 个学校分类",
+    );
+    expect(wrapper.get('[role="status"]').text()).toContain(
+      "学业核对未完成，请在下方重试",
+    );
+    expect(wrapper.get('[role="status"]').text()).not.toContain(
+      "更新后的学业核对",
+    );
+
+    await wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("从学校教务导入"))!
+      .trigger("click");
+    importSpy.mockResolvedValue(false);
+    await input.trigger("change");
+    await flushPromises();
+    expect(
+      wrapper.get('[aria-labelledby="school-import-title"]').attributes("open"),
+    ).toBeDefined();
+    const dialog = wrapper.get('[aria-labelledby="school-import-title"]');
+    expect(dialog.get('[role="status"]').text()).toContain("保存失败");
+    expect(dialog.get('[role="status"]').text()).not.toContain("已保存");
     if (apiMode) Object.defineProperty(api, "mode", apiMode);
   });
   it("按年级生成待确认课程并填入学分，未修课程可以修改", async () => {

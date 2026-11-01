@@ -21,6 +21,9 @@ export const schoolImportMessage = ref("");
 /** 正在保存时置真，界面据此禁用按钮。 */
 export const schoolImporting = ref(false);
 
+/** 最近一次导入是否已完成，用于文件导入和扩展导入共用弹窗收尾。 */
+export const schoolImportSucceeded = ref(false);
+
 let bridge: SchoolProgressBridge | null = null;
 let listener: ((event: MessageEvent) => void) | null = null;
 
@@ -48,11 +51,24 @@ export async function saveSchoolProgressPayload(
   if (!store.selectedCurriculumId)
     throw new Error("请先选择培养方案，再导入学校学业进度。");
   schoolImporting.value = true;
+  schoolImportSucceeded.value = false;
   schoolImportMessage.value = "正在保存学校学业进度并更新学业核对。";
   try {
     const saved = await store.importSchoolProgress(snapshot);
     if (!saved)
       throw new Error(store.schoolProgressError || "保存失败，请重试。");
+    schoolImportSucceeded.value = true;
+    schoolImportMessage.value =
+      store.auditStatus === "error"
+        ? `已保存 ${snapshot.courses.length} 条课程记录和 ${snapshot.nodes.length} 个学校分类；下方可查看学校学业情况。学业核对未完成，请在下方重试。`
+        : `已保存 ${snapshot.courses.length} 条课程记录和 ${snapshot.nodes.length} 个学校分类；下方可查看学校学业情况及更新后的学业核对。`;
+  } catch (error) {
+    schoolImportSucceeded.value = false;
+    schoolImportMessage.value =
+      error instanceof Error && error.message
+        ? error.message
+        : "未能保存学校学业进度，请重试。";
+    throw error;
   } finally {
     schoolImporting.value = false;
   }
@@ -75,7 +91,7 @@ export function startSchoolProgressBridge(router: Router): () => void {
       return;
     void bridge?.handle(event.data).then(async (outcome) => {
       if (outcome.kind === "ignored") return;
-      schoolImportMessage.value = outcome.message;
+      if (outcome.kind !== "saved") schoolImportMessage.value = outcome.message;
       // 存成功了但人不在学业资料页，就把他带过去看结果。
       if (
         outcome.kind === "saved" &&

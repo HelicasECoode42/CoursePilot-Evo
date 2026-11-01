@@ -909,6 +909,34 @@ describe("result page course search and replacement", () => {
     });
   });
 
+  it("hides the timetable after deleting the last course from a plan", async () => {
+    const result = answer();
+    result.recommendations[0].items = [INITIAL_ITEMS[0]];
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    vi.spyOn(api, "removeSessionPlanCourse").mockResolvedValue({
+      previousPlanId: PLAN_ID,
+      planId: "plan-empty-after-delete",
+      items: [],
+      hardConstraints: [],
+      verification: validation({ verdict: "UNKNOWN", scope: "COURSE_ONLY" }),
+      empty: true,
+    });
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await wrapper.get("button.course-card__delete").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("空方案，尚无核验结果");
+    expect(wrapper.text()).toContain(
+      "课程已从方案中移除。返回问卷后可以重新生成方案。",
+    );
+    expect(wrapper.text()).not.toContain("一周课表");
+    expect(wrapper.text()).not.toContain("正在读取班次时间，请稍候。");
+    expect(wrapper.find(".course-cards li").exists()).toBe(false);
+  });
+
   it("keeps the original plan and its old verdict when deleting fails", async () => {
     stubOfferings();
     vi.spyOn(api, "removeSessionPlanCourse").mockRejectedValue(
