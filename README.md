@@ -2,7 +2,9 @@
 
 一个帮助学生核对学业进度、了解课程与教师、表达选课偏好并比较方案的学业规划项目。支持课程咨询对话与逐步引导，覆盖高绩点、工作量、签到、兴趣、指定教师、职业与时间等组合目标。课程事实和时间由 Java 核验，Agent 负责理解、规划与解释。
 
-**当前状态：虚构资料下的学生主流程已完成三端联调。** 可以在网页填写目标和学业记录，由 Python 调用 Java 核对并展示规划结果；指定教师与时间条件的澄清回填也已验证。培养计划可通过本地受限接口导入虚构 XLSX。当前模型默认使用受控假实现，真实培养计划的独立基线、真实班次和模型质量评测仍待完成。运行方法见 [Web 说明](web/README.md)。
+**当前能力：学校学业进度导入、课程与评价查询、AI 咨询、完整需求引导、课程层规划及方案编辑均已有实现。** 真实模型咨询与课程层规划曾通过实测，见[验收记录](docs/checkpoints/advice-chat.md)。培养文件可保持 `CURRICULUM_FILE / UNVERIFIED` 提供课程建议；真实下学期班次不足时，课表与时间核验仍显示待确认。真实模型可靠性评测、自进化和老师报告尚未完成。未配置模型地址与密钥时使用带标记的受控假模型。
+
+本地完整版本与 GitHub `main` 的差异、Actions 失败及最新复查见[运行与仓库核对](docs/34-runtime-and-repository-review.md)。
 
 ## 先看懂项目，再开始开发
 
@@ -36,7 +38,7 @@
 
 ```mermaid
 flowchart LR
-  W[Vue Web 一次一问] --> P[Python API / Planning Runner]
+  W[Vue Web 学业进度 / 对话 / 引导] --> P[Python API / Planning Runner]
   H[可版本化 Harness] --> P
   P --> J[Java typed Tools / Verifier]
   J --> DB[(H2 / 快照 / 来源)]
@@ -77,7 +79,7 @@ python scripts/check_modules.py
 
 `requirements-dev.txt` 由 `uv export --only-group dev --no-hashes --no-emit-project -o requirements-dev.txt` 从锁文件生成，供 CI 和不用 uv 的人使用；改依赖请改 `pyproject.toml` 后重跑 `uv lock` 和该导出命令，不要手工编辑这两个文件。
 
-各模块有独立测试入口；整套服务的启动和模拟模式见 [Web README](web/README.md)。
+各模块有独立测试入口；整套服务的启动和模拟模式见 [Web README](web/README.md)。本机已有私有配置时可按 `integration/start_stack.py --help` 使用组合启动入口；公网演示脚本为 `scripts/demo_public.sh`，需要另行准备本机配置和 Cloudflare Tunnel。
 
 运行前端 E1：
 
