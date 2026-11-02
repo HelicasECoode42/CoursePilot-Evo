@@ -58,6 +58,11 @@ public class CurriculumSnapshot {
     @Column(nullable = false)
     private Instant createdAt;
 
+    /** 以下三项只对 OFFERING 快照有值：抓取时间与日历形状（契约 OfferingImport）。 */
+    private Instant capturedAt;
+    private Integer calendarWeeks;
+    private Integer sectionsPerDay;
+
     public CurriculumSnapshot() {}
 
     public CurriculumSnapshot(String snapshotId, Kind kind, State state, SourceKind sourceKind,
@@ -78,4 +83,14 @@ public class CurriculumSnapshot {
     public SourceValidation getSourceValidation() { return sourceValidation; }
     public String getTermId() { return termId; }
     public Instant getCreatedAt() { return createdAt; }
+    public Instant getCapturedAt() { return capturedAt; }
+    public Integer getCalendarWeeks() { return calendarWeeks; }
+    public Integer getSectionsPerDay() { return sectionsPerDay; }
+
+    /** 记录开课快照的抓取时间与日历形状。只在导入发布时调用一次。 */
+    public void recordOfferingFacts(Instant capturedAt, int calendarWeeks, int sectionsPerDay) {
+        this.capturedAt = capturedAt;
+        this.calendarWeeks = calendarWeeks;
+        this.sectionsPerDay = sectionsPerDay;
+    }
 }

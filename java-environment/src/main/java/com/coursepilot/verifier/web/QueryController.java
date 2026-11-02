@@ -1,5 +1,6 @@
 package com.coursepilot.verifier.web;
 
+import com.coursepilot.verifier.persistence.entity.CourseOffering;
 import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
 import com.coursepilot.verifier.persistence.entity.CurriculumSnapshot;
 import com.coursepilot.verifier.persistence.repo.CourseOfferingRepository;
@@ -8,6 +9,8 @@ import com.coursepilot.verifier.persistence.repo.CurriculumSnapshotRepository;
 import com.coursepilot.verifier.persistence.repo.OffsetPageRequest;
 import com.coursepilot.verifier.web.dto.CatalogDtos;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -21,6 +24,8 @@ public class QueryController {
     private static final Pattern OFFSET_CURSOR = Pattern.compile("^[0-9]{1,9}$");
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 200;
+    /** 契约 listOfferings 的 limit 上限为 100。 */
+    private static final int MAX_OFFERING_LIMIT = 100;
 
     private final CurriculumSnapshotRepository snapshotRepo;
     private final CurriculumCourseRepository curriculumCourseRepo;
@@ -82,14 +87,44 @@ public class QueryController {
         return Envelope.ok(requestId, new CatalogDtos.CourseList(items, nextCursor)).withProvenance(provenance);
     }
 
-    /** 契约 listOfferings：data = { items: CourseOffering[] }。时间由 Java 重新解析 meetingTextRaw。 */
+    /**
+     * 契约 listOfferings：data = { items: CourseOffering[] }。
+     * 只返回属于 offeringSnapshotId 的班次；快照必须是已发布的 OFFERING，且 curriculumSnapshotId
+     * 必须是已发布的 CURRICULUM。时间由 Java 从 meetingTextRaw 重新解析。
+     */
     @GetMapping("/offerings")
     public Envelope<CatalogDtos.OfferingList> offerings(
         @RequestHeader(value = "X-Request-Id", required = false) String requestId,
-        @RequestParam String courseCode) {
-        List<CatalogDtos.CourseOffering> items = offeringRepo.findByCourseCode(courseCode)
-            .stream().map(catalog::toOffering).toList();
+        @RequestHeader(value = "X-Subject-Id", required = false) String subjectId,
+        @RequestParam String curriculumSnapshotId,
+        @RequestParam String offeringSnapshotId,
+        @RequestParam(required = false) String courseCode,
+        @RequestParam(required = false) Integer limit) {
+        subjects.require(subjectId);
+        requireId("curriculumSnapshotId", curriculumSnapshotId);
+        requireId("offeringSnapshotId", offeringSnapshotId);
+        if (courseCode != null) requireId("courseCode", courseCode);
+        int size = limit == null ? DEFAULT_LIMIT : limit;
+        if (size < 1 || size > MAX_OFFERING_LIMIT) {
+            throw new InvalidQuery("limit", "limit 须在 1 到 " + MAX_OFFERING_LIMIT + " 之间");
+        }
+        requirePublished(curriculumSnapshotId, CurriculumSnapshot.Kind.CURRICULUM);
+        requirePublished(offeringSnapshotId, CurriculumSnapshot.Kind.OFFERING);
+
+        PageRequest page = PageRequest.of(0, size, Sort.by("offeringId"));
+        List<CourseOffering> rows = courseCode == null
+            ? offeringRepo.findBySnapshotId(offeringSnapshotId, page)
+            : offeringRepo.findBySnapshotIdAndCourseCode(offeringSnapshotId, courseCode, page);
+        List<CatalogDtos.CourseOffering> items = rows.stream().map(catalog::toOffering).toList();
         return Envelope.ok(requestId, new CatalogDtos.OfferingList(items));
+    }
+
+    private void requirePublished(String snapshotId, CurriculumSnapshot.Kind kind) {
+        CurriculumSnapshot snapshot = snapshotRepo.findById(snapshotId)
+            .orElseThrow(() -> new UnknownSnapshot(snapshotId));
+        if (snapshot.getKind() != kind || snapshot.getState() != CurriculumSnapshot.State.PUBLISHED) {
+            throw new UnknownSnapshot(snapshotId);
+        }
     }
 
     private static void requireId(String field, String value) {
