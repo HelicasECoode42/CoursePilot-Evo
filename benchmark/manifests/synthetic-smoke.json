@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.0",
+  "runId": "synthetic-smoke-local",
+  "benchmarkSetVersion": "synthetic-planning-smoke-v1",
+  "evaluatorVersion": "not-evaluated-no-human-labels",
+  "curriculumSnapshotId": "PLAN_CS_2025",
+  "offeringSnapshotId": null,
+  "javaToolApiVersion": "NOT_CONNECTED",
+  "verifierVersion": "NOT_CONNECTED",
+  "harnessVersion": "local-unverified",
+  "parentVersion": null,
+  "modelId": "DEPLOYMENT_MODEL_PLACEHOLDER",
+  "temperature": 0.0,
+  "maxInputTokens": 8000,
+  "maxOutputTokens": 4000,
+  "maxToolCalls": 6,
+  "maxModelCalls": 3,
+  "deadlineMs": 45000,
+  "repeatCount": 1,
+  "seed": null,
+  "createdAt": "2026-11-02T00:00:00Z"
+}

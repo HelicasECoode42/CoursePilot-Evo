@@ -128,6 +128,7 @@ cd web && npm ci && npm run dev:fixture
 | 接口与规范 | [总体 TRD](docs/03-trd.md)、[行为契约](docs/04-infrastructure-workflow.md)、[OpenAPI/Schema](contracts/README.md)、[工程规范](docs/16-engineering-and-debugging.md) |
 | 协作 | [GitHub 协作](docs/12-github-collaboration.md)、[PR 模板](.github/pull_request_template.md)、[仓库维护](docs/24-repo-maintenance.md)、[看板](https://github.com/users/HelicasECoode42/projects/1) |
 | 图与评测 | [Mermaid 图](docs/diagrams/README.md)、[Benchmark 协议](docs/07-benchmark-protocol.md) |
+| 运行 HTTP 评测与复用旧 PR | [Benchmark 入口](benchmark/README.md)、[PR #36 / #40 代码复用](docs/35-pr36-pr40-reuse.md) |
 | 体验原型 | [交互式 HTML 示例](demo/coursepilot-guided-demo.html) |
 
 `requirements-dev.txt` 由 `uv export --only-group dev --no-hashes --no-emit-project -o requirements-dev.txt` 从锁文件生成；修改依赖请改 `pyproject.toml`，然后重新运行 `uv lock` 和这条导出命令。
