@@ -12,7 +12,7 @@ dependencies = [
     "fastapi==0.143.0",
     "httpx==0.28.1",
     "pydantic==2.13.4",
-    "pydantic-settings==2.15.0",
+    "pydantic-settings==2.16.2",
     "PyYAML==6.0.3",
     "uvicorn==0.54.0",
 ]
