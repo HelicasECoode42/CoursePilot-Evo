@@ -2024,18 +2024,34 @@ describe("offering snapshot selection", () => {
     expect(store.usableOfferingSnapshots).toEqual([]);
   });
 
-  it("lets the user choose when several offerings are usable", async () => {
-    const first = offering("offer-a", "BROWSER_SNAPSHOT", "VERIFIED");
-    const second = offering("offer-b", "BROWSER_SNAPSHOT", "VERIFIED");
-    const { store, start } = startWith([first, second]);
+  it("defaults to the newest verified offering but still lets the user change it", async () => {
+    const older = offering("offer-a", "BROWSER_SNAPSHOT", "VERIFIED");
+    older.createdAt = "2025-08-01T00:00:00Z";
+    const newer = offering("offer-b", "BROWSER_SNAPSHOT", "VERIFIED");
+    newer.createdAt = "2025-09-01T00:00:00Z";
+    const { store, start } = startWith([older, newer]);
 
     await start();
 
-    expect(store.selectedOfferingSnapshotId).toBeNull();
-    store.chooseOfferingSnapshot("offer-unknown");
-    expect(store.selectedOfferingSnapshotId).toBeNull();
-    store.chooseOfferingSnapshot("offer-b");
     expect(store.selectedOfferingSnapshotId).toBe("offer-b");
+    store.chooseOfferingSnapshot("offer-unknown");
+    expect(store.selectedOfferingSnapshotId).toBe("offer-b");
+    store.chooseOfferingSnapshot("offer-a");
+    expect(store.selectedOfferingSnapshotId).toBe("offer-a");
+  });
+
+  it("defaults to the official timetable when nothing is verified", async () => {
+    const { store, start } = startWith([
+      offering("offer-official", "OFFICIAL_DOCUMENT", "UNVERIFIED"),
+    ]);
+
+    await start();
+
+    expect(store.selectedOfferingSnapshotId).toBe("offer-official");
+    expect(store.planningMode).toBe("REAL");
+    expect(store.selectedOfferingSnapshot?.sourceKind).toBe(
+      "OFFICIAL_DOCUMENT",
+    );
   });
 
   it("leaves the selection empty when there are no offerings at all", async () => {

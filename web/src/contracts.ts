@@ -46,7 +46,11 @@ export interface SnapshotSummary {
   snapshotId: string;
   kind: "CURRICULUM" | "OFFERING";
   state: "PUBLISHED" | "REJECTED";
-  sourceKind: "CURRICULUM_FILE" | "BROWSER_SNAPSHOT" | "SYNTHETIC";
+  sourceKind:
+    | "CURRICULUM_FILE"
+    | "BROWSER_SNAPSHOT"
+    | "OFFICIAL_DOCUMENT"
+    | "SYNTHETIC";
   termId: string | null;
   createdAt: string;
   sourceValidation: "VERIFIED" | "UNVERIFIED" | "SYNTHETIC";

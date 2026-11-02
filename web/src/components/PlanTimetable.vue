@@ -72,58 +72,69 @@ function dayLabel(day: number): string {
     </p>
 
     <div
-      v-if="view.gaps.length"
-      class="notice notice--warning timetable-gaps"
-      role="note"
+      class="timetable-layout"
+      :class="{
+        'timetable-layout--split':
+          view.placed.length > 0 && view.gaps.length > 0,
+      }"
     >
-      <p>以下课程的时间不能画进课表，它们不在下面的格子里：</p>
-      <ul class="summary-list">
-        <li v-for="gap in view.gaps" :key="gap.courseCode + gap.message">
-          {{ gap.message }}
-        </li>
-      </ul>
-    </div>
-
-    <div v-if="view.placed.length" class="timetable-scroll">
-      <table class="timetable">
-        <caption class="sr-only">
-          一周课表，列为星期，行为节次
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col" class="timetable-corner">节次</th>
-            <th v-for="day in SCHEDULE_DAYS" :key="day" scope="col">
-              {{ dayLabel(day) }}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="section in SCHEDULE_SECTIONS" :key="section">
-            <th scope="row" class="timetable-section">第{{ section }}节</th>
-            <td
-              v-for="day in SCHEDULE_DAYS"
-              :key="day"
-              :class="{
-                'timetable-cell--multi': cellEntries(day, section).length > 1,
-              }"
-            >
-              <ul
-                v-if="cellEntries(day, section).length"
-                class="timetable-stack"
+      <div v-if="view.placed.length" class="timetable-scroll">
+        <table class="timetable">
+          <caption class="sr-only">
+            一周课表，列为星期，行为节次
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col" class="timetable-corner">节次</th>
+              <th v-for="day in SCHEDULE_DAYS" :key="day" scope="col">
+                {{ dayLabel(day) }}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="section in SCHEDULE_SECTIONS" :key="section">
+              <th scope="row" class="timetable-section">第{{ section }}节</th>
+              <td
+                v-for="day in SCHEDULE_DAYS"
+                :key="day"
+                :class="{
+                  'timetable-cell--multi': cellEntries(day, section).length > 1,
+                }"
               >
-                <li
-                  v-for="entry in cellEntries(day, section)"
-                  :key="entry.courseCode + entry.classId"
-                  class="timetable-chip"
+                <ul
+                  v-if="cellEntries(day, section).length"
+                  class="timetable-stack"
                 >
-                  <strong>{{ entry.courseCode }}</strong>
-                  <span>{{ entry.classId }}</span>
-                </li>
-              </ul>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+                  <li
+                    v-for="entry in cellEntries(day, section)"
+                    :key="entry.courseCode + entry.classId"
+                    class="timetable-chip"
+                  >
+                    <strong>{{ entry.courseCode }}</strong>
+                    <span>{{ entry.classId }}</span>
+                  </li>
+                </ul>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <aside
+        v-if="view.gaps.length"
+        class="notice notice--warning timetable-gaps"
+        aria-labelledby="timetable-unplaced-title"
+      >
+        <h4 id="timetable-unplaced-title" class="timetable-gaps__title">
+          未排进课表
+        </h4>
+        <p class="microcopy">以下课程不在上面的格子里，原因如下：</p>
+        <ul class="summary-list">
+          <li v-for="gap in view.gaps" :key="gap.courseCode + gap.message">
+            {{ gap.message }}
+          </li>
+        </ul>
+      </aside>
     </div>
 
     <ul
@@ -162,6 +173,25 @@ function dayLabel(day: number): string {
 </template>
 
 <style scoped>
+/* 课表与「未排进课表」并排（宽屏）或上下排列（窄屏）。 */
+.timetable-layout {
+  display: grid;
+  gap: 12px;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .timetable-layout--split {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+}
+
+.timetable-gaps__title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .timetable-scroll {
   max-width: 100%;
   overflow-x: auto;

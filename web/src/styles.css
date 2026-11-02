@@ -150,6 +150,13 @@ select:focus-visible {
   border-bottom: 1px solid #e0b86a;
 }
 
+/* 学校公布课表（仍待核验）：蓝色，与模拟数据的橙色区分开。 */
+.sim-banner--official {
+  color: #1d4a6b;
+  background: #e3eef8;
+  border-bottom-color: #9bbcd8;
+}
+
 .mode-badge--demo {
   border-color: #e8d9bc;
   color: #875817;

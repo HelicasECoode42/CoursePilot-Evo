@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "./api";
 import { startSchoolProgressBridge } from "./school-progress-wiring";
+import { offeringBanner } from "./domain/offering-selection";
 import { usePlanningStore } from "./stores/planning";
 
 // 学业进度的接收挂在应用级：原先只在 /records 里监听，学生停在别的页面时
@@ -25,7 +26,10 @@ onUnmounted(() => {
   stopBridge = null;
 });
 
-const isSimulation = computed(() => api.mode === "simulation");
+// 横幅依据所选班次来源，不再只看全局模式：换成已核验或学校课表时要随之变化。
+const courseBanner = computed(() =>
+  offeringBanner(store.selectedOfferingSnapshot),
+);
 const modeLabel = computed(() =>
   api.mode === "fixture"
     ? "页面演示 · 虚构内容"
@@ -38,9 +42,16 @@ const modeLabel = computed(() =>
 <template>
   <div class="app-shell">
     <a class="skip-link" href="#main-content">跳到正文</a>
-    <!-- 模拟模式下课表不是真实开课，横幅常驻顶部，滚动时也不消失。 -->
-    <div v-if="isSimulation" class="sim-banner" role="status">
-      演示环境：课表为模拟数据
+    <!-- 课表来源横幅常驻顶部，滚动时也不消失；模拟数据与未核验课表都要说清楚。 -->
+    <div
+      v-if="courseBanner"
+      class="sim-banner"
+      :class="
+        courseBanner.tone === 'official' ? 'sim-banner--official' : undefined
+      "
+      role="status"
+    >
+      {{ courseBanner.text }}
     </div>
     <header class="topbar">
       <RouterLink class="brand" to="/" aria-label="CoursePilot 首页">

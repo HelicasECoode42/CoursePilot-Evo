@@ -233,3 +233,46 @@ describe("PlanTimetable detail cards", () => {
     expect(wrapper.get("li.timetable-card strong").text()).toBe("CS102");
   });
 });
+
+describe("PlanTimetable unplaced courses", () => {
+  it("lists courses without a usable section in a side list titled 未排进课表", () => {
+    const wrapper = mount(PlanTimetable, {
+      props: {
+        scope: "REAL_TIMETABLE",
+        sources: [
+          placed("CS101", offering("CS101", "CS101-01", [MON_1_2])),
+          {
+            courseCode: "CS102",
+            classId: null,
+            offering: null,
+            missing: "NOT_SELECTED",
+          },
+        ],
+      },
+    });
+    const side = wrapper.find(".timetable-gaps");
+    expect(side.find("h4").text()).toBe("未排进课表");
+    expect(side.text()).toContain(
+      "CS102：还没有选定班次，时间未知，未纳入课表。",
+    );
+    expect(wrapper.find(".timetable-layout--split").exists()).toBe(true);
+  });
+
+  it("does not split the layout when nothing is placed", () => {
+    const wrapper = mount(PlanTimetable, {
+      props: {
+        scope: "REAL_TIMETABLE",
+        sources: [
+          {
+            courseCode: "CS102",
+            classId: null,
+            offering: null,
+            missing: "NOT_SELECTED",
+          },
+        ],
+      },
+    });
+    expect(wrapper.find(".timetable-gaps").exists()).toBe(true);
+    expect(wrapper.find(".timetable-layout--split").exists()).toBe(false);
+  });
+});

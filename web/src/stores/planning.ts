@@ -40,6 +40,11 @@ import {
   isCurriculumUsableForMode,
 } from "../domain/planning-request";
 import {
+  defaultOfferingSnapshotId,
+  isOfferingUsable,
+  planningModeFor,
+} from "../domain/offering-selection";
+import {
   applyScheduleAction,
   type ScheduleAction,
   type ScheduleStrength,
@@ -610,11 +615,17 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       expireSessionWhenDue();
     }
 
-    // 契约里的规划模式只有 REAL / SIMULATION，而客户端有三种（http / fixture /
-    // simulation）。这里是唯一的映射点：分散着写会漂移——fixture 模式下
-    // 「=== "simulation" ? ... 」和「=== "http" ? ...」给出的结论正好相反。
+    // 契约里的规划模式只有 REAL / SIMULATION。模式由所选开课快照推导（SYNTHETIC →
+    // SIMULATION，其余 → REAL）；fixture 客户端是纯演示，固定为 SIMULATION。
+    // 唯一的映射规则在 domain/offering-selection.ts 的 planningModeFor。
+    const selectedOfferingSnapshot = computed<SnapshotSummary | null>(
+      () =>
+        offeringSnapshots.value.find(
+          (item) => item.snapshotId === selectedOfferingSnapshotId.value,
+        ) ?? null,
+    );
     const planningMode = computed<PlanningMode>(() =>
-      client.mode === "http" ? "REAL" : "SIMULATION",
+      planningModeFor(client.mode, selectedOfferingSnapshot.value),
     );
     const currentQuestion = computed<QuestionId>(() =>
       firstIncompleteQuestion({
@@ -636,10 +647,10 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
           (item) => item.snapshotId === selectedCurriculumId.value,
         ) ?? null,
     );
-    // 能用于当前模式的开课快照。规则与培养方案共用 isCurriculumUsableForMode，不另写。
+    // 能用于当前客户端的开课快照。只看快照自身与客户端，不依赖所选模式，避免循环。
     const usableOfferingSnapshots = computed(() =>
       offeringSnapshots.value.filter((item) =>
-        isCurriculumUsableForMode(item, planningMode.value),
+        isOfferingUsable(item, client.mode),
       ),
     );
     const mode = computed(() => client.mode);
@@ -705,13 +716,13 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
           ...offeringResult.unknownMessages,
         ];
         offeringSnapshots.value = offeringResult.items;
-        // 恰好一个可用时自动选中；多个让用户在培养方案那一步选；一个都没有就留空，
-        // 课表会说明「没有班次快照」，不替用户编一个。
-        const offeringUsable = offeringResult.items.filter((item) =>
-          isCurriculumUsableForMode(item, planningMode.value),
+        // 默认班次来源：VERIFIED > 学校公布课表(待核验) > 演示数据（仅模拟/演示）。
+        // 同级取最新。用户仍可在问答页改选；没有可用项就留空，课表说明原因，不编班次。
+        selectedOfferingSnapshotId.value = defaultOfferingSnapshotId(
+          offeringResult.items,
+          client.mode,
         );
-        selectedOfferingSnapshotId.value =
-          offeringUsable.length === 1 ? offeringUsable[0].snapshotId : null;
+        // 模式依赖刚选出的开课快照，必须在这之后再筛培养方案。
         // 只自动选能用于当前模式的方案。不加这个判断，一个 UNVERIFIED、既无课程也无
         // 类别要求的快照会因为「只有一个」被直接选中，用户走完 8 步才知道它不能用。
         const usable = result.items.filter((item) =>
@@ -1331,6 +1342,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       selectedCurriculum,
       offeringSnapshots,
       selectedOfferingSnapshotId,
+      selectedOfferingSnapshot,
       usableOfferingSnapshots,
       unknownMessages,
       errorMessage,

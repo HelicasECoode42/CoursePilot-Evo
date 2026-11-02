@@ -232,7 +232,11 @@ onBeforeUnmount(() => {
 function offeringOptionLabel(item: SnapshotSummary): string {
   const term = item.termId ?? "学期未注明";
   const source =
-    item.sourceValidation === "SYNTHETIC" ? "演示数据" : "班次快照";
+    item.sourceValidation === "SYNTHETIC"
+      ? "演示数据"
+      : item.sourceKind === "OFFICIAL_DOCUMENT"
+        ? "学校公布课表（待核验）"
+        : "班次快照";
   return `${term} · ${source}`;
 }
 
