@@ -293,8 +293,9 @@ onMounted(() => void prepareRecordsPage());
 watch(
   () => store.sessionStatus,
   (status) => {
-    if (status === "ready" && store.recordsStatus === "idle")
-      void prepareRecordsPage();
+    // 不再要求 recordsStatus 为 idle：刷新后会话恢复时，恢复流程已先发起了学业记录读取
+    // （recordsStatus 已是 loading），这里若因此跳过，学校学业进度就永远不会被读取。
+    if (status === "ready") void prepareRecordsPage();
   },
 );
 

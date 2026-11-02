@@ -131,4 +131,75 @@ describe("学校学业进度树", () => {
     expect(wrapper.get(".school-courses li").text()).toContain("学分待确认");
     expect(wrapper.get(".school-courses li").text()).toContain("在读");
   });
+  it("用学校接口的真实返回形状（GET /api/v1/school-progress）渲染，每门课程行都有名称、学分与状态", async () => {
+    // 字段与 snapshot 结构一致（nodeId/parentId/schoolNodeId/leaf/name/…；课程含 courseCode/name/credits/outcome），值全部为虚构。
+    const wrapper = mount(SchoolProgressTree, {
+      props: {
+        nodes: [
+          {
+            nodeId: "node-1",
+            parentId: null,
+            schoolNodeId: "SYN-A",
+            leaf: false,
+            name: "示例主修类别",
+            requiredCredits: 20,
+            earnedCredits: 4,
+            remainingCredits: 16,
+          },
+          {
+            nodeId: "node-2",
+            parentId: "node-1",
+            schoolNodeId: "SYN-A1",
+            leaf: true,
+            name: "示例子类别",
+            requiredCredits: 8,
+            earnedCredits: 2,
+            remainingCredits: 6,
+          },
+        ],
+        courses: [
+          {
+            nodeId: "node-2",
+            courseCode: "SYN0001",
+            name: "示例课程一",
+            credits: 2,
+            outcome: "PASSED",
+            completedYear: "2025-2026",
+            completedTerm: "1",
+            grade: "A",
+            makeup: null,
+            retake: null,
+            suggestedYear: null,
+            suggestedTerm: null,
+          },
+          {
+            nodeId: "node-2",
+            courseCode: "SYN0002",
+            name: "示例课程二",
+            credits: null,
+            outcome: "UNKNOWN",
+            completedYear: null,
+            completedTerm: null,
+            grade: null,
+            makeup: null,
+            retake: null,
+            suggestedYear: null,
+            suggestedTerm: null,
+          },
+        ],
+      },
+    });
+    await wrapper.findAll("details summary")[1].trigger("click");
+    const lines = wrapper
+      .findAll(".school-courses li")
+      .map((li) => li.text().replace(/\s+/g, " ").trim());
+    expect(lines).toHaveLength(2);
+    for (const line of lines) expect(line).not.toBe("");
+    expect(lines[0]).toContain("示例课程一 · SYN0001");
+    expect(lines[0]).toContain("2 学分");
+    expect(lines[0]).toContain("已修");
+    expect(lines[1]).toContain("示例课程二 · SYN0002");
+    expect(lines[1]).toContain("学分待确认");
+    expect(lines[1]).toContain("状态待确认");
+  });
 });
