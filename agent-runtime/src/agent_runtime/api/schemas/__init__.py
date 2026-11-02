@@ -81,6 +81,7 @@ from .school_progress import (
 from .trace import EventType, TraceEvent
 from .validation import (
     PlanItem,
+    PlanSection,
     PlanValidation,
     PlanValidationRequest,
     Scope,
@@ -130,6 +131,7 @@ __all__ = [
     "Outcome",
     "ParseStatus",
     "PlanItem",
+    "PlanSection",
     "PlanValidation",
     "PlanValidationRequest",
     "SessionPlanCourseRemovalRequest",
@@ -196,6 +198,7 @@ SCHEMA_DEFS: dict[str, type[DomainModel]] = {
     "AuditResult": AuditResult,
     "PlanItem": PlanItem,
     "PlanValidationRequest": PlanValidationRequest,
+    "PlanSection": PlanSection,
     "PlanValidation": PlanValidation,
     "SessionPlanCourseRemovalRequest": SessionPlanCourseRemovalRequest,
     "SessionPlanEditResult": SessionPlanEditResult,

@@ -159,6 +159,14 @@ export interface PlanItem {
 export type PlanVerdict = "VALID" | "INVALID" | "UNKNOWN";
 export type PlanScope = "COURSE_ONLY" | "REAL_TIMETABLE" | "SIMULATION";
 
+/** 分项：TIMETABLE 本学期课表核验，CURRICULUM 毕业要求核对。verdict 取值同总判决。 */
+export interface PlanSection {
+  scope: "TIMETABLE" | "CURRICULUM";
+  verdict: PlanVerdict;
+  violations: Issue[];
+  unknownChecks: Issue[];
+}
+
 /** 核验器判决。页面原样展示，不自行改写，也不从 violations 为空推断通过。 */
 export interface PlanValidation {
   verifierResultId: string;
@@ -171,6 +179,8 @@ export interface PlanValidation {
   unknownChecks: Issue[];
   performedChecks: string[];
   sourceRefIds: string[];
+  /** Java 始终返回两项；fixture 尚未补齐前可缺省，页面尚未展示分项（待 UI 任务）。 */
+  sections?: PlanSection[];
 }
 
 export interface QuestionChoice {

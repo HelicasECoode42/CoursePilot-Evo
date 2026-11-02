@@ -113,6 +113,38 @@ class A1WorkbookImporterTest {
   }
 
   @Test
+  void pureInformationalNotesAreNotUnmodeledConstraints() throws Exception {
+    // 任意选修说明与课程标记图例只是说明文字，不是约束：不计入未建模规则，也不产生 UNKNOWN_RULE。
+    for (String note : List.of("○学分分布供参考    ◇任意选修任何课程", "◎专业核心课程    ★全英语课程")) {
+      var draft = new A1WorkbookImporter().prepare(workbookWithRule("原表注释/规则", note), "cs-general");
+      assertTrue(draft.publishable(), draft.blockingIssues().toString());
+      assertEquals(1, draft.unmodeledRules().size());
+      assertEquals(
+          ImportModels.UnmodeledRule.Disposition.INFORMATIONAL,
+          draft.unmodeledRules().getFirst().disposition());
+      assertTrue(
+          draft.recordedIssues().stream()
+              .noneMatch(issue -> issue.code() == ImportModels.IssueCode.UNKNOWN_RULE));
+    }
+  }
+
+  @Test
+  void constraintLikeNoteStaysUnmodeledEvenWhenItMentionsElectives() throws Exception {
+    // 含有约束语义的同类文字（毕业前至少修读一门全英语课程）仍是未建模规则。
+    var draft =
+        new A1WorkbookImporter()
+            .prepare(
+                workbookWithRule("原表注释/规则", "●毕业前至少修读一门全英语授课课程且成绩合格。"),
+                "cs-general");
+    assertEquals(
+        ImportModels.UnmodeledRule.Disposition.UNMODELED,
+        draft.unmodeledRules().getFirst().disposition());
+    assertTrue(
+        draft.recordedIssues().stream()
+            .anyMatch(issue -> issue.code() == ImportModels.IssueCode.UNKNOWN_RULE));
+  }
+
+  @Test
   void excludedSourceRowIsKeptWithDispositionExcluded() throws Exception {
     var draft =
         new A1WorkbookImporter().prepare(workbookWithRule("原表课程行", "Java EE开发技术"), "cs-general");

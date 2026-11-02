@@ -1454,6 +1454,14 @@
           },
           "minItems": 0,
           "maxItems": 200
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanSection"
+          },
+          "minItems": 2,
+          "maxItems": 2
         }
       },
       "required": [
@@ -1466,7 +1474,8 @@
         "violations",
         "unknownChecks",
         "performedChecks",
-        "sourceRefIds"
+        "sourceRefIds",
+        "sections"
       ],
       "allOf": [
         {
@@ -1503,6 +1512,81 @@
             "properties": {
               "offeringSnapshotId": {
                 "$ref": "#/$defs/PlanValidation/properties/curriculumSnapshotId"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "VALID"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sections": {
+                "items": {
+                  "properties": {
+                    "verdict": {
+                      "const": "VALID"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "INVALID"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sections": {
+                "contains": {
+                  "properties": {
+                    "verdict": {
+                      "const": "INVALID"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "UNKNOWN"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sections": {
+                "contains": {
+                  "properties": {
+                    "verdict": {
+                      "const": "UNKNOWN"
+                    }
+                  }
+                },
+                "items": {
+                  "properties": {
+                    "verdict": {
+                      "not": {
+                        "const": "INVALID"
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -3711,6 +3795,70 @@
           "$ref": "#/$defs/Usage"
         }
       }
+    },
+    "PlanSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "TIMETABLE",
+            "CURRICULUM"
+          ]
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "VALID",
+            "INVALID",
+            "UNKNOWN"
+          ]
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "unknownChecks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "scope",
+        "verdict",
+        "violations",
+        "unknownChecks"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "VALID"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "violations": {
+                "maxItems": 0
+              },
+              "unknownChecks": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

@@ -180,3 +180,20 @@ sequenceDiagram
 - 方案核验：mode=REAL 且快照 VERIFIED、带学期、方案项都在该快照内，scope 为 REAL_TIMETABLE，时间检查照常执行，不再产生 TIMETABLE_UNVERIFIED。仍缺任一条件则保持 COURSE_ONLY 与未知项。
 - TimeParser 支持一个周次块对应多段节次（`星期四第3-4,7-8节{9-12周}` 拆为两段）。截断或残缺片段仍整体未知。
 - 尚未实现：核验过期机制（快照没有有效期字段，REAL 只检查学期非空）；SnapshotSummary 不展示核验人与时间。
+
+### 方案核验分项：本学期课表 / 毕业要求（2026-11-03）
+
+`POST /api/v1/plans/validate` 的结果新增 `sections`，把两类结论拆开，避免演示时整份方案都显示为“未知”：
+
+| 分项 scope | 含义 | 归入的 violations / unknownChecks |
+| --- | --- | --- |
+| TIMETABLE | 本学期课表：班次归属、时间冲突、时间类硬约束、班次来源核验、钉选课 | CLASS_COURSE_MISMATCH、TIME_CONFLICT、CONSTRAINT_*、TIMETABLE_UNVERIFIED、TIME_UNPARSEABLE、CLASS_NOT_FOUND、SECTION_UNASSIGNED、CONSTRAINT_UNVERIFIABLE、PIN_* |
+| CURRICULUM | 毕业要求：学分上限、未建模培养规则 | MAX_CREDITS_EXCEEDED、CREDITS_UNKNOWN、COURSE_FACTS_UNKNOWN、CREDITS_SCOPE_UNSUPPORTED、UNMODELED_CURRICULUM_RULES |
+
+- 分项判决与总判决同口径：有 violation 为 INVALID，无 violation 但有 unknown 为 UNKNOWN，否则 VALID；总判决 = 两个分项中最差的一个。
+- TIMETABLE 判 VALID 的条件：每个方案项都有班次且时间可解析、班次快照已核验（REAL 需 VERIFIED 且同学期），且无冲突、无违规。方案项未指定班次时记 SECTION_UNASSIGNED，不通过。
+- 只有 `UNMODELED` 规则进入 CURRICULUM 的 UNKNOWN；`INFORMATIONAL`（任意选修说明、课程标记图例）不计入。`EXCLUDED` 不参与。
+- 学分缺口、转读完整性 (TRANSCRIPT_COMPLETENESS_UNKNOWN) 与 PENDING_COURSE 仍只在 `/requirements/audit` 中判定；方案核验的 CURRICULUM 分项目前只覆盖 MAX_CREDITS 与未建模规则，不声称已核对全部毕业要求。
+- 测试：`PlanValidationEndpointTest` 覆盖分项拆分、总判决取最差、SECTION_UNASSIGNED；`OfferingVerificationEndpointTest` 覆盖（a）已核验无冲突 → TIMETABLE VALID 而 CURRICULUM UNKNOWN（未建模规则）；（b）OFFICIAL_DOCUMENT 未核验 → TIMETABLE UNKNOWN(TIMETABLE_UNVERIFIED)；（c）BLOCK_DAY 命中 → TIMETABLE INVALID、总判决 INVALID；`A1WorkbookImporterTest` 覆盖 INFORMATIONAL 分类。
+- 已知限制：Python 网关的 `PlanValidation.sections` 暂缺省为空列表（既有 fake/测试数据未带分项），页面尚未展示分项；这两处需在 UI 与 fixture 任务中补齐。
+- 已知限制：`INFORMATIONAL` 是新的处置值。`spring.jpa.hibernate.ddl-auto=update` 不会修改已存在表上的枚举检查约束，已有本地库需用新导入重建（或手工放宽约束）后才能写入此处置值；未重新导入前，现存库中的 `UNMODELED` 行保持原样，仍会作为未知出现。

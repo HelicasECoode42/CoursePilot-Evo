@@ -303,22 +303,42 @@ public final class A1WorkbookImporter {
       if (isEmpty(row, 2)) continue;
       if (!track.equals(text(row, 0, formatter))) continue;
       String sourceType = text(row, 5, formatter);
+      String subject = text(row, 2, formatter);
       // 原表课程行（如 Java EE 开发技术）已由负责人要求从有效清单删除，按排除记录。
       boolean excluded = "原表课程行".equals(sourceType);
+      UnmodeledRule.Disposition disposition =
+          excluded
+              ? UnmodeledRule.Disposition.EXCLUDED
+              : isInformationalNote(subject)
+                  ? UnmodeledRule.Disposition.INFORMATIONAL
+                  : UnmodeledRule.Disposition.UNMODELED;
       unmodeled.add(
           new UnmodeledRule(
               track,
               r + 1,
               text(row, 1, formatter),
-              text(row, 2, formatter),
+              subject,
               text(row, 3, formatter),
               text(row, 4, formatter),
               sourceType,
-              excluded ? UnmodeledRule.Disposition.EXCLUDED : UnmodeledRule.Disposition.UNMODELED));
-      if (!excluded) {
+              disposition));
+      if (disposition == UnmodeledRule.Disposition.UNMODELED) {
         issues.add(new ImportIssue(UNKNOWN_RULE, track, r + 1, 3));
       }
     }
+  }
+
+  /**
+   * 纯说明性备注：只描述「学分分布仅供参考」「任意选修可选任何课程」或课程标记的含义，不产生任何约束。
+   * 只按整句精确匹配（忽略空白），其余备注一律保持未建模。
+   */
+  private static final java.util.Set<String> INFORMATIONAL_NOTES =
+      java.util.Set.of(
+          "○学分分布供参考◇任意选修任何课程",
+          "◎专业核心课程★全英语课程");
+
+  static boolean isInformationalNote(String subject) {
+    return INFORMATIONAL_NOTES.contains(subject.replaceAll("[\\s\\p{Z}]+", ""));
   }
 
   private String text(Row row, int column, DataFormatter formatter) {

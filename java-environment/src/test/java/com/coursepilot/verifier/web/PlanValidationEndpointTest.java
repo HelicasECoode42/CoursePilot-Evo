@@ -296,6 +296,51 @@ class PlanValidationEndpointTest {
         assertTrue(hasCode(d.get("unknownChecks"), "CREDITS_UNKNOWN"));
     }
 
+    // ------------------------------------------------------------- sections (timetable / curriculum)
+
+    private static JsonNode section(JsonNode d, String scope) {
+        for (JsonNode s : d.get("sections")) {
+            if (scope.equals(s.get("scope").asText())) return s;
+        }
+        throw new AssertionError("缺少分项 " + scope);
+    }
+
+    @Test
+    @DisplayName("分项：时间冲突只归 TIMETABLE，学分超限只归 CURRICULUM；总判决取两者最差")
+    void overallIsWorstSectionAndSectionsStaySeparate() throws Exception {
+        Transcript record = new Transcript("S812");
+        record.revise("TEST_CURR_MAX", true, Transcript.SourceKind.SYNTHETIC,
+            Instant.parse("2026-01-01T00:00:00Z"), java.util.List.of());
+        transcripts.save(record);
+        // CS101 + CS201 时间不冲突；上限 1 学分而两门合计 2 学分 -> 只有学分分项不通过。
+        String over = "{\"kind\":\"MAX_CREDITS\",\"courseCode\":null,\"teacherKey\":null,\"dayOfWeek\":null,\"section\":null,\"value\":1,\"sourceText\":\"最多1学分\"}";
+        String b = body("SIMULATION", "S812", ITEM_CS101 + "," + ITEM_CS201, over)
+            .replace("PLAN_CS_2025", "TEST_CURR_MAX");
+        JsonNode d = data(validateAs(b, "S812"));
+        assertEquals("INVALID", d.get("verdict").asText());
+        assertEquals(2, d.get("sections").size());
+        JsonNode timetable = section(d, "TIMETABLE");
+        assertEquals("VALID", timetable.get("verdict").asText());
+        assertEquals(0, timetable.get("violations").size());
+        assertEquals(0, timetable.get("unknownChecks").size());
+        JsonNode curriculum = section(d, "CURRICULUM");
+        assertEquals("INVALID", curriculum.get("verdict").asText());
+        assertTrue(hasCode(curriculum.get("violations"), "MAX_CREDITS_EXCEEDED"));
+        assertTrue(hasCode(d.get("violations"), "MAX_CREDITS_EXCEEDED"), "顶层 violations 仍是合并结果");
+    }
+
+    @Test
+    @DisplayName("分项：方案课未指定班次 -> TIMETABLE UNKNOWN(SECTION_UNASSIGNED)，CURRICULUM 不受影响")
+    void unassignedSectionMakesOnlyTimetableUnknown() throws Exception {
+        String item = "{\"courseCode\":\"CS201\",\"teacherKey\":null,\"classId\":null}";
+        JsonNode d = data(validate(body("SIMULATION", OWNER, item, "")));
+        assertEquals("UNKNOWN", d.get("verdict").asText());
+        JsonNode timetable = section(d, "TIMETABLE");
+        assertEquals("UNKNOWN", timetable.get("verdict").asText());
+        assertTrue(hasCode(timetable.get("unknownChecks"), "SECTION_UNASSIGNED"));
+        assertEquals("VALID", section(d, "CURRICULUM").get("verdict").asText());
+    }
+
     // ------------------------------------------------------------- authorization and shape
 
     @Test

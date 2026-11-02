@@ -9,7 +9,7 @@
   "unknownChecks": [
     {
       "code": "OFFERING_UNAVAILABLE",
-      "message": "未取得本学期班次",
+      "message": "\u672a\u53d6\u5f97\u672c\u5b66\u671f\u73ed\u6b21",
       "field": "offeringSnapshotId",
       "retryable": false
     }
@@ -19,5 +19,26 @@
   ],
   "sourceRefIds": [
     "source:demo"
+  ],
+  "sections": [
+    {
+      "scope": "TIMETABLE",
+      "verdict": "UNKNOWN",
+      "violations": [],
+      "unknownChecks": [
+        {
+          "code": "OFFERING_UNAVAILABLE",
+          "message": "\u672a\u53d6\u5f97\u672c\u5b66\u671f\u73ed\u6b21",
+          "field": "offeringSnapshotId",
+          "retryable": false
+        }
+      ]
+    },
+    {
+      "scope": "CURRICULUM",
+      "verdict": "VALID",
+      "violations": [],
+      "unknownChecks": []
+    }
   ]
 }

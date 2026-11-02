@@ -148,5 +148,25 @@
     "file": "invalid-offering-verification-bad-sha.json",
     "definition": "OfferingVerificationRequest",
     "valid": false
+  },
+  {
+    "file": "verification-two-sections.json",
+    "definition": "PlanValidation",
+    "valid": true
+  },
+  {
+    "file": "invalid-section-valid-with-unknown.json",
+    "definition": "PlanValidation",
+    "valid": false
+  },
+  {
+    "file": "invalid-overall-not-worst-section.json",
+    "definition": "PlanValidation",
+    "valid": false
+  },
+  {
+    "file": "invalid-section-scope.json",
+    "definition": "PlanValidation",
+    "valid": false
   }
 ]

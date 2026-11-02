@@ -7,6 +7,12 @@ import com.coursepilot.verifier.persistence.entity.CurriculumSnapshot;
 import com.coursepilot.verifier.persistence.repo.CurriculumSnapshotRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.coursepilot.verifier.persistence.entity.CurriculumUnmodeledRule;
+import com.coursepilot.verifier.persistence.entity.Transcript;
+import com.coursepilot.verifier.persistence.repo.CurriculumUnmodeledRuleRepository;
+import com.coursepilot.verifier.persistence.repo.TranscriptRepository;
+import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -166,6 +172,106 @@ class OfferingVerificationEndpointTest {
         assertEquals("REAL_TIMETABLE", after.get("scope").asText());
         assertFalse(hasCode(after.get("unknownChecks"), "TIMETABLE_UNVERIFIED"));
         assertEquals("VALID", after.get("verdict").asText());
+    }
+
+    /** 同一培养快照下的学业记录 S811：带一条未建模规则，用于验证分项互不吞并。 */
+    @Autowired private TranscriptRepository transcripts;
+    @Autowired private CurriculumUnmodeledRuleRepository unmodeledRules;
+
+    private void ensureRulesCurriculum() {
+        if (snapshots.findById("TEST_CURR_RULES").isPresent()) return;
+        snapshots.save(new CurriculumSnapshot("TEST_CURR_RULES", CurriculumSnapshot.Kind.CURRICULUM,
+            CurriculumSnapshot.State.PUBLISHED, CurriculumSnapshot.SourceKind.SYNTHETIC,
+            CurriculumSnapshot.SourceValidation.SYNTHETIC, null, Instant.parse("2026-01-01T00:00:00Z")));
+        unmodeledRules.save(new CurriculumUnmodeledRule(snapshots.getReferenceById("TEST_CURR_RULES"),
+            "测试表", 7, "测试表!A7", "毕业前至少修读一门全英语课程", "synthetic raw note",
+            "未建模（测试）", "原表注释/规则", CurriculumUnmodeledRule.Disposition.UNMODELED));
+        Transcript record = new Transcript("S811");
+        record.revise("TEST_CURR_RULES", true, Transcript.SourceKind.SYNTHETIC,
+            Instant.parse("2026-01-01T00:00:00Z"), List.of());
+        transcripts.save(record);
+    }
+
+    /** 导入并核验一个 REAL 开课快照（CS201 周五、CS101 周一，互不冲突），返回快照编号。 */
+    private String verifiedRulesOfferings(String term, String prefix) throws Exception {
+        String id = snapshotOf(importOffering(importBody(term, "OFFICIAL_DOCUMENT",
+            offering(prefix + "_CS201_FRI", "CS201", "周五第5-6节{第1-16周}"),
+            offering(prefix + "_CS101_MON", "CS101", "周一第5-6节{第1-16周}"))));
+        assertEquals(200, verify(id, request("核验甲", "上传乙", 30, 0), GOOD_ADMIN).getResponse().getStatus());
+        return id;
+    }
+
+    private static String rulesPlan(String snapshotId, String prefix, String constraints) {
+        return """
+            {"schemaVersion":"1.0","curriculumSnapshotId":"TEST_CURR_RULES","offeringSnapshotId":"%s",
+             "academicRecordId":"S811","mode":"REAL","items":[
+               {"courseCode":"CS201","teacherKey":null,"classId":"%s_CS201_FRI"},
+               {"courseCode":"CS101","teacherKey":null,"classId":"%s_CS101_MON"}],"hardConstraints":[%s]}
+            """.formatted(snapshotId, prefix, prefix, constraints);
+    }
+
+    private MvcResult validateAs(String body, String subject) throws Exception {
+        return mvc.perform(post("/api/v1/plans/validate").header(SERVICE, GOOD_SERVICE).header(SUBJECT, subject)
+            .contentType(MediaType.APPLICATION_JSON).content(body)).andReturn();
+    }
+
+    private static JsonNode section(JsonNode d, String scope) {
+        for (JsonNode s : d.get("sections")) {
+            if (scope.equals(s.get("scope").asText())) return s;
+        }
+        throw new AssertionError("缺少分项 " + scope);
+    }
+
+    @Test
+    void verifiedConflictFreeTimetablePassesWhileCurriculumStaysUnknown() throws Exception {
+        ensureRulesCurriculum();
+        String id = verifiedRulesOfferings("2026-2027-RULES-A", "RA");
+        JsonNode d = data(validateAs(rulesPlan(id, "RA", ""), "S811"));
+
+        assertEquals("REAL_TIMETABLE", d.get("scope").asText());
+        assertEquals("UNKNOWN", d.get("verdict").asText(), "总判决随最差分项：毕业要求侧 UNKNOWN");
+        assertEquals(0, d.get("violations").size());
+
+        JsonNode timetable = section(d, "TIMETABLE");
+        assertEquals("VALID", timetable.get("verdict").asText());
+        assertEquals(0, timetable.get("unknownChecks").size());
+
+        JsonNode curriculum = section(d, "CURRICULUM");
+        assertEquals("UNKNOWN", curriculum.get("verdict").asText());
+        assertEquals(0, curriculum.get("violations").size());
+        assertTrue(hasCode(curriculum.get("unknownChecks"), "UNMODELED_CURRICULUM_RULES"));
+        // 顶层 unknownChecks 仍是两个分项的合并：这里只有毕业要求侧的一条。
+        assertEquals(1, d.get("unknownChecks").size());
+    }
+
+    @Test
+    void unverifiedOfficialDocumentMakesTimetableUnknownWithTimetableUnverified() throws Exception {
+        ensureRulesCurriculum();
+        String id = snapshotOf(importOffering(importBody("2026-2027-RULES-B", "OFFICIAL_DOCUMENT",
+            offering("RB_CS201_FRI", "CS201", "周五第5-6节{第1-16周}"),
+            offering("RB_CS101_MON", "CS101", "周一第5-6节{第1-16周}"))));
+        JsonNode d = data(validateAs(rulesPlan(id, "RB", ""), "S811"));
+
+        assertEquals("COURSE_ONLY", d.get("scope").asText());
+        JsonNode timetable = section(d, "TIMETABLE");
+        assertEquals("UNKNOWN", timetable.get("verdict").asText());
+        assertTrue(hasCode(timetable.get("unknownChecks"), "TIMETABLE_UNVERIFIED"));
+        assertEquals(0, timetable.get("violations").size());
+    }
+
+    @Test
+    void blockDayHitMakesTimetableInvalidAndOverallInvalidEvenWithCurriculumUnknown() throws Exception {
+        ensureRulesCurriculum();
+        String id = verifiedRulesOfferings("2026-2027-RULES-C", "RC");
+        String blockFriday = "{\"kind\":\"BLOCK_DAY\",\"courseCode\":null,\"teacherKey\":null,"
+            + "\"dayOfWeek\":5,\"section\":null,\"value\":null,\"sourceText\":\"周五不排课\"}";
+        JsonNode d = data(validateAs(rulesPlan(id, "RC", blockFriday), "S811"));
+
+        assertEquals("INVALID", d.get("verdict").asText());
+        JsonNode timetable = section(d, "TIMETABLE");
+        assertEquals("INVALID", timetable.get("verdict").asText());
+        assertTrue(hasCode(timetable.get("violations"), "CONSTRAINT_BLOCK_DAY"));
+        assertEquals("UNKNOWN", section(d, "CURRICULUM").get("verdict").asText());
     }
 
     private MvcResult validate(String body) throws Exception {

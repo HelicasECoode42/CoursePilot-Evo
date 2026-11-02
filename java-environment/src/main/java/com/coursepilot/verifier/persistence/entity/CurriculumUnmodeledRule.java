@@ -13,8 +13,11 @@ import jakarta.persistence.*;
 @Table(name = "curriculum_unmodeled_rule")
 public class CurriculumUnmodeledRule {
 
-    /** 与 ImportModels.UnmodeledRule.Disposition 一一对应。 */
-    public enum Disposition { UNMODELED, EXCLUDED }
+    /**
+     * 与 ImportModels.UnmodeledRule.Disposition 一一对应。
+     * INFORMATIONAL 只是纯说明性文字（如任意选修说明、课程标记图例），不是约束，不带入任何分项的 unknown。
+     */
+    public enum Disposition { UNMODELED, EXCLUDED, INFORMATIONAL }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

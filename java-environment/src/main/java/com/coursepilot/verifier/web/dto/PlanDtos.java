@@ -37,7 +37,10 @@ public final class PlanDtos {
         Double value,
         String sourceText) {}
 
-    /** contracts: PlanValidation。verdict 取 VALID / INVALID / UNKNOWN；scope 取 COURSE_ONLY / REAL_TIMETABLE / SIMULATION。 */
+    /**
+     * contracts: PlanValidation。verdict 取 VALID / INVALID / UNKNOWN；scope 取 COURSE_ONLY / REAL_TIMETABLE / SIMULATION。
+     * verdict 是 sections 中最差的分项；violations / unknownChecks 是所有分项的合并（兼容旧消费者）。
+     */
     public record PlanValidation(
         String verifierResultId,
         String verdict,
@@ -48,5 +51,16 @@ public final class PlanDtos {
         List<AuditDtos.Issue> violations,
         List<AuditDtos.Issue> unknownChecks,
         List<String> performedChecks,
-        List<String> sourceRefIds) {}
+        List<String> sourceRefIds,
+        List<PlanSection> sections) {}
+
+    /**
+     * contracts: PlanSection。scope 取 TIMETABLE（本学期课表核验）/ CURRICULUM（毕业要求核对）；
+     * verdict 取值与总判决相同，但只由本分项的 violations / unknownChecks 推出。
+     */
+    public record PlanSection(
+        String scope,
+        String verdict,
+        List<AuditDtos.Issue> violations,
+        List<AuditDtos.Issue> unknownChecks) {}
 }
