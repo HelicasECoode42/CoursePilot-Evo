@@ -110,6 +110,8 @@ start_java() {
   export COURSEPILOT_ADMIN_KEY="${CP_ADMIN_KEY:-}"
   # 合成开课/培养方案导入：演示默认开启（模拟数据必须显式开关）；COURSEPILOT_IMPORT_SYNTHETIC=false 可关闭。
   export COURSEPILOT_SYNTHETIC_IMPORT_ENABLED="${COURSEPILOT_IMPORT_SYNTHETIC:-true}"
+  # 整学期官方课表（6431 条，约 2.5 MB JSON）需整体导入同一快照，超过默认 2 MiB 请求体上限；放宽到 8 MiB，仍为有界上限。
+  export COURSEPILOT_MAX_JSON_BODY_BYTES="${COURSEPILOT_MAX_JSON_BODY_BYTES:-8388608}"
   launch java "$REPO/java-environment" ./mvnw -B spring-boot:run
   wait_port 8081 180 java
 }
