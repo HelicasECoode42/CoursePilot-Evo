@@ -2,6 +2,8 @@
 
 核对日期：2026-11-01。代码审核由 Luna 执行，主 Agent 检查 Actions 日志、启动服务并进行浏览器与 HTTP 验收。
 
+2026-11-02 更新：[PR #51](https://github.com/HelicasECoode42/CoursePilot-Evo/pull/51) 已合并到 `main`，合并提交为 `d6380364375f835da3abb6e04cc7a0e6c4d48a87`。下文版本差异与失败记录对应修复前的检查。合并前的同一分支提交已通过[项目检查](https://github.com/HelicasECoode42/CoursePilot-Evo/actions/runs/41365658939)和[集成检查](https://github.com/HelicasECoode42/CoursePilot-Evo/actions/runs/41365772637)。
+
 ## 版本
 
 - 本地基线：`feat/b-contract-endpoints`，`7f6bb436ace6f50c4b70f73389095c8bc5d32394`。
@@ -65,4 +67,4 @@
 
 修改前：`refs/checkpoints/coursepilot/20261101T133212079673Z-readme-review-before`，提交 `04df0ae6c27bd9d9c327bc0667e292ddcaaab73a`。Checkpoint 不改变分支或工作区，排除被忽略的配置和数据库。
 
-后续已完成上述CI检查修复与独立浏览器验收，详细结果见[CI与学生网页验收](checkpoints/ci-and-web-acceptance-2026-11-01.md)。GitHub原运行尚未重跑。
+后续已完成上述 CI 检查修复与独立浏览器验收，详细结果见[CI 与学生网页验收](checkpoints/ci-and-web-acceptance-2026-11-01.md)。旧运行保留原失败结果，修复后的检查见本文开头链接。
