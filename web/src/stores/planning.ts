@@ -853,6 +853,8 @@ export function createPlanningStore(
           selectedCurriculumId.value = null;
         }
         sessionStatus.value = "ready";
+        // 记录列表不保存在浏览器里，恢复后重新读取，否则规划页会误以为还没有学业记录。
+        void loadRecords();
       } catch (error) {
         if (version !== sessionVersion.value) return;
         if (error instanceof ApiFailure && error.kind === "aborted") return;
@@ -1182,12 +1184,16 @@ export function createPlanningStore(
         if (!isCurrentRecordRequest(version)) return;
         records.value = list.items;
         // 刷新恢复时保留原先选中的记录；不在列表里才退回第一条。
+        // 只有真的换了记录才调用 setSelectedRecord：它会清空当前方案结果，
+        // 恢复或重新读取列表时不能把刚恢复的方案抹掉。
         const kept = list.items.find(
           (item) => item.academicRecordId === selectedRecordId.value,
         );
-        setSelectedRecord(
-          kept?.academicRecordId ?? list.items[0]?.academicRecordId ?? null,
-        );
+        const nextRecordId =
+          kept?.academicRecordId ?? list.items[0]?.academicRecordId ?? null;
+        if (nextRecordId !== selectedRecordId.value) {
+          setSelectedRecord(nextRecordId);
+        }
         recordsStatus.value = "ready";
       } catch (error) {
         if (!isCurrentRecordRequest(version)) return;

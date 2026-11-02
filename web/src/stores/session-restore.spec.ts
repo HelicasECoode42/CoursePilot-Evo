@@ -106,6 +106,45 @@ describe("刷新后恢复会话与草稿", () => {
     expect(store.selectedCurriculumId).toBe(curriculum.snapshotId);
   });
 
+  it("恢复后重新读取学业记录不会抹掉刚恢复的方案结果", async () => {
+    const storage = new MemoryStorage();
+    const state = savedState();
+    const answer = {
+      schemaVersion: "1.0",
+      decision: "UNABLE_TO_VERIFY",
+      recommendations: [],
+      unknowns: [],
+    } as never;
+    writeSavedSession(storage, {
+      ...state,
+      selectedRecordId: "record:1",
+      planningResult: answer,
+    });
+    const api = client({
+      listSessionRecords: vi.fn(async () => ({
+        items: [
+          {
+            academicRecordId: "record:1",
+            curriculumSnapshotId: curriculum.snapshotId,
+            completedCourses: [],
+            transcriptComplete: false,
+            sourceKind: "USER_IMPORT",
+            createdAt: "2026-10-30T00:00:00Z",
+          },
+        ],
+      })),
+    } as never);
+    const store = createPlanningStore(api, storage)();
+
+    await store.restoreSavedSession();
+    await flushPromises();
+
+    expect(store.selectedRecordId).toBe("record:1");
+    expect(store.selectedRecord?.academicRecordId).toBe("record:1");
+    expect(store.planningResult).not.toBeNull();
+    expect(readSavedSession(storage)?.planningResult).not.toBeNull();
+  });
+
   it("服务端 401（过期或服务重启）：清空草稿、清除保存、提示会话已过期，不静默新建", async () => {
     const storage = new MemoryStorage();
     writeSavedSession(storage, savedState());
