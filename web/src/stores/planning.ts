@@ -266,7 +266,7 @@ export function createPlanningStore(
         return {
           retryMode: "none" as const,
           message:
-            "本会话的对话额度已用完，无法再生成回答。请刷新页面重新开始；刷新后草稿会清空。",
+            "本会话的对话额度已用完，无法再生成回答。请重新开始会话后再试。",
         };
       }
       if (code === "MODEL_INVALID_OUTPUT") {
@@ -683,7 +683,12 @@ export function createPlanningStore(
     }
 
     async function startSession(): Promise<void> {
-      if (sessionStatus.value === "loading") return;
+      if (sessionStatus.value === "loading") {
+        // 页面刷新后恢复会话还在进行中：等它完成，而不是直接返回一个仍是 loading 的状态，
+        // 否则调用方会把「还没好」误判为「建立会话失败」。
+        if (restoreTask !== null) await restoreTask;
+        return;
+      }
       if (
         sessionId.value &&
         (!expiresAt.value ||
@@ -788,7 +793,14 @@ export function createPlanningStore(
      * 再用两个只读查询确认令牌仍有效：401 说明会话已过期或服务已重启，清空并提示；
      * 其他错误保留令牌，状态记为 error，学生可以重试。
      */
-    async function restoreSavedSession(): Promise<void> {
+    let restoreTask: Promise<void> | null = null;
+
+    function restoreSavedSession(): Promise<void> {
+      if (restoreTask === null) restoreTask = restoreOnce();
+      return restoreTask;
+    }
+
+    async function restoreOnce(): Promise<void> {
       if (storage === null || client.mode === "fixture") return;
       if (sessionId.value !== null) return;
       const saved = readSavedSession(storage);

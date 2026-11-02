@@ -158,6 +158,31 @@ describe("刷新后恢复会话与草稿", () => {
     expect(storage.getItem(SAVED_SESSION_KEY)).toBeNull();
   });
 
+  it("恢复尚未完成时，页面发起的 startSession 等待恢复结束，而不是报告建立会话失败", async () => {
+    const storage = new MemoryStorage();
+    writeSavedSession(storage, savedState());
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const api = client({
+      listCurricula: vi.fn(async () => {
+        await gate;
+        return { items: [curriculum], unknownMessages: [] };
+      }),
+    });
+    const store = createPlanningStore(api, storage)();
+
+    const restoring = store.restoreSavedSession();
+    const starting = store.startSession();
+    release();
+    await Promise.all([restoring, starting]);
+
+    expect(store.sessionStatus).toBe("ready");
+    expect(store.errorMessage).toBe("");
+    expect(api.createSession).not.toHaveBeenCalled();
+  });
+
   it("没有传入存储时不持久化、不恢复（测试与演示路径不受影响）", async () => {
     const api = client();
     const store = createPlanningStore(api)();

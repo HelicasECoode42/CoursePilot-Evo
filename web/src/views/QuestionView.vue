@@ -308,13 +308,13 @@ async function openRecords() {
       当前连接本地测试服务。培养资料来源以所选方案为准，模拟班次不代表下学期开课情况。
     </p>
     <p v-else class="notice" role="note">
-      当前是服务连接模式。会话只保存在本次页面内存中；刷新页面后需要重新开始。
+      当前是服务连接模式。会话与已填写的答案保存在本标签页中，刷新页面可以接着用；关闭标签页后需要重新开始。
     </p>
     <p v-if="store.errorMessage" class="notice notice--error" role="alert">
       {{ store.errorMessage }}
     </p>
     <p v-if="store.sessionStatus === 'expired'" class="microcopy" role="status">
-      已填写的目标暂存在本页内存中；建立新会话后可以继续，刷新页面会清除。
+      会话已过期或本地服务已重启，已填写的目标已清空。请重新开始，再继续填写。
     </p>
     <button
       class="button button--primary"
