@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>SYNTHETIC school progress fixture</title></head>
+<body>
+<!-- 虚构测试数据：结构模仿学业情况页面，名称、学分与状态均为假的。 -->
+<ul class="treeview">
+  <li xfyqjd_id="SYN-A" leaf="false">
+    <div class="hitarea first-hitarea start-hitarea collapsable-hitarea"></div>
+    <div class="title"><p class="title1">示例主修类别 要求学分：40 获得学分：10 未获得学分：30</p></div>
+    <ul>
+      <li xfyqjd_id="SYN-A1" leaf="false">
+        <div class="hitarea"></div>
+        <div class="title"><p class="title1">示例子类别甲 要求学分：20 获得学分：5 未获得学分：15</p></div>
+        <ul>
+          <li xfyqjd_id="SYN-A1a" leaf="true">
+            <div class="title"><p class="title1">示例孙类别 要求学分：8 获得学分：2 未获得学分：6</p></div>
+            <table>
+              <thead><tr><th>修读状态</th><th>成绩学年</th><th>学期</th><th>课程号</th><th></th><th>课程名称</th><th>学分</th><th>成绩</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><span class="icon"><i title="已修"></i></span></td><td>2025-2026</td><td>1</td><td>SYN0001</td><td></td>
+                  <td>示例课程一</td><td>2</td><td>90</td>
+                </tr>
+                <tr>
+                  <td><span class="icon"><i title="未修"></i></span></td><td></td><td></td><td>SYN0002</td><td></td>
+                  <td>示例课程二</td><td>3</td><td></td>
+                </tr>
+                <tr>
+                  <td><img alt="在修" src="legend-a.png"></td><td>2026-2027</td><td>1</td><td>SYN0003</td><td></td>
+                  <td>示例课程三</td><td>2</td><td></td>
+                </tr>
+                <tr>
+                  <td><span>无标签状态</span></td><td></td><td></td><td>SYN0004</td><td></td>
+                  <td>示例课程四</td><td>1</td><td></td>
+                </tr>
+              </tbody>
+            </table>
+          </li>
+        </ul>
+      </li>
+      <li xfyqjd_id="SYN-A2" leaf="true">
+        <div class="title"><p class="title1">示例子类别乙 共（2门） 要求学分：4 获得学分：0 未获得学分：4</p></div>
+        <table>
+          <thead><tr><th>修读状态</th><th>课程号</th><th>课程名称</th><th>学分</th></tr></thead>
+          <tbody>
+            <tr><td><i title="未过"></i></td><td>SYN0005</td><td>示例课程五</td><td>2</td></tr>
+          </tbody>
+        </table>
+      </li>
+    </ul>
+  </li>
+</ul>
+</body>
+</html>
