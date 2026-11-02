@@ -10,6 +10,7 @@ import type { Router } from "vue-router";
 import { api } from "./api";
 import {
   createSchoolProgressBridge,
+  schoolImportErrorMessage,
   type SchoolProgressBridge,
 } from "./domain/school-progress-bridge";
 import { schoolProgressFromBridge } from "./domain/school-progress";
@@ -64,10 +65,7 @@ export async function saveSchoolProgressPayload(
         : `已保存 ${snapshot.courses.length} 条课程记录和 ${snapshot.nodes.length} 个学校分类；下方可查看学校学业情况及更新后的学业核对。`;
   } catch (error) {
     schoolImportSucceeded.value = false;
-    schoolImportMessage.value =
-      error instanceof Error && error.message
-        ? error.message
-        : "未能保存学校学业进度，请重试。";
+    schoolImportMessage.value = schoolImportErrorMessage(error);
     throw error;
   } finally {
     schoolImporting.value = false;
