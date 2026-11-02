@@ -17,6 +17,13 @@
 #   - preview 只服务构建产物，带安全响应头（CSP、nosniff、X-Frame-Options 等），/api 转发到 8000。
 # 本脚本不打印任何密钥值，只输出组件状态、端口、HTTP 状态码和路径。
 # --caffeinate 会用 caffeinate -i 防止 Mac 因空闲睡眠断开服务；stop 时一并停掉。
+#
+# 演示模式（只影响本脚本启动的组件）
+#   CP_ADMIN_KEY                     管理员密钥（data/private/stack.env）；映射为 Java 的 COURSEPILOT_ADMIN_KEY。
+#                                    开课/培养方案导入（X-Admin-Key）需要它，未配置时导入接口返回 ADMIN_KEY_NOT_CONFIGURED。
+#   COURSEPILOT_IMPORT_SYNTHETIC     默认 true：允许 SYNTHETIC（模拟）导入；设为 false 关闭。
+#   COURSEPILOT_WEB_MODE             默认 simulation：前端构建为模拟模式（规划用模拟开课，页面显示「演示环境：课表为模拟数据」横幅）；
+#                                    设为 http 恢复真实模式构建。
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -99,6 +106,10 @@ wait_log() {
 # ---------- 各组件的启动方式 ----------
 
 start_java() {
+  # 管理员密钥（开课/培养方案导入的 X-Admin-Key 校验）只从 CP_ADMIN_KEY 映射，不打印。
+  export COURSEPILOT_ADMIN_KEY="${CP_ADMIN_KEY:-}"
+  # 合成开课/培养方案导入：演示默认开启（模拟数据必须显式开关）；COURSEPILOT_IMPORT_SYNTHETIC=false 可关闭。
+  export COURSEPILOT_SYNTHETIC_IMPORT_ENABLED="${COURSEPILOT_IMPORT_SYNTHETIC:-true}"
   launch java "$REPO/java-environment" ./mvnw -B spring-boot:run
   wait_port 8081 180 java
 }
@@ -114,7 +125,8 @@ start_api() {
 build_web() {
   local log="$LOG_DIR/web-build.log"
   echo "web：生产构建中（输出 ${log}）..."
-  (cd "$REPO/web" && VITE_API_BASE_URL="/" npm run build >"$log" 2>&1) || die "web 生产构建失败，看日志：$log"
+  # 演示默认 simulation：规划用 SYNTHETIC 模拟开课并显示「演示环境」横幅；设 COURSEPILOT_WEB_MODE=http 恢复真实模式
+  (cd "$REPO/web" && VITE_API_BASE_URL="/" VITE_COURSEPILOT_MODE="${COURSEPILOT_WEB_MODE:-simulation}" npm run build >"$log" 2>&1) || die "web 生产构建失败，看日志：$log"
 }
 
 start_web() {
