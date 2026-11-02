@@ -25,7 +25,8 @@ public class CurriculumSnapshot {
     public enum State { PUBLISHED, REJECTED }
 
     /** contracts: SnapshotSummary.sourceKind */
-    public enum SourceKind { CURRICULUM_FILE, BROWSER_SNAPSHOT, SYNTHETIC }
+    /** OFFICIAL_DOCUMENT：官方公开文件（如教务课表 PDF）转换所得，仍需人工抽样核验后才能 VERIFIED。 */
+    public enum SourceKind { CURRICULUM_FILE, BROWSER_SNAPSHOT, OFFICIAL_DOCUMENT, SYNTHETIC }
 
     /** contracts: SnapshotSummary.sourceValidation */
     public enum SourceValidation { VERIFIED, UNVERIFIED, SYNTHETIC }
@@ -92,5 +93,16 @@ public class CurriculumSnapshot {
         this.capturedAt = capturedAt;
         this.calendarWeeks = calendarWeeks;
         this.sectionsPerDay = sectionsPerDay;
+    }
+
+    /**
+     * 人工核验结论的落地：VERIFIED 或 REJECTED。只由 OfferingVerificationService 调用。
+     * 以最近一次核验为准：通过则 VERIFIED，否则回到 UNVERIFIED。SYNTHETIC 快照不接受核验。
+     */
+    public void applyVerification(boolean passed) {
+        if (this.sourceValidation == SourceValidation.SYNTHETIC) {
+            throw new IllegalStateException("SYNTHETIC 快照不可核验");
+        }
+        this.sourceValidation = passed ? SourceValidation.VERIFIED : SourceValidation.UNVERIFIED;
     }
 }

@@ -31,7 +31,8 @@ import org.springframework.transaction.annotation.Transactional;
  * 三条硬规则（AGENTS.md）：
  * 1. 时间只由唯一的 TimeParser 从 meetingTextRaw 重新解析；客户端的 meetings 只做结构校验，
  *    不入库；客户端的 parseStatus 只用来比对并给出提示，不采信。
- * 2. sourceValidation 由 Java 决定：SYNTHETIC 来源为 SYNTHETIC，其余一律 UNVERIFIED。
+ * 2. sourceValidation 由 Java 决定：SYNTHETIC 来源为 SYNTHETIC，其余（含 OFFICIAL_DOCUMENT）一律 UNVERIFIED，
+ *    只能经人工抽样核验接口（OfferingVerificationService）改为 VERIFIED。
  *    上传者声称什么都不影响它，也不会自动变成 VERIFIED。
  * 3. 解析不出的时间保留为 UNPARSED，不丢班次；读取与计划核验都把它当未知。
  *
@@ -41,7 +42,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class OfferingImportService {
 
-    public static final int MAX_OFFERINGS = 2000;
+    /**
+     * 单次导入班次上限。2026-27 秋季官方课表共 6431 条，须整体进入同一快照：
+     * 同一学期拆成多个快照后，单快照查询与方案核验都只能看到其中一部分。
+     * 请求体上限需由 coursepilot.max-json-body-bytes 另行放宽（见 demo_public.sh）。
+     */
+    public static final int MAX_OFFERINGS = 7000;
     public static final int MAX_MEETINGS = 40;
     private static final String SNAPSHOT_PREFIX = "OFS_";
     private static final Pattern ID = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$");
@@ -52,7 +58,7 @@ public class OfferingImportService {
     private static final Set<String> OFFERING_FIELDS = Set.of("courseCode", "classId", "teacherKey",
         "teacherText", "credits", "capacity", "meetingTextRaw", "meetings", "parseStatus", "sourceRefId");
     private static final Set<String> MEETING_FIELDS = Set.of("dayOfWeek", "sectionStart", "sectionEnd", "weeks");
-    private static final Set<String> SOURCE_KINDS = Set.of("BROWSER_SNAPSHOT", "SYNTHETIC");
+    private static final Set<String> SOURCE_KINDS = Set.of("BROWSER_SNAPSHOT", "OFFICIAL_DOCUMENT", "SYNTHETIC");
     private static final Set<String> PARSE_STATUSES = Set.of("PARSED", "UNPARSED", "INVALID");
 
     private final CourseOfferingRepository offerings;

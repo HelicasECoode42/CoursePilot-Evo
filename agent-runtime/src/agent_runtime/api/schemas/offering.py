@@ -10,7 +10,7 @@ from pydantic import Field, StringConstraints, field_validator
 from ._base import Credits, DomainModel, Id
 
 ParseStatus = Literal["PARSED", "UNPARSED", "INVALID"]
-OfferingSourceKind = Literal["BROWSER_SNAPSHOT", "SYNTHETIC"]
+OfferingSourceKind = Literal["BROWSER_SNAPSHOT", "OFFICIAL_DOCUMENT", "SYNTHETIC"]
 
 Week = Annotated[int, Field(ge=1, le=60)]
 

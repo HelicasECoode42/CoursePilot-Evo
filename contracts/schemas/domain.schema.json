@@ -818,6 +818,7 @@
           "type": "string",
           "enum": [
             "BROWSER_SNAPSHOT",
+            "OFFICIAL_DOCUMENT",
             "SYNTHETIC"
           ]
         },
@@ -851,7 +852,7 @@
             "$ref": "#/$defs/CourseOffering"
           },
           "minItems": 1,
-          "maxItems": 2000
+          "maxItems": 7000
         }
       },
       "required": [
@@ -861,6 +862,111 @@
         "capturedAt",
         "calendar",
         "offerings"
+      ]
+    },
+    "OfferingVerificationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "verifierName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "uploaderName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "sampleSize": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 100000
+        },
+        "errorCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "sampleFileSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "verifierName",
+        "uploaderName",
+        "sampleSize",
+        "errorCount",
+        "sampleFileSha256"
+      ]
+    },
+    "OfferingVerificationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "snapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "verificationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "VERIFIED",
+            "REJECTED"
+          ]
+        },
+        "sourceValidation": {
+          "type": "string",
+          "enum": [
+            "VERIFIED",
+            "UNVERIFIED"
+          ]
+        },
+        "sampleSize": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 100000
+        },
+        "errorCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "verifiedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "snapshotId",
+        "verificationId",
+        "outcome",
+        "sourceValidation",
+        "sampleSize",
+        "errorCount",
+        "verifiedAt"
       ]
     },
     "AuditRequest": {
@@ -2367,6 +2473,7 @@
           "enum": [
             "CURRICULUM_FILE",
             "BROWSER_SNAPSHOT",
+            "OFFICIAL_DOCUMENT",
             "SYNTHETIC"
           ]
         },

@@ -21,6 +21,8 @@ uv run python scripts/self_check.py
 
 ## 变更记录
 
+- `OfferingImport.sourceKind` 与 `SnapshotSummary.sourceKind` 增加 `OFFICIAL_DOCUMENT`（官方公开课表文件转换所得），导入后 sourceValidation 恒为 `UNVERIFIED`。`OfferingImport.offerings` 上限由 2000 提高到 7000：2026-27 秋季官方课表共 6431 条，须整体进入同一开课快照，否则同一学期被拆成多个快照。新增 `POST /api/v1/offering-snapshots/{snapshotId}/verification`（`verifyOfferingSnapshot`，管理员密钥）与 `OfferingVerificationRequest`/`OfferingVerificationResult`：核验人与上传人不得相同；样本至少 30 条；错误率不超过 2% 记为 VERIFIED，否则 REJECTED；SYNTHETIC 快照不可核验；每次写审计记录。只有 mode=REAL、快照 VERIFIED 且方案项都在该快照内时，方案核验 scope 才为 REAL_TIMETABLE。Python 网关两处 sourceKind 枚举同步加入该值。
+
 - 新增 `POST /api/v1/advice/chat` 及 AdviceChatRequest/Answer、课程建议、学校进度引用与确认动作 Schema，支持有来源的课程咨询。相同请求重放不重复调用模型；明确选课与优先考虑分别进入硬条件和软偏好。完整字段与交互见 [对话接口](../docs/29-advice-chat-contract.md)。
 
 - `Recommendation` 增加可选 `courseRationales` 和 `explorationDirections`：逐课程理由携带所引用的评价编号，探索方向包含可执行的学习步骤。Python 校验理由所引用的评价来自同一课程的已查询证据；方向内容为模型建议。

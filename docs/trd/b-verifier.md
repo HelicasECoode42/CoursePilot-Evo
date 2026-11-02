@@ -173,3 +173,10 @@ sequenceDiagram
 课程目录中的 `Course` 只作为跨版本的课程编号身份；名称、学分、类别存于 `CurriculumCourse` 的快照关联，来源元数据单独存于 `SourceReference`，目录响应携带 `sourceRefIds` 和完整的 `provenance`。课程查询、学业核对及 `MAX_CREDITS` 均按请求的培养快照读取关联属性。合成种子只写入新建的合成培养快照，不依据旧 `Course` 行或旧关联推导版本属性/来源。
 
 升级到该模型后，旧快照关联的新增字段保持空值，不会被全局课程信息自动补齐。课程查询遇到缺属性或缺来源的关联返回 `SNAPSHOT_COURSE_FACTS_UNKNOWN`（HTTP 409）；学业核对和方案学分上限保留 UNKNOWN。该行为需要后续导入流程提供来源和快照字段后才能恢复确定核验。目前仓库没有真实授权培养计划数据，本实现和测试均为 synthetic；不构成真实课程来源或真实规则验收。属性和来源实体已可持久化，导入发布事务仍未接入。
+
+### 开课快照人工核验与多段时间（2026-11-02）
+
+- `OFFICIAL_DOCUMENT` 来源导入后恒为 UNVERIFIED。`POST /api/v1/offering-snapshots/{snapshotId}/verification` 写入抽样核验审计（核验人、上传人、样本数、错误数、样本 SHA-256、结论）。错误率 ≤ 2% 为 VERIFIED，否则 REJECTED；以最近一次结论为准。核验人与上传人（忽略大小写与空白）相同拒绝；SYNTHETIC 快照不可核验。
+- 方案核验：mode=REAL 且快照 VERIFIED、带学期、方案项都在该快照内，scope 为 REAL_TIMETABLE，时间检查照常执行，不再产生 TIMETABLE_UNVERIFIED。仍缺任一条件则保持 COURSE_ONLY 与未知项。
+- TimeParser 支持一个周次块对应多段节次（`星期四第3-4,7-8节{9-12周}` 拆为两段）。截断或残缺片段仍整体未知。
+- 尚未实现：核验过期机制（快照没有有效期字段，REAL 只检查学期非空）；SnapshotSummary 不展示核验人与时间。

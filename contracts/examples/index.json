@@ -123,5 +123,30 @@
     "file": "advice-chat-answer.json",
     "definition": "AdviceChatAnswer",
     "valid": true
+  },
+  {
+    "file": "offering-import-official-document.json",
+    "definition": "OfferingImport",
+    "valid": true
+  },
+  {
+    "file": "invalid-offering-import-unknown-source-kind.json",
+    "definition": "OfferingImport",
+    "valid": false
+  },
+  {
+    "file": "offering-verification-request.json",
+    "definition": "OfferingVerificationRequest",
+    "valid": true
+  },
+  {
+    "file": "invalid-offering-verification-small-sample.json",
+    "definition": "OfferingVerificationRequest",
+    "valid": false
+  },
+  {
+    "file": "invalid-offering-verification-bad-sha.json",
+    "definition": "OfferingVerificationRequest",
+    "valid": false
   }
 ]

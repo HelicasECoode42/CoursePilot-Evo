@@ -40,7 +40,8 @@ import java.util.stream.Collectors;
  * 全部完成且无 violation → VALID。未知永远不能被当成通过。
  *
  * 范围（docs/04）：只有 mode=SIMULATION、offeringSnapshotId 非空、且每个班次都存在且 sourceKind=SYNTHETIC
- * 才是 SIMULATION；其余一律 COURSE_ONLY。REAL_TIMETABLE 目前没有任何已验证来源，本类永远不产出它。
+ * 才是 SIMULATION；mode=REAL 且班次快照 sourceValidation=VERIFIED（带学期、方案项都在该快照内）才是 REAL_TIMETABLE；
+ * 其余一律 COURSE_ONLY。已核验快照由人工抽样核验接口产生，上传者标签不会产生它。
  * COURSE_ONLY / 非 SIMULATION 下，所有时间相关检查（冲突、时间类硬约束）都记进 unknownChecks。
  *
  * 时间只经 ConflictChecker.analyze（唯一 TimeParser）得到，本类不解析客户端给的任何时间文本。
@@ -128,7 +129,11 @@ public class PlanValidationService {
             && items.stream().allMatch(i -> i.classId() != null
                 && offerings.containsKey(i.classId())
                 && "SYNTHETIC".equals(offerings.get(i.classId()).getSourceKind()));
-        String scope = simulation ? "SIMULATION" : "COURSE_ONLY";
+        // REAL：班次快照已人工核验（VERIFIED）、学期非空，且每个方案项都落在该快照内，才是 REAL_TIMETABLE。
+        boolean realVerified = !simulation && isRealVerified(req, items, offerings);
+        String scope = simulation ? "SIMULATION" : realVerified ? "REAL_TIMETABLE" : "COURSE_ONLY";
+        // 时间类检查只有在班次来源已核验（模拟或真实）时才能真正执行。
+        boolean timeVerified = simulation || realVerified;
 
         Findings f = new Findings();
         // 未建模规则不参与核验，但必须显式带出：快照里有几条未建模规则，就带出一条说明。
@@ -139,12 +144,12 @@ public class PlanValidationService {
                 "curriculumSnapshotId");
         }
         checkClassAssignments(items, offerings, f);
-        checkTime(items, classIds, analysis, simulation, f);
+        checkTime(items, classIds, analysis, timeVerified, f);
         for (int i = 0; i < req.hardConstraints().size(); i++) {
             Constraint c = req.hardConstraints().get(i);
             switch (c.kind()) {
                 case BLOCK_DAY, BLOCK_SECTION, BLOCK_SLOT ->
-                    checkTimeConstraint(i, c, items, simulation, analysis, f);
+                    checkTimeConstraint(i, c, items, timeVerified, analysis, f);
                 case PIN_COURSE -> checkPinCourse(i, c, items, f);
                 case PIN_TEACHER_COURSE -> checkPinTeacherCourse(i, c, items, f);
                 case MAX_CREDITS -> checkMaxCredits(i, c, items, catalog, req.curriculumSnapshotId(), f);
@@ -175,6 +180,24 @@ public class PlanValidationService {
             List.copyOf(refs));
     }
 
+    /**
+     * REAL_TIMETABLE 的判定：mode=REAL、班次快照为 OFFERING 且 sourceValidation=VERIFIED、
+     * 快照带学期，并且每个方案项的 classId 都存在于该快照中。缺任一条件都不算已核验。
+     */
+    private boolean isRealVerified(PlanValidationRequest req, List<PlanItem> items,
+                                   Map<String, CourseOffering> offerings) {
+        if (!"REAL".equals(req.mode()) || req.offeringSnapshotId() == null) return false;
+        CurriculumSnapshot snapshot = snapshots.findById(req.offeringSnapshotId()).orElse(null);
+        if (snapshot == null || snapshot.getKind() != CurriculumSnapshot.Kind.OFFERING
+            || snapshot.getSourceValidation() != CurriculumSnapshot.SourceValidation.VERIFIED
+            || snapshot.getTermId() == null) {
+            return false;
+        }
+        return items.stream().allMatch(i -> i.classId() != null
+            && offerings.containsKey(i.classId())
+            && req.offeringSnapshotId().equals(offerings.get(i.classId()).getSnapshotId()));
+    }
+
     /** 班次存在性与班次归属课程。 */
     private void checkClassAssignments(List<PlanItem> items, Map<String, CourseOffering> offerings, Findings f) {
         boolean any = false;
@@ -201,8 +224,8 @@ public class PlanValidationService {
      * 其他范围下没有已验证班次，冲突未核验，记入 unknownChecks。
      */
     private void checkTime(List<PlanItem> items, List<String> classIds,
-                           ConflictChecker.Analysis analysis, boolean simulation, Findings f) {
-        if (!simulation) {
+                           ConflictChecker.Analysis analysis, boolean timeVerified, Findings f) {
+        if (!timeVerified) {
             f.unknown("TIMETABLE_UNVERIFIED",
                 "没有已验证来源的班次（mode=REAL 或班次非 SYNTHETIC），时间冲突与时间类硬约束未核验，不能判为通过",
                 null);
@@ -225,11 +248,11 @@ public class PlanValidationService {
         f.performed("时间冲突核对（同星期、节次、周次相交）");
     }
 
-    private void checkTimeConstraint(int i, Constraint c, List<PlanItem> items, boolean simulation,
+    private void checkTimeConstraint(int i, Constraint c, List<PlanItem> items, boolean timeVerified,
                                      ConflictChecker.Analysis analysis, Findings f) {
         String field = "hardConstraints[" + i + "]";
         String label = "第 " + i + " 条硬约束（" + c.kind() + "）";
-        if (!simulation) {
+        if (!timeVerified) {
             f.unknown("CONSTRAINT_UNVERIFIABLE",
                 label + "需要已验证的班次时间，当前没有可用来源，无法核验", field);
             return;
