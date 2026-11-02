@@ -14,10 +14,10 @@ from check_stack import (
     classify_chain_planning,
     classify_planning,
     configure_controlled_model_request,
+    run_chain,
     step_audit,
     step_planning,
     step_record,
-    run_chain,
 )
 from smoke_stack import case_bad_input, case_java_unwired, case_no_auth, case_no_time_claim
 from stack_checks import (
