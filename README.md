@@ -4,7 +4,7 @@
 
 **当前能力：学校学业进度导入、课程与评价查询、AI 咨询、完整需求引导、课程层规划及方案编辑均已有实现。** 真实模型咨询与课程层规划曾通过实测，见[验收记录](docs/checkpoints/advice-chat.md)。培养文件可保持 `CURRICULUM_FILE / UNVERIFIED` 提供课程建议；真实下学期班次不足时，课表与时间核验仍显示待确认。真实模型可靠性评测、自进化和老师报告尚未完成。未配置模型地址与密钥时使用带标记的受控假模型。
 
-本地完整版本与 GitHub `main` 的差异、Actions 失败及最新复查见[运行与仓库核对](docs/34-runtime-and-repository-review.md)。
+运行验收、Actions 修复与合并记录见[运行与仓库核对](docs/34-runtime-and-repository-review.md)。
 
 ## 先看懂项目，再开始开发
 
@@ -33,6 +33,7 @@
 | E1 实施方案与任务进度 | [引导页面与披露自查方案](docs/20-e1-and-disclosure-implementation.md)、[Web任务核对记录](docs/21-web-task-status.md) |
 | 填志愿与账号 | [人员表模板](docs/team/team-signup-template.csv)，导入金山表格；填写后的表不要提交公开仓库 |
 | 看图与实验 | [Mermaid 图](docs/diagrams/README.md)、[Benchmark 协议](docs/07-benchmark-protocol.md) |
+| 运行 HTTP 评测与查看旧 PR 复用范围 | [Benchmark 入口](benchmark/README.md)、[PR #36 / #40 代码复用](docs/35-pr36-pr40-reuse.md) |
 
 ## 架构与目录
 
