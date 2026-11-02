@@ -36,37 +36,6 @@ from agent_runtime.application.ids import new_id
 logger = logging.getLogger(__name__)
 
 
-def _invalid_model_reply(
-    message: str,
-    reply: AdviceChatModelReply,
-    context: ExecutionContext,
-    *,
-    field_path: str,
-    reason_code: str,
-) -> ModelInvalidOutput:
-    diagnostics: dict[str, str | int | bool | None] = {
-        "request_id": context.request_id,
-        "stage": "advice_chat_fact_validation",
-        "field_path": field_path,
-        "reason_code": reason_code,
-        "shape": reply.response_shape or "json_object",
-        "finish_reason": reply.finish_reason,
-        "input_tokens": reply.input_tokens,
-        "output_tokens": reply.output_tokens,
-    }
-    logger.warning(
-        "Advice chat model output rejected: %s",
-        json.dumps(diagnostics, sort_keys=True),
-        extra={"advice_chat_diagnostics": diagnostics},
-    )
-    return ModelInvalidOutput(
-        message,
-        input_tokens=reply.input_tokens,
-        output_tokens=reply.output_tokens,
-        diagnostics=diagnostics,
-    )
-
-
 def _bigram_relevance(query: str, text: str) -> float:
     normalized_query = "".join(query.casefold().split())
     normalized_text = "".join(text.casefold().split())
@@ -211,11 +180,26 @@ class AdviceChatService:
             raise RuntimeError("课程目录返回类型错误")
         courses = [item for item in all_courses if isinstance(item, Course)]
 
-        from agent_runtime.domain.policies.course_scope import eligible_course_codes
+        from agent_runtime.domain.policies.course_scope import (
+            eligible_course_codes,
+            school_gap_categories,
+            school_taken_codes,
+        )
 
         record_courses = list(record.completedCourses) if record else []
+        # 学校报告只在本轮与培养方案/学业记录一致时使用；缺口与 Java 审计分开表述。
+        report_gaps = (
+            school_gap_categories(progress.snapshot.nodes, {c.category for c in courses})
+            if progress
+            else frozenset()
+        )
+        report_taken = school_taken_codes(progress.snapshot.courses) if progress else frozenset()
         allowed = eligible_course_codes(
-            courses, record_courses, explicitly_selected=request.selectedCourseCodes
+            courses,
+            record_courses,
+            explicitly_selected=request.selectedCourseCodes,
+            gap_categories=report_gaps,
+            school_taken_codes=report_taken,
         )
         if not record:
             # No Java academic record matches this curriculum in the current session.
@@ -292,6 +276,7 @@ class AdviceChatService:
             key=lambda course: (
                 course.courseCode not in request.selectedCourseCodes,
                 course.courseCode not in request.preferredCourseCodes,
+                course.category not in report_gaps,
                 -_bigram_relevance(context_terms, f"{course.name} {course.category}"),
                 course.courseCode,
             ),
@@ -335,6 +320,12 @@ class AdviceChatService:
                 "sourceValidation": matching.sourceValidation,
             },
             "schoolProgress": self._model_progress(progress),
+            # 学校报告的剩余学分（来源：学校报告），与 Java 审计结果分开给出。
+            "schoolReportGaps": [
+                {"category": node.name, "remainingCredits": str(node.remainingCredits)}
+                for node in (progress.snapshot.nodes if progress else [])
+                if node.name in report_gaps
+            ],
             "availableCourses": available_courses,
             "reviews": {
                 code: [{**n.model_dump(mode="json"), "excerpt": n.excerpt[:300]} for n in notes]
@@ -383,38 +374,19 @@ class AdviceChatService:
             exc.output_tokens = model_reply.output_tokens
             raise
 
+        # 模型输出的引用是不可信的：越出候选集的课程/评价只丢弃该条目，保留其余回答，
+        # 并在 unknowns 中说明；绝不补造课程，也不因单条引用失败而整轮不出回答。
         rationale_map: dict[str, dict] = {}
-        allowed_reviews = {
-            (code, n.reviewNoteId) for code, notes in reviews_by_course.items() for n in notes
-        }
-        for index, item in enumerate(model_reply.courses):
+        dropped_items = 0
+        for item in model_reply.courses:
             code = item["courseCode"]
-            if code not in course_by_code:
-                raise _invalid_model_reply(
-                    "课程引用不匹配",
-                    model_reply,
-                    context,
-                    field_path=f"courses[{index}].courseCode",
-                    reason_code="COURSE_REFERENCE_MISMATCH",
-                )
-            refs = item["reviewNoteIds"]
-            if not 1 <= len(item["reason"]) <= 500:
-                raise _invalid_model_reply(
-                    "回答结构错误",
-                    model_reply,
-                    context,
-                    field_path=f"courses[{index}].reason",
-                    reason_code="STRING_LENGTH",
-                )
-            if len(refs) > 10 or any((code, ref) not in allowed_reviews for ref in refs):
-                raise _invalid_model_reply(
-                    "课程评价引用不匹配",
-                    model_reply,
-                    context,
-                    field_path=f"courses[{index}].reviewNoteIds",
-                    reason_code="REVIEW_REFERENCE_MISMATCH",
-                )
-            rationale_map[code] = item
+            if code not in course_by_code or code in rationale_map:
+                dropped_items += 1
+                continue
+            own_notes = {n.reviewNoteId for n in reviews_by_course.get(code, [])}
+            refs = [ref for ref in item["reviewNoteIds"] if ref in own_notes]
+            dropped_items += len(item["reviewNoteIds"]) - len(refs)
+            rationale_map[code] = {**item, "reviewNoteIds": refs}
 
         completed_courses = []
         for code, rationale in rationale_map.items():
@@ -436,26 +408,23 @@ class AdviceChatService:
             )
 
         suggestions = []
-        shown_codes = {x.courseCode for x in completed_courses}
-        for index, raw in enumerate(model_reply.suggestions):
+        for raw in model_reply.suggestions:
             kind, value = raw["kind"], raw["value"]
-            if kind != "INTEREST" and value not in shown_codes:
-                raise _invalid_model_reply(
-                    "课程建议引用不匹配",
-                    model_reply,
-                    context,
-                    field_path=f"suggestions[{index}].value",
-                    reason_code="SUGGESTION_REFERENCE_MISMATCH",
-                )
-            if not 1 <= len(raw["label"]) <= 200 or not 1 <= len(value) <= 1000:
-                raise _invalid_model_reply(
-                    "回答结构错误",
-                    model_reply,
-                    context,
-                    field_path=f"suggestions[{index}]",
-                    reason_code="FIELD_LENGTH",
-                )
+            # 课程动作只能指向本轮允许的课程；其它建议丢弃，不编造。
+            if kind != "INTEREST" and value not in course_by_code:
+                dropped_items += 1
+                continue
             suggestions.append(AdviceChatSuggestion(suggestionId=new_id("suggestion"), **raw))
+        if dropped_items:
+            logger.info("advice chat dropped %d out-of-scope model items", dropped_items)
+            unknowns.append(
+                Issue(
+                    code="MODEL_CITATION_DROPPED",
+                    message="部分建议引用了本轮候选范围之外的课程或评价，已忽略这些条目。",
+                    field="courses",
+                    retryable=False,
+                )
+            )
 
         school = None
         if progress:
@@ -503,7 +472,7 @@ class AdviceChatService:
                 {
                     "courseCode": c.courseCode,
                     "name": c.name,
-                    "credits": c.credits,
+                    "credits": None if c.credits is None else float(c.credits),
                     "outcome": c.outcome,
                 }
                 for c in progress.snapshot.courses

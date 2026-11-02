@@ -173,6 +173,104 @@ def test_school_progress_enters_model_payload_without_replacing_audit_unknowns(
     assert answer.usage.toolCalls == 5  # searchReviews 不计入 maxToolCalls
 
 
+def test_school_report_gaps_and_school_passed_courses_shape_candidates(
+    planning_request: PlanningRequest,
+) -> None:
+    from agent_runtime.api.schemas.school_progress import SchoolProgressCourse
+
+    extra = [
+        Course(
+            courseCode="MATH301",
+            name="线性代数（演示）",
+            credits=Decimal("3.00"),
+            category="学科基础课",
+            sourceRefIds=["source:fake-w2"],
+        ),
+        Course(
+            courseCode="PHYS201",
+            name="大学物理（演示）",
+            credits=Decimal("3.00"),
+            category="学科基础课",
+            sourceRefIds=["source:fake-w2"],
+        ),
+    ]
+
+    class Tools(TypedFakeToolClient):
+        def call(self, tool, dto, context, *, params=None, idempotency_key=None):
+            if tool == "listCourses":
+                return [*super().call(tool, dto, context, params=params), *extra]
+            if tool == "getSchoolProgress":
+                record = super().call(
+                    "getAcademicRecord", None, context, params={"recordId": "record:demo"}
+                )
+                return SchoolProgressImportResult(
+                    receipt=SchoolProgressReceipt(
+                        schoolProgressId="school:demo",
+                        contentHash="b" * 64,
+                        importedAt=datetime(2026, 10, 30, tzinfo=UTC),
+                        reused=True,
+                    ),
+                    snapshot=SchoolProgressSnapshot(
+                        format="coursepilot-shu-academic-progress",
+                        version=1,
+                        capturedAt=datetime(2026, 10, 29, tzinfo=UTC),
+                        source="browser adapter",
+                        nodes=[
+                            SchoolProgressNode(
+                                nodeId="node:core",
+                                parentId=None,
+                                schoolNodeId="10",
+                                leaf=True,
+                                name="学科基础课",
+                                requiredCredits=Decimal("40"),
+                                earnedCredits=Decimal("35"),
+                                remainingCredits=Decimal("5"),
+                            )
+                        ],
+                        courses=[
+                            SchoolProgressCourse(
+                                nodeId="node:core",
+                                courseCode="PHYS201",
+                                name="大学物理（演示）",
+                                credits=Decimal("3"),
+                                outcome="PASSED",
+                                completedYear=None,
+                                completedTerm=None,
+                                grade=None,
+                                makeup=None,
+                                retake=None,
+                                suggestedYear=None,
+                                suggestedTerm=None,
+                            )
+                        ],
+                    ),
+                    academicRecord=record,
+                )
+            return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
+
+    class Model:
+        messages = []
+
+        def generate(self, *, context, messages, tool_schemas):
+            self.messages = messages
+            return ModelReply(items=None)
+
+    model = Model()
+    PlanningRunner(
+        tool_client=Tools(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=model,
+    ).run(planning_request, _context(planning_request))
+
+    payload = json.loads(model.messages[-1]["content"].split("AVAILABLE_FACTS:", 1)[-1])
+    assert payload["schoolReportGaps"] == [{"category": "学科基础课", "remainingCredits": "5"}]
+    candidates = {course["courseCode"] for course in payload["courses"]}
+    # Gap category candidates come in; the school-passed course stays out.
+    assert "MATH301" in candidates
+    assert "PHYS201" not in candidates
+    assert payload["courses"][0]["courseCode"] == "MATH301"
+
+
 @pytest.mark.parametrize(
     ("mismatch", "expected_code"),
     [

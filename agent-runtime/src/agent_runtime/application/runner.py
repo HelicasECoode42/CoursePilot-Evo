@@ -66,8 +66,22 @@ from agent_runtime.domain.policies.candidate_guard import (
     ReviewFact,
 )
 from agent_runtime.domain.policies.clarification_policy import ClarificationPolicy
-from agent_runtime.domain.policies.course_scope import eligible_course_codes
+from agent_runtime.domain.policies.course_scope import (
+    eligible_course_codes,
+    school_gap_categories,
+    school_taken_codes,
+)
 from agent_runtime.domain.policies.intent_resolver import IntentResolver
+
+
+def _school_report_gaps(school_progress: dict[str, object] | None) -> list[object]:
+    """School-report remaining-credit categories; empty when the report is not usable."""
+    if not school_progress:
+        return []
+    progress = school_progress.get("progress")
+    if not isinstance(progress, dict):
+        return []
+    return list(progress.get("gapCategories", []))
 
 
 class PlanningRunner:
@@ -413,12 +427,36 @@ class PlanningRunner:
             for constraint in request.intent.hardConstraints
             if constraint.kind == "PIN_COURSE" and constraint.courseCode is not None
         }
-        course_codes = eligible_course_codes(courses, record.completedCourses, pinned)
+        # 学校报告只在与本轮培养方案和学业记录一致时作为事实；其缺口与 Java 审计分开使用。
+        report_snapshot = (
+            school_result.snapshot
+            if school_result is not None
+            and school_result_matches_record
+            and school_result_matches_curriculum
+            else None
+        )
+        report_gaps = (
+            school_gap_categories(report_snapshot.nodes, {c.category for c in courses})
+            if report_snapshot is not None
+            else frozenset()
+        )
+        report_taken = (
+            school_taken_codes(report_snapshot.courses)
+            if report_snapshot is not None
+            else frozenset()
+        )
+        course_codes = eligible_course_codes(
+            courses,
+            record.completedCourses,
+            pinned,
+            gap_categories=report_gaps,
+            school_taken_codes=report_taken,
+        )
         taken_course_codes = {
             course.courseCode
             for course in record.completedCourses
             if course.outcome in {"PASSED", "IN_PROGRESS"}
-        }
+        } | set(report_taken)
         uncertain_course_codes = sorted(
             {course.courseCode for course in record.completedCourses if course.outcome == "UNKNOWN"}
         )
@@ -444,6 +482,12 @@ class PlanningRunner:
                         ),
                     }
                     for node in snapshot.nodes
+                ],
+                # 学校报告中仍有剩余学分的类别（只按类别名精确匹配目录类别）。
+                "gapCategories": [
+                    {"category": node.name, "remainingCredits": str(node.remainingCredits)}
+                    for node in snapshot.nodes
+                    if node.name in report_gaps
                 ],
             }
         options = cast(
@@ -472,10 +516,15 @@ class PlanningRunner:
         interest_text = (request.promptText + " " + " ".join(request.intent.interestTags)).lower()
         grams = {interest_text[i : i + 2] for i in range(len(interest_text) - 1)}
 
-        def course_order(course: Course) -> tuple[int, int, str]:
+        def course_order(course: Course) -> tuple[int, int, int, str]:
             name = course.name.lower()
             relevance = sum(1 for gram in grams if gram.strip() and gram in name)
-            return (0 if course.courseCode in pinned else 1, -relevance, course.courseCode)
+            return (
+                0 if course.courseCode in pinned else 1,
+                0 if course.category in report_gaps else 1,
+                -relevance,
+                course.courseCode,
+            )
 
         course_facts = tuple(
             CourseFact(
@@ -799,6 +848,8 @@ class PlanningRunner:
         queried = sorted(facts.reviews_queried_for)
         payload: dict[str, object] = {
             "schoolProgress": school_progress,
+            # 学校报告的剩余学分，与下面 Java 审计 unknowns 是两个来源，不得合并。
+            "schoolReportGaps": _school_report_gaps(school_progress),
             "academicRecordOutcomeUnknownCourseCodes": (
                 school_progress.get("uncertainCourseCodes", []) if school_progress else []
             ),
@@ -874,6 +925,8 @@ class PlanningRunner:
             "必须包含所有 PIN_COURSE 指定的课程；没有指定时最多推荐 3 门，"
             "指定时最多 30 门，并保留所有指定课程。"
             "PASSED 课程不得重新推荐；IN_PROGRESS 不进入候选。"
+            "schoolReportGaps 列出学校报告中仍差学分的类别（来源：学校报告），"
+            "优先从这些类别的候选中选择；它与 Java 审计 unknowns 分开表述，不得相互改写。"
             "UNKNOWN 不能视为已修，必须说明状态不确定。"
             "schoolProgress 为 null 或 availability=UNAVAILABLE 时，学校进度事实缺失；"
             "不得从 auditRequirements 的 UNKNOWN 改写为已知或从缺失学校进度推断学分。"
