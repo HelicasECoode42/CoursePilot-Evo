@@ -25,11 +25,12 @@ onUnmounted(() => {
   stopBridge = null;
 });
 
+const isSimulation = computed(() => api.mode === "simulation");
 const modeLabel = computed(() =>
   api.mode === "fixture"
     ? "页面演示 · 虚构内容"
     : api.mode === "simulation"
-      ? "本地测试服务"
+      ? "演示环境 · 模拟课表"
       : "本机运行",
 );
 </script>
@@ -37,6 +38,10 @@ const modeLabel = computed(() =>
 <template>
   <div class="app-shell">
     <a class="skip-link" href="#main-content">跳到正文</a>
+    <!-- 模拟模式下课表不是真实开课，横幅常驻顶部，滚动时也不消失。 -->
+    <div v-if="isSimulation" class="sim-banner" role="status">
+      演示环境：课表为模拟数据
+    </div>
     <header class="topbar">
       <RouterLink class="brand" to="/" aria-label="CoursePilot 首页">
         <span class="brand-mark" aria-hidden="true"></span>

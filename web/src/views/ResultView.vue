@@ -27,6 +27,10 @@ import {
   type VerificationView,
 } from "../domain/answer-display";
 import {
+  explainUnknownIssue,
+  isVerificationLevelUnknown,
+} from "../domain/unknown-explain";
+import {
   meetingsText,
   resolveTimetableSources,
   type OfferingListRead,
@@ -160,44 +164,26 @@ const recommendations = computed<Recommendation[]>(
 );
 
 /** 未知项：答复级 + 每份当前方案的核验级（替换后只用新判决）。 */
-const unknowns = computed<Issue[]>(() =>
-  result.value === null
-    ? []
-    : collectUnknowns(
-        result.value.unknowns,
-        recommendations.value
-          .map((item) => currentPlan(item).verification)
-          .filter((item): item is PlanValidation => item !== null),
-      ),
-);
+const unknowns = computed<Issue[]>(() => {
+  if (result.value === null) return [];
+  const plans = recommendations.value.map((item) => currentPlan(item));
+  const validations = plans
+    .map((plan) => plan.verification)
+    .filter((item): item is PlanValidation => item !== null);
+  // 方案被换班重新核验后，原答复里的核验级未知项（如「班次来源尚未核验」）已经过时，
+  // 只保留与核验无关的答复级项，核验级项只来自新判决。
+  const replaced = plans.some((plan) => plan.replacedFrom !== null);
+  const answerLevel = replaced
+    ? result.value.unknowns.filter(
+        (issue) => !isVerificationLevelUnknown(issue.code),
+      )
+    : result.value.unknowns;
+  return collectUnknowns(answerLevel, validations);
+});
 
-const UNKNOWN_EXPLANATIONS: Record<string, string> = {
-  FAKE_MODEL: "当前建议由演示模型生成。",
-  FAKE_TOOL: "当前核验使用演示数据，无法确认真实课程与班次。",
-  OFFERING_UNAVAILABLE: "未取得目标学期班次，无法确认上课时间是否冲突。",
-  OFFERING_SNAPSHOT_MISSING: "方案没有可用的班次资料，无法确认上课时间。",
-  TIMETABLE_UNVERIFIED: "班次来源尚未核验，无法确认实际上课时间。",
-  TIME_UNPARSEABLE: "部分班次的上课时间无法识别，无法确认是否冲突。",
-  TIME_UNPARSED: "部分班次的上课时间无法识别，无法确认是否冲突。",
-  CLASS_NOT_FOUND: "方案中的班次不在当前开课资料中，无法完成核验。",
-  PIN_TEACHER_UNKNOWN: "指定教师无法从当前资料中确认。",
-  CONSTRAINT_UNVERIFIABLE: "部分限制条件缺少核验所需资料。",
-  COURSE_FACTS_UNKNOWN: "部分课程信息无法确认。",
-  CREDITS_UNKNOWN: "部分课程学分未知，无法完成学分相关核对。",
-  CREDITS_SCOPE_UNSUPPORTED: "当前核验范围无法确认学分要求。",
-  CURRICULUM_NOT_FOUND: "所选培养方案资料无法读取。",
-  ACADEMIC_RECORD_EMPTY: "尚无可用于核对的学业记录。",
-  TRANSCRIPT_COMPLETENESS_UNKNOWN: "已修课程可能未填全，暂时无法确定剩余要求。",
-  REQUIREMENT_SOURCE_REFS_MISSING: "部分培养要求缺少可核对的来源。",
-  UNMODELED_RULE: "部分培养要求尚未纳入可自动核验的规则。",
-};
-
-/** 显示不确定事实的用户文案；原始服务诊断只放在折叠的排查详情中。 */
+/** 显示不确定事实的用户文案；原始服务诊断只放在折叠的排查详情中。文案表见 domain/unknown-explain.ts。 */
 function explainUnknown(issue: Issue): string {
-  return (
-    UNKNOWN_EXPLANATIONS[issue.code] ??
-    "有一项课程或班次信息无法确认，具体原因见排查详情。"
-  );
+  return explainUnknownIssue(issue, courseNames.value);
 }
 
 const studentUnknowns = computed(() => [

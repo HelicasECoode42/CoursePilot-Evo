@@ -136,6 +136,20 @@ select:focus-visible {
   line-height: 1.4;
 }
 
+/* 模拟模式横幅：固定在顶部，明确告诉学生课表是模拟数据 */
+.sim-banner {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  padding: 6px 12px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b3f00;
+  background: #ffe9b8;
+  border-bottom: 1px solid #e0b86a;
+}
+
 .mode-badge--demo {
   border-color: #e8d9bc;
   color: #875817;
