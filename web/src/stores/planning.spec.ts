@@ -49,6 +49,8 @@ function fakeClient(
       unknownMessages: [],
     })),
     clearSession: vi.fn(),
+    restoreSession: vi.fn(),
+    currentSessionToken: vi.fn(() => null),
     fixtureAcademicRecordId: vi.fn(() => null),
     listSessionRecords: vi.fn(async () => ({ items: [] })),
     removeSessionPlanCourse: vi.fn(async (body) => ({

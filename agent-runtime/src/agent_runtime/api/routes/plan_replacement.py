@@ -113,6 +113,12 @@ def search_session_offerings(
             course_code=query.courseCode,
             context=context,
         )
+        checks = service.check_must_avoid(
+            session_id=subject_id,
+            previous_plan_id=query.previousPlanId,
+            offerings=offerings,
+            context=context,
+        )
     except OfferingSnapshotMissing:
         # The missing id is on the stored plan, not in this query. 200 UNKNOWN
         # with empty items matches the page: it must not say the course has no classes.
@@ -123,6 +129,7 @@ def search_session_offerings(
                 "previousPlanId": query.previousPlanId,
                 "courseCode": query.courseCode,
                 "items": [],
+                "mustAvoidChecks": [],
             },
             issues=[
                 Issue(
@@ -143,6 +150,10 @@ def search_session_offerings(
             "previousPlanId": query.previousPlanId,
             "courseCode": query.courseCode,
             "items": [item.model_dump(mode="json") for item in offerings],
+            # Java's hard-time verdict per candidate. Empty when the plan has no hard constraints.
+            "mustAvoidChecks": [
+                {"classId": check.classId, "verdict": check.verdict} for check in checks
+            ],
         },
     ).model_dump(mode="json")
 

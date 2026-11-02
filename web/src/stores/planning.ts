@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, onScopeDispose, ref } from "vue";
+import { computed, onScopeDispose, ref, watch } from "vue";
 import { ApiFailure, type CoursePilotApiClient } from "../api/client";
 import { api } from "../api";
 import type {
@@ -49,6 +49,15 @@ import {
   type ScheduleAction,
   type ScheduleStrength,
 } from "../domain/schedule-grid";
+import {
+  clearSavedSession,
+  defaultSessionStorage,
+  isStillValidUntil,
+  readSavedSession,
+  writeSavedSession,
+  type KeyValueStorage,
+  type SavedPlanningSession,
+} from "../domain/session-restore";
 
 export type SessionStatus = "idle" | "loading" | "ready" | "error" | "expired";
 export type SubmitStatus = "idle" | "submitting" | "ready" | "error";
@@ -70,7 +79,14 @@ function newIdempotencyKey(): string {
   return `web-${crypto.randomUUID().replaceAll("-", "")}`;
 }
 
-export function createPlanningStore(client: CoursePilotApiClient = api) {
+/**
+ * storage 为空时不做任何持久化（测试与演示用）。页面入口传入本标签页的 sessionStorage，
+ * 刷新后才能恢复会话、草稿与当前方案。
+ */
+export function createPlanningStore(
+  client: CoursePilotApiClient = api,
+  storage: KeyValueStorage | null = null,
+) {
   return defineStore("coursepilot-planning", () => {
     const sessionStatus = ref<SessionStatus>("idle");
     const sessionId = ref<string | null>(null);
@@ -728,8 +744,13 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         const usable = result.items.filter((item) =>
           isCurriculumUsableForMode(item, planningMode.value),
         );
+        // 已选的方案仍可用时保留（例如刷新后重新确认会话），否则只有唯一可用项才自动选。
+        const kept = usable.find(
+          (item) => item.snapshotId === selectedCurriculumId.value,
+        );
         selectedCurriculumId.value =
-          usable.length === 1 ? usable[0].snapshotId : null;
+          kept?.snapshotId ??
+          (usable.length === 1 ? usable[0].snapshotId : null);
         sessionStatus.value = "ready";
         if (result.items.length === 0) {
           errorMessage.value =
@@ -759,6 +780,80 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         errorMessage.value = visibleError(error);
       } finally {
         if (activeController === controller) activeController = null;
+      }
+    }
+
+    /**
+     * 刷新后恢复 sessionStorage 里的会话与草稿。先同步还原（页面不闪空），
+     * 再用两个只读查询确认令牌仍有效：401 说明会话已过期或服务已重启，清空并提示；
+     * 其他错误保留令牌，状态记为 error，学生可以重试。
+     */
+    async function restoreSavedSession(): Promise<void> {
+      if (storage === null || client.mode === "fixture") return;
+      if (sessionId.value !== null) return;
+      const saved = readSavedSession(storage);
+      if (saved === null) return;
+      if (!isStillValidUntil(saved.expiresAt, Date.now())) {
+        clearSavedSession(storage);
+        return;
+      }
+      client.restoreSession(saved.sessionToken);
+      sessionId.value = saved.sessionId;
+      expiresAt.value = saved.expiresAt;
+      draft.value = saved.draft;
+      selectedCurriculumId.value = saved.selectedCurriculumId;
+      selectedOfferingSnapshotId.value = saved.selectedOfferingSnapshotId;
+      selectedRecordId.value = saved.selectedRecordId;
+      planningResult.value = saved.planningResult;
+      editedPlans.value = saved.editedPlans;
+      teacherPickDisplayNames.value = saved.teacherPickDisplayNames;
+      scheduleSessionExpiry();
+
+      const version = ++sessionVersion.value;
+      sessionStatus.value = "loading";
+      errorMessage.value = "";
+      try {
+        const list = await client.listCurricula();
+        if (version !== sessionVersion.value) return;
+        const offering = await client.listOfferingSnapshots();
+        if (version !== sessionVersion.value) return;
+        curricula.value = list.items;
+        offeringSnapshots.value = offering.items;
+        unknownMessages.value = [
+          ...list.unknownMessages,
+          ...offering.unknownMessages,
+        ];
+        if (
+          !offering.items.some(
+            (item) => item.snapshotId === saved.selectedOfferingSnapshotId,
+          )
+        ) {
+          selectedOfferingSnapshotId.value = defaultOfferingSnapshotId(
+            offering.items,
+            client.mode,
+          );
+        }
+        if (
+          !list.items.some(
+            (item) => item.snapshotId === saved.selectedCurriculumId,
+          )
+        ) {
+          selectedCurriculumId.value = null;
+        }
+        sessionStatus.value = "ready";
+      } catch (error) {
+        if (version !== sessionVersion.value) return;
+        if (error instanceof ApiFailure && error.kind === "aborted") return;
+        if (error instanceof ApiFailure && error.status === 401) {
+          // 服务端已不认这个令牌（过期，或本地服务重启后内存会话已丢失）：
+          // 清空草稿，明确提示，由学生自己重新开始。
+          draft.value = emptyPlanningDraft();
+          selectedRecordId.value = null;
+          invalidateSession("会话已过期，请重新开始。");
+          return;
+        }
+        sessionStatus.value = "error";
+        errorMessage.value = visibleError(error);
       }
     }
 
@@ -1074,7 +1169,13 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         const list = await client.listSessionRecords(signal);
         if (!isCurrentRecordRequest(version)) return;
         records.value = list.items;
-        setSelectedRecord(list.items[0]?.academicRecordId ?? null);
+        // 刷新恢复时保留原先选中的记录；不在列表里才退回第一条。
+        const kept = list.items.find(
+          (item) => item.academicRecordId === selectedRecordId.value,
+        );
+        setSelectedRecord(
+          kept?.academicRecordId ?? list.items[0]?.academicRecordId ?? null,
+        );
         recordsStatus.value = "ready";
       } catch (error) {
         if (!isCurrentRecordRequest(version)) return;
@@ -1308,6 +1409,41 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       }
     }
 
+    /** 本标签页要保存的内容；没有会话时为 null，表示应清除保存。 */
+    function savedSnapshot(): SavedPlanningSession | null {
+      if (!sessionId.value || !expiresAt.value) return null;
+      let token: string | null = null;
+      try {
+        token = client.currentSessionToken();
+      } catch {
+        token = null;
+      }
+      if (token === null) return null;
+      return {
+        sessionId: sessionId.value,
+        sessionToken: token,
+        expiresAt: expiresAt.value,
+        selectedCurriculumId: selectedCurriculumId.value,
+        selectedOfferingSnapshotId: selectedOfferingSnapshotId.value,
+        selectedRecordId: selectedRecordId.value,
+        draft: draft.value,
+        planningResult: planningResult.value,
+        editedPlans: editedPlans.value,
+        teacherPickDisplayNames: teacherPickDisplayNames.value,
+      };
+    }
+
+    if (storage !== null && client.mode !== "fixture") {
+      watch(
+        savedSnapshot,
+        (snapshot) => {
+          if (snapshot === null) clearSavedSession(storage);
+          else writeSavedSession(storage, snapshot);
+        },
+        { deep: true },
+      );
+    }
+
     onScopeDispose(() => {
       clearExpiryTimer();
       discardSubmission();
@@ -1383,6 +1519,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       currentQuestion,
       questions,
       startSession,
+      restoreSavedSession,
       invalidateSession,
       chooseCurriculum,
       chooseOfferingSnapshot,
@@ -1409,4 +1546,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
   });
 }
 
-export const usePlanningStore = createPlanningStore();
+export const usePlanningStore = createPlanningStore(
+  api,
+  defaultSessionStorage(),
+);

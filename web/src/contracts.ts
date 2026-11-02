@@ -426,10 +426,20 @@ export interface RunReport {
 }
 
 /** `GET /api/v1/session-offerings` 的 data。items 为空数组是正常业务状态。 */
+/** Java 对单个候选班次与学生硬时间约束（必避时段）的核对结果。只映射 Java 的判决，不做时间计算。 */
+export type MustAvoidVerdict = "CONFLICT" | "CLEAR" | "UNKNOWN";
+
+export interface MustAvoidCheck {
+  classId: string;
+  verdict: MustAvoidVerdict;
+}
+
 export interface SessionOfferingList {
   previousPlanId: string;
   courseCode: string;
   items: CourseOffering[];
+  /** 方案有硬时间约束时，每个候选班次各有一条；没有硬约束时为空数组（并不代表已核对）。 */
+  mustAvoidChecks: MustAvoidCheck[];
 }
 
 /** `POST /api/v1/session-plans/replace` 的请求体。selectedClassId 必须来自搜索结果。 */

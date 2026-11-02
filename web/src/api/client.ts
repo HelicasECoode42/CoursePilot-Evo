@@ -17,6 +17,7 @@ import type {
   PlanningRequest,
   ReviewNote,
   RunReport,
+  MustAvoidCheck,
   SessionOfferingList,
   SessionPlanReplaceInput,
   SessionPlanEditInput,
@@ -195,6 +196,13 @@ export interface CoursePilotApiClient {
   /** E4：受限的老师运行报告。服务端还要求管理密钥，浏览器端拿不到时会得到 403，页面需要照实说明。 */
   getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport>;
   clearSession(): void;
+  /**
+   * 页面刷新后恢复会话：只接收 sessionStorage 里保存的令牌，不做网络请求；
+   * 是否仍有效由调用方用一次只读查询确认（401 即已过期）。
+   */
+  restoreSession(sessionToken: string): void;
+  /** 当前会话令牌，仅供存入本标签页的 sessionStorage；没有会话时为 null。 */
+  currentSessionToken(): string | null;
   fixtureAcademicRecordId(): string | null;
 }
 
@@ -223,6 +231,16 @@ const validateAdviceChatRequest = ajv.getSchema(
 const validateAdviceChatAnswer = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/AdviceChatAnswer",
 );
+function isMustAvoidCheck(value: unknown): value is MustAvoidCheck {
+  return (
+    isObject(value) &&
+    typeof value.classId === "string" &&
+    (value.verdict === "CONFLICT" ||
+      value.verdict === "CLEAR" ||
+      value.verdict === "UNKNOWN")
+  );
+}
+
 const validateCourseOffering = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/CourseOffering",
 );
@@ -433,6 +451,14 @@ export class HttpApiClient implements CoursePilotApiClient {
 
   clearSession(): void {
     this.sessionToken = null;
+  }
+
+  restoreSession(sessionToken: string): void {
+    this.sessionToken = sessionToken;
+  }
+
+  currentSessionToken(): string | null {
+    return this.sessionToken;
   }
 
   async createSession(signal?: AbortSignal): Promise<SessionView> {
@@ -783,7 +809,9 @@ export class HttpApiClient implements CoursePilotApiClient {
       data.previousPlanId !== previousPlanId ||
       data.courseCode !== courseCode ||
       !Array.isArray(data.items) ||
-      !everyValid(data.items, validateCourseOffering)
+      !everyValid(data.items, validateCourseOffering) ||
+      !Array.isArray(data.mustAvoidChecks) ||
+      !data.mustAvoidChecks.every(isMustAvoidCheck)
     ) {
       throw new ApiFailure(
         "服务返回的开课班次不符合当前接口约定。",

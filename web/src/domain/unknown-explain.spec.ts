@@ -5,7 +5,9 @@ import {
   isVerificationLevelUnknown,
   sectionNotAssignedReason,
   UNKNOWN_EXPLANATIONS,
+  unplacedReasonsFor,
 } from "./unknown-explain";
+import type { PlanValidation } from "../contracts";
 
 const issue = (code: string, message = "") =>
   ({ code, message, field: null, retryable: false }) as Issue;
@@ -164,5 +166,75 @@ describe("未选定班次与真实课表文案", () => {
       reason: "可选班次都与学生设定的必避时段冲突",
     });
     expect(sectionNotAssignedReason(issue("TIMETABLE_UNVERIFIED"))).toBeNull();
+  });
+});
+
+describe("Java 的 SECTION_UNASSIGNED 与未排进课表的版本来源", () => {
+  const validation = (unknownChecks: Issue[]) =>
+    ({ unknownChecks, violations: [] }) as unknown as PlanValidation;
+
+  it("SECTION_UNASSIGNED（Java 的分项代码）与 SECTION_NOT_ASSIGNED 同样给出课程名和可执行建议", () => {
+    const text = explainUnknownIssue(
+      issue(
+        "SECTION_UNASSIGNED",
+        "课程 08305011 未指定班次，无法核验其时间与班次归属",
+      ),
+      { "08305011": "操作系统(1-2)" },
+    );
+    expect(text).toContain("操作系统(1-2)（08305011）");
+    expect(text).toContain("没有选定班次");
+    expect(text).toContain("重新核验");
+    expect(text).not.toContain("这一项暂时无法确认");
+  });
+
+  it("SECTION_UNASSIGNED 读不到课程名时只显示课程号", () => {
+    const text = explainUnknownIssue(
+      issue("SECTION_UNASSIGNED", "课程 08305011 未指定班次，无法核验"),
+    );
+    expect(text.startsWith("08305011 没有选定班次")).toBe(true);
+  });
+
+  it("SECTION_UNASSIGNED 两个代码都视为核验级，换班后过时", () => {
+    expect(isVerificationLevelUnknown("SECTION_UNASSIGNED")).toBe(true);
+    expect(isVerificationLevelUnknown("SECTION_NOT_ASSIGNED")).toBe(true);
+  });
+
+  it("未换班时用答复里 Python 给的具体原因，覆盖判决里 Java 的通用说明", () => {
+    const reasons = unplacedReasonsFor(
+      [issue("SECTION_NOT_ASSIGNED", "课程 08306029：本学期没有开课")],
+      [
+        {
+          replaced: false,
+          verification: validation([
+            issue("SECTION_UNASSIGNED", "课程 08306029 未指定班次，无法核验"),
+          ]),
+        },
+      ],
+    );
+    expect(reasons).toEqual({ "08306029": "本学期没有开课" });
+  });
+
+  it("换班后不再读答复里的旧原因，只看当前判决", () => {
+    const reasons = unplacedReasonsFor(
+      [issue("SECTION_NOT_ASSIGNED", "课程 08306029：本学期没有开课")],
+      [
+        {
+          replaced: true,
+          verification: validation([
+            issue("SECTION_UNASSIGNED", "课程 08305011 未指定班次，无法核验"),
+          ]),
+        },
+      ],
+    );
+    expect(reasons).not.toHaveProperty("08306029");
+    expect(reasons["08305011"]).toContain("没有为这门课选定班次");
+  });
+
+  it("没有判决时，未换班的方案仍能用答复里的原因", () => {
+    const reasons = unplacedReasonsFor(
+      [issue("SECTION_NOT_ASSIGNED", "课程 08306029：本学期没有开课")],
+      [{ replaced: false, verification: null }],
+    );
+    expect(reasons).toEqual({ "08306029": "本学期没有开课" });
   });
 });

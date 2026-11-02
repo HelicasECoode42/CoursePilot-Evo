@@ -17,7 +17,7 @@ import type { CareerDirection, Course, ReviewNote } from "../contracts";
 import SchoolProgressTree from "../components/SchoolProgressTree.vue";
 import ReviewSummary from "../components/ReviewSummary.vue";
 import AdviceChat from "../components/AdviceChat.vue";
-import { groupAuditItems } from "../domain/academic-record";
+import { groupAuditItems, recordSourceLabel } from "../domain/academic-record";
 import { isCurriculumUsableForMode } from "../domain/planning-request";
 import { usePlanningStore } from "../stores/planning";
 
@@ -416,6 +416,31 @@ onUnmounted(() => controller?.abort());
           >
             我学了什么
           </button>
+        </div>
+        <div v-if="store.records.length > 0" class="dash-records">
+          <h3 class="sub-label">本次会话的学业记录</h3>
+          <ul class="dash-record-list" aria-label="学业记录来源">
+            <li
+              v-for="(record, index) in store.records"
+              :key="record.academicRecordId"
+              :data-source="record.sourceKind"
+            >
+              <strong>学业记录 {{ index + 1 }}</strong>
+              <span>
+                {{ record.completedCourses.length }} 门课程 ·
+                {{
+                  recordSourceLabel(
+                    record.sourceKind,
+                    record.academicRecordId ===
+                      store.schoolProgress?.academicRecord.academicRecordId,
+                  )
+                }}
+                ·
+                {{ record.transcriptComplete ? "已填完整" : "尚未确认填全" }}
+              </span>
+              <RouterLink to="/records">查看或修改</RouterLink>
+            </li>
+          </ul>
         </div>
         <div v-if="!store.selectedCurriculum" class="empty-state">
           <template v-if="usableCurricula.length"
@@ -861,6 +886,15 @@ onUnmounted(() => controller?.abort());
   font-size: 0.85rem;
   margin-top: 0.3rem;
 }
+.dash-record-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.8rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line, #e5e7eb);
+}
+
 .dash-learned li {
   display: flex;
   justify-content: space-between;

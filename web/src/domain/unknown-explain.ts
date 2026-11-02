@@ -9,7 +9,7 @@
  *     不再用一句笼统的「有一项课程信息无法确认」。
  */
 
-import type { Issue } from "../contracts";
+import type { Issue, PlanValidation } from "../contracts";
 
 const GENERIC =
   "这一项暂时无法确认。可以展开排查详情查看原因，或调整条件后重新核验。";
@@ -53,6 +53,8 @@ export const UNKNOWN_EXPLANATIONS: Record<string, string> = {
     "培养方案中有部分规则系统尚未纳入自动核对（例如只限选、组选、学期限制）。请以培养方案原文为准，系统不会替你判定这些规则。",
   SECTION_NOT_ASSIGNED:
     "这门课没有选定班次。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。",
+  SECTION_UNASSIGNED:
+    "这门课没有选定班次。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。",
   PENDING_COURSE_UNCATEGORIZED:
     "有一门课程尚未出结果，而且系统无法确定它属于哪个类别，所以所有要求的缺口都暂不能确定。可以在学业资料里确认它的结果，并检查课程是否在培养方案中。",
 };
@@ -91,6 +93,9 @@ const VERIFICATION_LEVEL_CODES = new Set([
   "CONSTRAINT_UNVERIFIABLE",
   "OFFERING_UNAVAILABLE",
   "OFFERING_SNAPSHOT_MISSING",
+  // 未排进课表是方案本身的状态，换班后同样过时（Java 的 SECTION_UNASSIGNED，Python 的 SECTION_NOT_ASSIGNED）。
+  "SECTION_UNASSIGNED",
+  "SECTION_NOT_ASSIGNED",
 ]);
 
 export function isVerificationLevelUnknown(code: string): boolean {
@@ -117,20 +122,35 @@ function pendingCourseText(
   return `${label} 在修或结果未知，${categoryText}。可以在学业资料里把它标为已修、未修或在修，确认后再核对。`;
 }
 
-/** Java 的 SECTION_NOT_ASSIGNED message 形如「课程 CODE：原因」（全角冒号）。 */
+/**
+ * Python 的 SECTION_NOT_ASSIGNED message 形如「课程 CODE：原因」（全角冒号），原因带有
+ * 具体来源（如「本学期没有开课」）。Java 的 SECTION_UNASSIGNED message 形如
+ * 「课程 CODE 未指定班次，无法核验…」，只说明没有班次，不带原因。两者都归为未排进课表。
+ */
 const SECTION_NOT_ASSIGNED_PATTERN = /^课程 (\S+)：(.+)$/;
+const SECTION_UNASSIGNED_PATTERN = /^课程 (\S+) 未指定班次/;
+const JAVA_UNASSIGNED_REASON =
+  "方案里还没有为这门课选定班次，所以上课时间无法核验";
 
 /**
- * 解析未选定班次的原因。返回课程号与 Java 给出的原因原文（只翻译，不改写）；
- * 格式不符时返回 null，调用方退回通用文案。
+ * 解析未选定班次的课程号与原因。原因是 Java 或 Python 给出的原文（只翻译，不改写）；
+ * Java 没有给原因时说明它的含义。格式不符或不是这两个代码时返回 null。
  */
 export function sectionNotAssignedReason(
   issue: Issue,
 ): { courseCode: string; reason: string } | null {
-  if (issue.code !== "SECTION_NOT_ASSIGNED") return null;
-  const match = SECTION_NOT_ASSIGNED_PATTERN.exec(issue.message.trim());
-  if (!match) return null;
-  return { courseCode: match[1], reason: match[2] };
+  const message = issue.message.trim();
+  if (issue.code === "SECTION_NOT_ASSIGNED") {
+    const match = SECTION_NOT_ASSIGNED_PATTERN.exec(message);
+    return match ? { courseCode: match[1], reason: match[2] } : null;
+  }
+  if (issue.code === "SECTION_UNASSIGNED") {
+    const match = SECTION_UNASSIGNED_PATTERN.exec(message);
+    return match
+      ? { courseCode: match[1], reason: JAVA_UNASSIGNED_REASON }
+      : null;
+  }
+  return null;
 }
 
 function sectionNotAssignedText(
@@ -138,13 +158,47 @@ function sectionNotAssignedText(
   courseNames: Readonly<Record<string, string>>,
 ): string {
   const parsed = sectionNotAssignedReason(issue);
-  if (!parsed) return UNKNOWN_EXPLANATIONS.SECTION_NOT_ASSIGNED ?? GENERIC;
+  if (!parsed) return UNKNOWN_EXPLANATIONS[issue.code] ?? GENERIC;
   const name = courseNames[parsed.courseCode];
   const label =
     name && name !== parsed.courseCode
       ? `${name}（${parsed.courseCode}）`
       : parsed.courseCode;
   return `${label} 没有选定班次：${parsed.reason}。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。`;
+}
+
+/**
+ * 当前方案里未排进课表的课程号 → 原因，供课表列出。
+ *
+ * 数据来源只有两处，都跟随「当前版本」：
+ *   - 当前方案的核验判决（Java 的 SECTION_UNASSIGNED，换班后是新判决）；
+ *   - 答复里的 SECTION_NOT_ASSIGNED（Python 给出的具体原因），仅对尚未换班的原方案有效。
+ * 换过班的方案不再读答复里的旧原因，避免把已经换掉的课还写成「未排进」。
+ */
+export function unplacedReasonsFor(
+  answerUnknowns: readonly Issue[],
+  plans: readonly {
+    replaced: boolean;
+    verification: PlanValidation | null;
+  }[],
+): Record<string, string> {
+  const reasons: Record<string, string> = {};
+  for (const plan of plans) {
+    if (plan.verification !== null) {
+      for (const issue of plan.verification.unknownChecks) {
+        const parsed = sectionNotAssignedReason(issue);
+        if (parsed !== null) reasons[parsed.courseCode] = parsed.reason;
+      }
+    }
+    if (!plan.replaced) {
+      // 未换班时原答复的具体原因（Python）比判决里 Java 的通用说明更有用，覆盖之。
+      for (const issue of answerUnknowns) {
+        const parsed = sectionNotAssignedReason(issue);
+        if (parsed !== null) reasons[parsed.courseCode] = parsed.reason;
+      }
+    }
+  }
+  return reasons;
 }
 
 /**
@@ -159,7 +213,10 @@ export function explainUnknownIssue(
 ): string {
   if (issue.code === "PENDING_COURSE")
     return pendingCourseText(issue, courseNames);
-  if (issue.code === "SECTION_NOT_ASSIGNED")
+  if (
+    issue.code === "SECTION_NOT_ASSIGNED" ||
+    issue.code === "SECTION_UNASSIGNED"
+  )
     return sectionNotAssignedText(issue, courseNames);
   const official = context.officialUnverified
     ? OFFICIAL_UNVERIFIED_EXPLANATIONS.get(issue.code)

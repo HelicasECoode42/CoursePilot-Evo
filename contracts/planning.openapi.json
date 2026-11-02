@@ -2217,12 +2217,42 @@
                               "items": {
                                 "$ref": "./schemas/domain.schema.json#/$defs/CourseOffering"
                               }
+                            },
+                            "mustAvoidChecks": {
+                              "type": "array",
+                              "minItems": 0,
+                              "maxItems": 50,
+                              "description": "Java 对每个候选班次单独核验硬时间约束（CONSTRAINT_BLOCK_* 违规即 CONFLICT）。方案没有硬约束时为空数组，不代表已核对。候选班次只是预览，换班后仍须整份重新核验。",
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "classId": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+                                    "maxLength": 120
+                                  },
+                                  "verdict": {
+                                    "type": "string",
+                                    "enum": [
+                                      "CONFLICT",
+                                      "CLEAR",
+                                      "UNKNOWN"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "classId",
+                                  "verdict"
+                                ]
+                              }
                             }
                           },
                           "required": [
                             "previousPlanId",
                             "courseCode",
-                            "items"
+                            "items",
+                            "mustAvoidChecks"
                           ]
                         }
                       }

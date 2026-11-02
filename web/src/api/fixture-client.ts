@@ -501,6 +501,14 @@ export class FixtureApiClient implements CoursePilotApiClient {
     this.sessionToken = null;
   }
 
+  restoreSession(sessionToken: string): void {
+    this.sessionToken = sessionToken;
+  }
+
+  currentSessionToken(): string | null {
+    return this.sessionToken;
+  }
+
   async createSession(signal?: AbortSignal): Promise<SessionView> {
     this.sessionToken = null;
     await new Promise<void>((resolve, reject) => {
@@ -676,6 +684,8 @@ export class FixtureApiClient implements CoursePilotApiClient {
       previousPlanId,
       courseCode,
       items: structuredClone(FIXTURE_OFFERINGS.get(courseCode) ?? []),
+      // 演示数据不做必避时段核对：没有检查结果，页面会按「未核对」处理，不声称无冲突。
+      mustAvoidChecks: [],
       status: "OK",
     };
   }

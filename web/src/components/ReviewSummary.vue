@@ -3,11 +3,16 @@ import type { ReviewNote } from "../contracts";
 import { reviewSourceLabel } from "../domain/review-source";
 import { summarizeReviewsByDimension } from "../domain/review-summary";
 
-defineProps<{
-  courseCode: string;
-  notes: ReviewNote[];
-  unconfirmed?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    courseCode: string;
+    notes: ReviewNote[];
+    unconfirmed?: boolean;
+    /** 标题：课程级、按老师、未绑定老师等区块分别说明依据。 */
+    title?: string;
+  }>(),
+  { title: "课程评价维度汇总" },
+);
 
 const LABELS: Record<string, string> = {
   GRADING: "给分方式",
@@ -45,7 +50,7 @@ function publishedYear(publishedAt: string | null): string {
     v-if="summarizeReviewsByDimension(notes, courseCode).length > 0"
     aria-label="课程评价维度汇总"
   >
-    <h2>课程评价维度汇总</h2>
+    <h2>{{ props.title }}</h2>
     <p class="microcopy">
       按评价记录统计；同一记录可能涉及多个维度，数量不等于评价人数。
     </p>

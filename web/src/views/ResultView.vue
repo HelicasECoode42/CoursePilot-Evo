@@ -13,6 +13,8 @@ import { api } from "../api";
 import { ApiFailure } from "../api/client";
 import type {
   CourseOffering,
+  MustAvoidCheck,
+  MustAvoidVerdict,
   Issue,
   Meeting,
   PlanItem,
@@ -37,9 +39,13 @@ import {
   type SectionLine,
 } from "../domain/plan-sections";
 import {
+  teacherReviewNotes,
+  unboundReviewNotes,
+} from "../domain/review-summary";
+import {
   explainUnknownIssue,
   isVerificationLevelUnknown,
-  sectionNotAssignedReason,
+  unplacedReasonsFor,
   type UnknownContext,
 } from "../domain/unknown-explain";
 import {
@@ -222,15 +228,22 @@ function explainUnknown(issue: Issue): string {
   return explainUnknownIssue(issue, courseNames.value, unknownContext.value);
 }
 
-/** 未排进课表的真实原因：课程号 → Java 给出的原因原文（来自 SECTION_NOT_ASSIGNED）。 */
-const unplacedReasons = computed<Record<string, string>>(() => {
-  const reasons: Record<string, string> = {};
-  for (const issue of result.value?.unknowns ?? []) {
-    const parsed = sectionNotAssignedReason(issue);
-    if (parsed !== null) reasons[parsed.courseCode] = parsed.reason;
-  }
-  return reasons;
-});
+/**
+ * 未排进课表的原因：课程号 → 原因。跟随每份方案的当前版本（换班后用新判决），
+ * 不再读换班前答复里的旧原因。规则在 domain/unknown-explain.ts 的 unplacedReasonsFor。
+ */
+const unplacedReasons = computed<Record<string, string>>(() =>
+  unplacedReasonsFor(
+    result.value?.unknowns ?? [],
+    recommendations.value.map((item) => {
+      const plan = currentPlan(item);
+      return {
+        replaced: plan.replacedFrom !== null,
+        verification: plan.verification,
+      };
+    }),
+  ),
+);
 
 /** 是否有方案用了模拟班次。横幅只跟随方案的判决，不跟随客户端模式。 */
 const planIsSimulated = computed(() =>
@@ -408,6 +421,73 @@ async function loadCourseEvidence(courseCode: string) {
   }
 }
 
+/** 按老师读取评价：键为 课程号::教师键。只保留这门课、且 teacherKey 完全一致的记录。 */
+const teacherReviews = ref<
+  Record<
+    string,
+    {
+      status: "loading" | "ready" | "error";
+      notes: ReviewNote[];
+      unknown: boolean;
+    }
+  >
+>({});
+
+function teacherReviewKey(courseCode: string, teacherKey: string): string {
+  return `${courseCode}::${teacherKey}`;
+}
+
+async function loadTeacherEvidence(courseCode: string, teacherKey: string) {
+  const key = teacherReviewKey(courseCode, teacherKey);
+  if (teacherReviews.value[key]?.status === "loading") return;
+  teacherReviews.value = {
+    ...teacherReviews.value,
+    [key]: { status: "loading", notes: [], unknown: false },
+  };
+  try {
+    const result = await api.searchReviews(courseCode, teacherKey);
+    teacherReviews.value = {
+      ...teacherReviews.value,
+      [key]: {
+        status: "ready",
+        notes: teacherReviewNotes(result.items, courseCode, teacherKey),
+        unknown: result.status === "UNKNOWN",
+      },
+    };
+  } catch {
+    teacherReviews.value = {
+      ...teacherReviews.value,
+      [key]: { status: "error", notes: [], unknown: false },
+    };
+  }
+}
+
+/** 展开「评价」时才读取课程级与本班教师的评价，收起不发请求。 */
+function onEvidenceToggle(card: PlanCourseCard, event: globalThis.Event) {
+  const target = event.target as { open?: boolean } | null;
+  const open = target?.open === true;
+  if (!open) return;
+  void loadCourseEvidence(card.courseCode);
+  if (card.teacherKey !== null) {
+    void loadTeacherEvidence(card.courseCode, card.teacherKey);
+  }
+}
+
+/** 课程级评价里没有绑定老师的那部分（规则在 domain/review-summary.ts）。 */
+function unboundNotesOf(courseCode: string): ReviewNote[] {
+  return unboundReviewNotes(
+    courseReviews.value[courseCode]?.notes ?? [],
+    courseCode,
+  );
+}
+
+/** 同一课程里已绑定到其他老师的评价条数，课程级区块要说明它们存在但不混入。 */
+function boundElsewhereCount(card: PlanCourseCard): number {
+  return (courseReviews.value[card.courseCode]?.notes ?? []).filter(
+    (note) => note.teacherKey !== null && note.teacherKey !== card.teacherKey,
+  ).length;
+}
+
 /** 删除课程正在请求的那一门；同一时间只允许一个删除请求。 */
 const deleting = ref<{ planId: string; courseCode: string } | null>(null);
 /** 删除失败的提示，按「原推荐的 planId」保存；原方案保留，不清空。 */
@@ -425,6 +505,8 @@ interface PlanCourseCard {
   name: string | null;
   classId: string | null;
   teacher: string;
+  /** 班次资料里的教师键（与评价的 teacherKey 对应）；没有班次资料时为 null。 */
+  teacherKey: string | null;
   time: string;
   rationale: NonNullable<Recommendation["courseRationales"]>[number] | null;
   rationaleWasReused: boolean;
@@ -473,6 +555,7 @@ function cardsOf(entry: PlanEntry): PlanCourseCard[] {
       name: courseNames.value[item.courseCode] ?? null,
       classId: item.classId,
       teacher,
+      teacherKey: offering?.teacherKey ?? null,
       time,
       rationale,
       rationaleWasReused:
@@ -563,6 +646,8 @@ const searchedCourse = ref<string | null>(null);
 const offerings = ref<CourseOffering[]>([]);
 /** 班次资料是 UNKNOWN（快照缺失或非当前）：空列表不能说成「没有班次」。 */
 const offeringsUnconfirmed = ref(false);
+/** Java 对每个候选班次的硬时间约束核对（必避时段）。 */
+const mustAvoidChecks = ref<MustAvoidCheck[]>([]);
 const knownPlanMeetings = ref<KnownPlanMeeting[]>([]);
 const planGaps = ref<string[]>([]);
 const selectedClassId = ref<string | null>(null);
@@ -822,6 +907,7 @@ async function runSearch(entry: PlanEntry) {
       }
     }
     offerings.value = target.items;
+    mustAvoidChecks.value = target.mustAvoidChecks;
     offeringsUnconfirmed.value = target.status === "UNKNOWN";
     knownPlanMeetings.value = known;
     planGaps.value = gaps;
@@ -839,11 +925,31 @@ async function runSearch(entry: PlanEntry) {
  * 只有「班次资料已确认、本班次时间完整、方案其他课时间全部读到、且没有冲突」才给 clear，
  * 与 answer-display.ts 的门禁一致：确定的结论才给绿色，其余一律落到无法确认。
  */
+/**
+ * 候选班次的必避时段核对结果。null 表示学生没有设定必避时段，不需要核对；
+ * NOT_CHECKED 表示设定了必避时段，但服务端没有给出这个班次的核对结果，不能当作无冲突。
+ */
+type MustAvoidState = MustAvoidVerdict | "NOT_CHECKED" | null;
+
+function mustAvoidStateOf(classId: string): MustAvoidState {
+  const check = mustAvoidChecks.value.find((item) => item.classId === classId);
+  if (check !== undefined) return check.verdict;
+  return store.draft.mustSlots.length > 0 ? "NOT_CHECKED" : null;
+}
+
 function judgeOffering(
   offering: CourseOffering,
   listUnconfirmed: boolean,
   gapCodes: readonly string[],
+  mustAvoid: MustAvoidState,
 ): Pick<OfferingRow, "kind" | "note"> {
+  // 必避时段的判决来自 Java（经 Python 的 session-offerings），这里只翻译，不算时间。
+  if (mustAvoid === "CONFLICT") {
+    return {
+      kind: "conflict",
+      note: "与你设定的必避时段冲突（已由服务端核对，不能选择这个班次）。",
+    };
+  }
   if (offering.parseStatus !== "PARSED" || offering.meetings.length === 0) {
     return {
       kind: "unknown",
@@ -869,6 +975,18 @@ function judgeOffering(
       note: `与方案中已选的 ${conflicts.join("、")} 时间重叠（仅为预览，提交前需整份核验）。`,
     };
   }
+  if (mustAvoid === "UNKNOWN") {
+    return {
+      kind: "unknown",
+      note: "无法确认是否与你设定的必避时段冲突，不能直接选择。",
+    };
+  }
+  if (mustAvoid === "NOT_CHECKED") {
+    return {
+      kind: "unknown",
+      note: "还没有核对这个班次与你设定的必避时段，不能直接选择。",
+    };
+  }
   if (listUnconfirmed) {
     return {
       kind: "unknown",
@@ -883,7 +1001,10 @@ function judgeOffering(
   }
   return {
     kind: "clear",
-    note: "按已知时间没有发现冲突（仅为预览，提交前仍需整份核验）。",
+    note:
+      mustAvoid === "CLEAR"
+        ? "与你设定的必避时段没有冲突（服务端核对），与方案里已选课程也没有冲突（仅为预览，提交前仍需整份核验）。"
+        : "按已知时间没有发现冲突（仅为预览，提交前仍需整份核验）。",
   };
 }
 
@@ -893,6 +1014,7 @@ const offeringRows = computed<OfferingRow[]>(() =>
       offering,
       offeringsUnconfirmed.value,
       planGaps.value,
+      mustAvoidStateOf(offering.classId),
     );
     return {
       classId: offering.classId,
@@ -1274,12 +1396,7 @@ async function goBackToQuestions() {
                 :review-evidence-refs="card.rationale?.reviewEvidenceRefs ?? []"
                 :review-notes="courseReviews[card.courseCode]?.notes ?? []"
               />
-              <details
-                @toggle="
-                  ($event.target as HTMLDetailsElement).open &&
-                  loadCourseEvidence(card.courseCode)
-                "
-              >
+              <details @toggle="onEvidenceToggle(card, $event)">
                 <summary>查看评价维度汇总与资料</summary>
                 <p
                   v-if="
@@ -1297,13 +1414,60 @@ async function goBackToQuestions() {
                 <ReviewSummary
                   v-if="
                     courseReviews[card.courseCode]?.status === 'ready' &&
-                    !courseReviews[card.courseCode].unknown &&
-                    courseReviews[card.courseCode].notes.length > 0
+                    unboundNotesOf(card.courseCode).length > 0
                   "
+                  title="课程整体评价（未绑定老师）"
                   :course-code="card.courseCode"
-                  :notes="courseReviews[card.courseCode].notes"
+                  :notes="unboundNotesOf(card.courseCode)"
                   :unconfirmed="courseReviews[card.courseCode].unknown"
                 />
+                <p
+                  v-if="
+                    card.teacherKey !== null &&
+                    teacherReviews[
+                      teacherReviewKey(card.courseCode, card.teacherKey)
+                    ]?.status === 'loading'
+                  "
+                  class="microcopy"
+                >
+                  正在读取本班教师的评价…
+                </p>
+                <template
+                  v-if="
+                    card.teacherKey !== null &&
+                    teacherReviews[
+                      teacherReviewKey(card.courseCode, card.teacherKey)
+                    ]?.status === 'ready'
+                  "
+                >
+                  <ReviewSummary
+                    v-if="
+                      teacherReviews[
+                        teacherReviewKey(card.courseCode, card.teacherKey)
+                      ].notes.length > 0
+                    "
+                    :title="`本班教师评价（${card.teacher}）`"
+                    :course-code="card.courseCode"
+                    :notes="
+                      teacherReviews[
+                        teacherReviewKey(card.courseCode, card.teacherKey)
+                      ].notes
+                    "
+                    :unconfirmed="
+                      teacherReviews[
+                        teacherReviewKey(card.courseCode, card.teacherKey)
+                      ].unknown
+                    "
+                  />
+                  <p v-else class="microcopy">
+                    这位老师暂无绑定到本人的评价记录。
+                  </p>
+                </template>
+                <p v-if="boundElsewhereCount(card) > 0" class="microcopy">
+                  另有
+                  {{ boundElsewhereCount(card) }}
+                  条评价绑定到其他老师，未计入本班教师。
+                </p>
                 <p
                   v-else-if="
                     courseReviews[card.courseCode]?.status === 'ready' &&

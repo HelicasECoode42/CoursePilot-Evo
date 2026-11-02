@@ -832,6 +832,9 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
             previousPlanId: "plan-1",
             courseCode: "CS103",
             items: [offering],
+            mustAvoidChecks: [
+              { classId: offering.classId, verdict: "CONFLICT" },
+            ],
           }),
         ),
       );
@@ -843,6 +846,7 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
       previousPlanId: "plan-1",
       courseCode: "CS103",
       items: [offering],
+      mustAvoidChecks: [{ classId: offering.classId, verdict: "CONFLICT" }],
       status: "OK",
     });
     const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
@@ -866,6 +870,7 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
             previousPlanId: "plan-1",
             courseCode: "CS103",
             items: [],
+            mustAvoidChecks: [],
           }),
         ),
       );
@@ -874,6 +879,28 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     const result = await client.searchSessionOfferings("plan-1", "CS103");
     expect(result.items).toEqual([]);
     expect(result.status).toBe("UNKNOWN");
+  });
+
+  it("rejects an offering search that omits or malforms mustAvoidChecks", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          200,
+          envelope("OK", {
+            previousPlanId: "plan-1",
+            courseCode: "CS103",
+            items: [offering],
+            mustAvoidChecks: [{ classId: offering.classId, verdict: "MAYBE" }],
+          }),
+        ),
+      );
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.searchSessionOfferings("plan-1", "CS103"),
+    ).rejects.toThrow(/不符合当前接口约定/);
   });
 
   it("posts the replacement with an Idempotency-Key and returns the server verdict unchanged", async () => {

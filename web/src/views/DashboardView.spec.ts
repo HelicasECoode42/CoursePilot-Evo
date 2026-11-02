@@ -609,3 +609,28 @@ describe("个人控制台", () => {
     expect(wrapper.text()).toContain("确认采用的兴趣或课程会进入本次规划草稿");
   });
 });
+
+describe("个人控制台 · 学业记录来源", () => {
+  it("手动补录的学业记录在 /me 显示为「手动补录」，不再只藏在记录页里", async () => {
+    const { wrapper, store } = await mountDashboard(false);
+    store.$patch({
+      records: [
+        {
+          academicRecordId: "rec-manual",
+          curriculumSnapshotId: "curr-real",
+          completedCourses: [],
+          transcriptComplete: false,
+          sourceKind: "USER_IMPORT",
+          createdAt: "2026-10-30T00:00:00Z",
+        } as never,
+      ],
+    });
+    await flushPromises();
+    const list = wrapper.get('[aria-label="学业记录来源"]');
+    expect(list.text()).toContain("手动补录");
+    expect(list.text()).toContain("尚未确认填全");
+    expect(wrapper.get(".dash-record-list li").attributes("data-source")).toBe(
+      "USER_IMPORT",
+    );
+  });
+});

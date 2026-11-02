@@ -360,6 +360,7 @@ async function loadReviews(option: TeacherCourseOption) {
     );
     if (reviewSeq.get(key) !== seq) return;
     // 只保留这门课、且是这位老师或未指明老师的评价，不混入别的老师。
+    // 未指明老师的记录带「依据有限」标记，不当作这位老师的评价。
     const own = result.items.filter(
       (note) =>
         note.courseCode === option.courseCode &&
@@ -629,6 +630,7 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                 "
               >
                 <ReviewSummary
+                  title="课程整体评价（未绑定老师）"
                   :course-code="course.courseCode"
                   :notes="reviewStates[courseReviewKey(course)]!.notes"
                   :unconfirmed="
@@ -799,6 +801,7 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                     </p>
                   </div>
                   <ReviewSummary
+                    :title="`${option.teacherDisplayName} 的教师评价`"
                     :course-code="option.courseCode"
                     :notes="reviewStateOf(option)!.notes"
                     :unconfirmed="reviewStateOf(option)!.unconfirmed"

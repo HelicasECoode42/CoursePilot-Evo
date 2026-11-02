@@ -21,6 +21,8 @@ uv run python scripts/self_check.py
 
 ## 变更记录
 
+- `GET /api/v1/session-offerings` 的 `data` 增加必填 `mustAvoidChecks`：方案带硬时间约束时，每个候选班次各一条 `{classId, verdict}`，`verdict` 为 `CONFLICT`（Java 的 `CONSTRAINT_BLOCK_*` 违规）、`CLEAR` 或 `UNKNOWN`（Java 的 `CONSTRAINT_UNVERIFIABLE`）；方案没有硬约束时为空数组，空数组不代表已核对。Python 对每个候选班次各调用一次 Java `validatePlan`（只带该班次与原硬约束），时间判断仍全部在 Java。`CourseOffering` 本身未改动。网页搜索预览据此标出「与必避时段冲突」，不再对此类班次显示「没有发现冲突」。
+
 - `PlanValidation` 增加必填 `sections`（恰好两项，`scope` 为 `TIMETABLE` 本学期课表核验 / `CURRICULUM` 毕业要求核对），每项携带自己的 `verdict`、`violations`、`unknownChecks`。两个分项的判决口径与总判决相同，取值仍为 VALID / INVALID / UNKNOWN（不另引入 PASS/FAIL 词汇）。总判决 `verdict` 是两个分项中最差的一个（INVALID > UNKNOWN > VALID），Schema 用条件规则约束这一关系；顶层 `violations` / `unknownChecks` 仍是两个分项的合并，旧消费者无需改动。`schemaVersion` 保持 `1.0`（无已发布的外部消费者）。Python 网关的 `PlanValidation` 同步加入 `sections` 与分项判决约束；为不破坏既有构造该对象的测试数据，Python 侧暂缺省为空列表，待 fixture 补齐后改为必填。新增正反例：`verification-two-sections.json` 与三条反例。另新增未指定班次时的 `SECTION_UNASSIGNED` 未知项（归 TIMETABLE）。培养快照的未建模规则新增 `INFORMATIONAL` 处置（仅用于「任意选修说明」与「课程标记图例」这两类纯说明文字），不计入未知；导入时只对上述整句精确匹配，其余备注仍为 `UNMODELED`。
 
 - `OfferingImport.sourceKind` 与 `SnapshotSummary.sourceKind` 增加 `OFFICIAL_DOCUMENT`（官方公开课表文件转换所得），导入后 sourceValidation 恒为 `UNVERIFIED`。`OfferingImport.offerings` 上限由 2000 提高到 7000：2026-27 秋季官方课表共 6431 条，须整体进入同一开课快照，否则同一学期被拆成多个快照。新增 `POST /api/v1/offering-snapshots/{snapshotId}/verification`（`verifyOfferingSnapshot`，管理员密钥）与 `OfferingVerificationRequest`/`OfferingVerificationResult`：核验人与上传人不得相同；样本至少 30 条；错误率不超过 2% 记为 VERIFIED，否则 REJECTED；SYNTHETIC 快照不可核验；每次写审计记录。只有 mode=REAL、快照 VERIFIED 且方案项都在该快照内时，方案核验 scope 才为 REAL_TIMETABLE。Python 网关两处 sourceKind 枚举同步加入该值。

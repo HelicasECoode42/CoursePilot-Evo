@@ -173,6 +173,127 @@ def test_search_returns_multiple_classes_for_the_course() -> None:
     assert [item["classId"] for item in items] == ["class:cs-a", "class:cs-b"]
     assert items[0]["parseStatus"] == "PARSED"
     assert items[0]["sourceRefId"] == "source:class:cs-a"
+    # 方案带硬时间约束：每个候选班次单独交给 Java 核验一次，不在 Python 里算时间。
+    assert tools.calls == ["listOfferings", "validatePlan", "validatePlan"]
+    assert response.json()["data"]["mustAvoidChecks"] == [
+        {"classId": "class:cs-a", "verdict": "CLEAR"},
+        {"classId": "class:cs-b", "verdict": "CLEAR"},
+    ]
+
+
+def test_search_flags_a_candidate_that_hits_a_must_avoid_block() -> None:
+    class BlockingTools(ScriptedTools):
+        def call(self, tool: str, dto, context, *, params=None):
+            if tool != "validatePlan":
+                return super().call(tool, dto, context, params=params)
+            self.calls.append(tool)
+            # 只有候选班次 cs-a 命中 Java 的整日必避约束；cs-b 不命中。
+            verifier_id = f"verify:check-{len(self.calls)}"
+            if dto.items[0].classId == "class:cs-a":
+                return _validation("INVALID", verifier_id).model_copy(
+                    update={
+                        "violations": [
+                            Issue(
+                                code="CONSTRAINT_BLOCK_DAY",
+                                message="课程 CS101（班次 class:cs-a）周一第1-2节，命中第 0 条硬约束",  # noqa: E501
+                                field="hardConstraints[0]",
+                                retryable=False,
+                            )
+                        ],
+                        "unknownChecks": [],
+                    }
+                )
+            return PlanValidation(
+                verifierResultId=verifier_id,
+                verdict="VALID",
+                scope="REAL_TIMETABLE",
+                curriculumSnapshotId="curr:demo",
+                offeringSnapshotId="offer:demo",
+                recordRevision=1,
+                violations=[],
+                unknownChecks=[],
+                performedChecks=["TIME_OVERLAP"],
+                sourceRefIds=["source:class:cs-b"],
+            )
+
+    tools = BlockingTools()
+    client = _app(tools)
+    session_id, token = _session(client)
+    _remember(client.app, session_id)
+
+    response = client.get(
+        "/api/v1/session-offerings",
+        params={"previousPlanId": "plan:old", "courseCode": "CS101"},
+        headers=_headers(token, key=None),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["mustAvoidChecks"] == [
+        {"classId": "class:cs-a", "verdict": "CONFLICT"},
+        {"classId": "class:cs-b", "verdict": "CLEAR"},
+    ]
+
+
+def test_must_avoid_unverifiable_constraint_stays_unknown_not_clear() -> None:
+    class UnverifiableTools(ScriptedTools):
+        def call(self, tool: str, dto, context, *, params=None):
+            if tool != "validatePlan":
+                return super().call(tool, dto, context, params=params)
+            self.calls.append(tool)
+            return _validation("UNKNOWN", f"verify:u-{len(self.calls)}").model_copy(
+                update={
+                    "violations": [],
+                    "unknownChecks": [
+                        Issue(
+                            code="CONSTRAINT_UNVERIFIABLE",
+                            message="需要已验证的班次时间",
+                            field="hardConstraints[0]",
+                            retryable=False,
+                        )
+                    ],
+                }
+            )
+
+    tools = UnverifiableTools()
+    client = _app(tools)
+    session_id, token = _session(client)
+    _remember(client.app, session_id)
+
+    response = client.get(
+        "/api/v1/session-offerings",
+        params={"previousPlanId": "plan:old", "courseCode": "CS101"},
+        headers=_headers(token, key=None),
+    )
+
+    assert response.status_code == 200
+    checks = response.json()["data"]["mustAvoidChecks"]
+    assert {check["verdict"] for check in checks} == {"UNKNOWN"}
+
+
+def test_search_without_hard_constraints_makes_no_java_check() -> None:
+    tools = ScriptedTools()
+    client = _app(tools)
+    session_id, token = _session(client)
+    client.app.state.plan_store.remember(
+        session_id=session_id,
+        plan_id="plan:plain",
+        curriculum_snapshot_id="curr:demo",
+        offering_snapshot_id="offer:demo",
+        academic_record_id="record:demo",
+        mode="REAL",
+        items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)],
+        hard_constraints=[],
+        verifier_result_id="verify:plain",
+    )
+
+    response = client.get(
+        "/api/v1/session-offerings",
+        params={"previousPlanId": "plan:plain", "courseCode": "CS101"},
+        headers=_headers(token, key=None),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["mustAvoidChecks"] == []
     assert tools.calls == ["listOfferings"]
 
 

@@ -60,6 +60,22 @@ class ReplacementResult:
     empty: bool = False
 
 
+@dataclass(frozen=True)
+class MustAvoidCheck:
+    """Java's verdict on one candidate class against the hard time constraints."""
+
+    classId: str
+    verdict: str  # CONFLICT | CLEAR | UNKNOWN
+
+
+def _must_avoid_verdict(verification: PlanValidation) -> str:
+    if any(item.code.startswith("CONSTRAINT_BLOCK_") for item in verification.violations):
+        return "CONFLICT"
+    if any(item.code.startswith("CONSTRAINT_") for item in verification.unknownChecks):
+        return "UNKNOWN"
+    return "CLEAR"
+
+
 class PlanReplacement:
     def __init__(self, plans: SessionPlanStore, tools: ToolCaller) -> None:
         self._plans = plans
@@ -75,6 +91,56 @@ class PlanReplacement:
     ) -> list[CourseOffering]:
         plan = self._require_plan(session_id, previous_plan_id)
         return self._load_offerings(plan, course_code, context)
+
+    def check_must_avoid(
+        self,
+        *,
+        session_id: str,
+        previous_plan_id: str,
+        offerings: list[CourseOffering],
+        context: ExecutionContext,
+    ) -> list[MustAvoidCheck]:
+        """Ask Java whether each candidate class breaks a hard time constraint.
+
+        Each candidate is validated alone against the saved hard constraints.
+        Java does the time math. This only maps its CONSTRAINT_BLOCK_* findings
+        to CONFLICT / UNKNOWN / CLEAR. A plan without hard constraints needs no
+        Java call and gets no checks.
+        """
+        plan = self._require_plan(session_id, previous_plan_id)
+        if not plan.hard_constraints or plan.offering_snapshot_id is None:
+            return []
+        constraints = [item.model_copy(deep=True) for item in plan.hard_constraints]
+        checks: list[MustAvoidCheck] = []
+        for offering in offerings:
+            candidate = PlanItem(
+                courseCode=offering.courseCode,
+                teacherKey=offering.teacherKey,
+                classId=offering.classId,
+            )
+            verification = cast(
+                PlanValidation,
+                self._tools.call(
+                    "validatePlan",
+                    PlanValidationRequest(
+                        schemaVersion="1.0",
+                        curriculumSnapshotId=plan.curriculum_snapshot_id,
+                        offeringSnapshotId=plan.offering_snapshot_id,
+                        academicRecordId=plan.academic_record_id,
+                        mode=plan.mode,
+                        items=[candidate],
+                        hardConstraints=constraints,
+                    ),
+                    context,
+                ),
+            )
+            checks.append(
+                MustAvoidCheck(
+                    classId=offering.classId,
+                    verdict=_must_avoid_verdict(verification),
+                )
+            )
+        return checks
 
     def replace(
         self,

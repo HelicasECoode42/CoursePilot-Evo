@@ -225,6 +225,7 @@ function stubOfferings(overrides: Record<string, CourseOffering[]> = {}) {
         overrides[courseCode] ?? DEFAULT_OFFERINGS[courseCode] ?? [];
       const list: SessionOfferingList & { status: "OK" } = {
         previousPlanId,
+        mustAvoidChecks: [],
         courseCode,
         items: structuredClone(items),
         status: "OK",
@@ -548,6 +549,45 @@ describe("result page course search and replacement", () => {
     );
   });
 
+  it("search preview flags a section that Java says hits a must-avoid time, and never calls it clear", async () => {
+    vi.spyOn(api, "searchSessionOfferings").mockImplementation(
+      async (previousPlanId, courseCode) => ({
+        previousPlanId,
+        courseCode,
+        status: "OK",
+        items: structuredClone(DEFAULT_OFFERINGS[courseCode] ?? []),
+        mustAvoidChecks: [
+          { classId: "CS103-01", verdict: "CONFLICT" },
+          { classId: "CS103-02", verdict: "CLEAR" },
+        ],
+      }),
+    );
+    const wrapper = mountPage();
+    await openAndSearch(wrapper, "CS103");
+
+    const hit = rowOf(wrapper, "CS103-01");
+    expect(hit?.text()).toContain("有冲突");
+    expect(hit?.text()).toContain("与你设定的必避时段冲突");
+    expect(hit?.text()).not.toContain("没有发现冲突");
+    expect(hit?.text()).not.toContain("选这个班次");
+    const clear = rowOf(wrapper, "CS103-02");
+    expect(clear?.text()).toContain("与你设定的必避时段没有冲突");
+  });
+
+  it("does not claim a section is conflict-free when the student has must-avoid times but Java gave no check for it", async () => {
+    const wrapper = mountPage();
+    store.$patch({
+      draft: { ...store.draft, mustSlots: ["5-1"] },
+    });
+    stubOfferings();
+    await openAndSearch(wrapper, "CS103");
+
+    const row = rowOf(wrapper, "CS103-02");
+    expect(row?.text()).toContain("还没有核对这个班次与你设定的必避时段");
+    expect(row?.text()).not.toContain("没有发现冲突");
+    expect(row?.text()).not.toContain("选这个班次");
+  });
+
   it("says a course has no offerings in the current snapshot instead of reporting an error", async () => {
     stubOfferings();
     const wrapper = mountPage();
@@ -561,6 +601,7 @@ describe("result page course search and replacement", () => {
     vi.spyOn(api, "searchSessionOfferings").mockImplementation(
       async (previousPlanId, courseCode) => ({
         previousPlanId,
+        mustAvoidChecks: [],
         courseCode,
         items: [],
         status: "UNKNOWN",
@@ -578,6 +619,7 @@ describe("result page course search and replacement", () => {
     vi.spyOn(api, "searchSessionOfferings").mockImplementation(
       async (previousPlanId, courseCode) => ({
         previousPlanId,
+        mustAvoidChecks: [],
         courseCode,
         items: structuredClone(DEFAULT_OFFERINGS[courseCode] ?? []),
         status: "UNKNOWN",
@@ -597,6 +639,7 @@ describe("result page course search and replacement", () => {
     vi.spyOn(api, "searchSessionOfferings").mockImplementation(
       async (previousPlanId, courseCode) => ({
         previousPlanId,
+        mustAvoidChecks: [],
         courseCode,
         // 方案里的 CS102-01 在快照中找不到，它的时间就成了缺口。
         items:
@@ -778,6 +821,7 @@ describe("result page course search and replacement", () => {
         }
         return {
           previousPlanId,
+          mustAvoidChecks: [],
           courseCode,
           items: DEFAULT_OFFERINGS.CS102,
           status: "OK" as const,
@@ -813,6 +857,7 @@ describe("result page course search and replacement", () => {
     vi.spyOn(api, "searchSessionOfferings").mockImplementation(
       async (previousPlanId, courseCode) => ({
         previousPlanId,
+        mustAvoidChecks: [],
         courseCode,
         items:
           courseCode === "CS102"
