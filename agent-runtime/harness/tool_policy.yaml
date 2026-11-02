@@ -14,8 +14,10 @@ tools:
     max_calls: 2
   - name: searchReviews
     max_calls: 2
+  # Section assignment: one listOfferings per planned course. Not counted in the
+  # 6-call run budget; capped by Budget.max_offering_calls (4).
   - name: listOfferings
-    max_calls: 1
+    max_calls: 4
   - name: listCareerDirections
     max_calls: 1
   - name: validatePlan

@@ -22,6 +22,11 @@ class Budget:
     max_tool_calls: int = 6
     max_model_calls: int = 3
     deadline_ms: int = 45000
+    # listOfferings lookups for section assignment. Counted apart from max_tool_calls:
+    # the 6-call run budget is already used by audit, school progress, courses,
+    # teacher options, reviews and validation. One lookup per course, capped here.
+    # RunManifest has no field for this yet, so the cap is not recorded there.
+    max_offering_calls: int = 4
 
 
 class BudgetExceeded(RuntimeError):
@@ -35,8 +40,24 @@ class BudgetTracker:
     output_tokens: int | None = None
     tool_calls: int = 0
     model_calls: int = 0
+    offering_calls: int = 0
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     _per_tool: dict[str, int] = field(default_factory=dict)
+
+    def record_offering_call(self, tool_caps: dict[str, int] | None = None) -> None:
+        """Count one listOfferings lookup against maxOfferingCalls and the tool cap.
+
+        Does not touch ``tool_calls``: offering lookups have their own cap (see
+        ``Budget.max_offering_calls``). The per-tool cap still applies.
+        """
+        name = "listOfferings"
+        if self.offering_calls >= self.budget.max_offering_calls:
+            raise BudgetExceeded("maxOfferingCalls exceeded")
+        if tool_caps is not None:
+            if name not in tool_caps or self._per_tool.get(name, 0) >= tool_caps[name]:
+                raise BudgetExceeded(f"tool_policy 不允许再调用 {name}")
+            self._per_tool[name] = self._per_tool.get(name, 0) + 1
+        self.offering_calls += 1
 
     def record_tool_call(
         self,

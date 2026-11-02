@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -15,13 +16,19 @@ from agent_runtime.adapters.model_client import (
     ModelReply,
 )
 from agent_runtime.adapters.result_repository import FileResultRepository
-from agent_runtime.adapters.tool_client import InvalidTool, ToolClient, ToolRejected
+from agent_runtime.adapters.tool_client import (
+    InvalidTool,
+    ToolClient,
+    ToolRejected,
+    ToolUnavailable,
+)
 from agent_runtime.adapters.trace_port import TracePort
 from agent_runtime.api.schemas import (
     AcademicRecord,
     AuditRequest,
     AuditResult,
     Course,
+    CourseOffering,
     Issue,
     PlanItem,
     PlanningAnswer,
@@ -34,12 +41,23 @@ from agent_runtime.api.schemas import (
     Usage,
 )
 from agent_runtime.api.schemas.answer import CourseRationale, ReviewEvidenceRef
-from agent_runtime.application.budget import Budget, BudgetTracker
+from agent_runtime.application.budget import Budget, BudgetExceeded, BudgetTracker
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.ids import digest, new_id
 from agent_runtime.application.plan_replacement import ReusedVerification
 from agent_runtime.application.plan_store import PlanNotInSession, SavedPlan, SessionPlanStore
 from agent_runtime.application.run_manifest import RunIdentity, build_run_manifest
+from agent_runtime.application.section_assignment import (
+    REASON_BUDGET,
+    REASON_CONFLICT,
+    REASON_LOOKUP_FAILED,
+    CourseNeed,
+    CourseOptions,
+    choose_sections,
+    course_options,
+    hard_blocks,
+    soft_blocks,
+)
 from agent_runtime.domain.policies.answer_compiler import AnswerCompiler
 from agent_runtime.domain.policies.candidate_guard import (
     CandidateGuard,
@@ -172,6 +190,9 @@ class PlanningRunner:
                     selected.add(constraint.courseCode)
             if len(items) > 30:
                 raise ModelInvalidOutput("推荐课程和学生所选课程合计超过 30 门")
+        items, facts, section_issues = self._assign_sections(
+            request, items, facts, context, budget, trace
+        )
         guard_issues = self._guard.check(
             items, facts, required_teacher_pairs=request.intent.pinnedTeacherCoursePairs
         )
@@ -304,7 +325,9 @@ class PlanningRunner:
                 hard_constraints=request.intent.hardConstraints,
                 verifier_result_id=verdict.verifierResultId,
             )
-        unknowns = self._with_fake_model_issue(list(verdict.unknownChecks) + list(audit.unknowns))
+        unknowns = self._with_fake_model_issue(
+            list(verdict.unknownChecks) + section_issues + list(audit.unknowns)
+        )
         answer = self._answer.recommendations(
             task_id=task_id,
             trace_id=trace_id,
@@ -589,9 +612,172 @@ class PlanningRunner:
                         # 也限制注入载荷的长度；标注在 payload 里（见 _propose）。
                         excerpt=note.excerpt[:300],
                         source_ref_id=note.sourceRefId,
+                        teacher_key=note.teacherKey,
                     )
                 )
         return tuple(facts), queried
+
+    def _assign_sections(
+        self,
+        request: PlanningRequest,
+        items: list[PlanItem],
+        facts: KnownFacts,
+        context: ExecutionContext,
+        budget: BudgetTracker,
+        trace: TracePort,
+    ) -> tuple[list[PlanItem], KnownFacts, list[Issue]]:
+        """Fill classId for planned items from the offering snapshot (docs/36).
+
+        Only items with no classId are assigned. An item the model already gave a
+        classId keeps it; validatePlan still checks it. Java decides conflicts for
+        the final plan. Returns the items, the facts extended with the offering ids
+        the guard must accept, and one Issue per course left without a class.
+        """
+        if request.offeringSnapshotId is None or not items:
+            return items, facts, []
+
+        must = {
+            pair.courseCode: pair.teacherKey
+            for pair in request.intent.pinnedTeacherCoursePairs
+            if pair.mode == "MUST"
+        }
+        prefer = {
+            pair.courseCode: pair.teacherKey
+            for pair in request.intent.pinnedTeacherCoursePairs
+            if pair.mode == "PREFER"
+        }
+        blocks = hard_blocks(request.intent.hardConstraints)
+        soft = soft_blocks(request.intent.softPreferences)
+        review_counts: dict[str, dict[str | None, int]] = {}
+        for fact in facts.review_facts:
+            per_teacher = review_counts.setdefault(fact.course_code, {})
+            per_teacher[fact.teacher_key] = per_teacher.get(fact.teacher_key, 0) + 1
+
+        # MUST-pinned courses go first, so the lookup budget and the conflict fallback
+        # favour them. Original item order breaks the rest.
+        pending = sorted(
+            (index for index, item in enumerate(items) if item.classId is None),
+            key=lambda index: (items[index].courseCode not in must, index),
+        )
+
+        lookups: dict[str, list[CourseOffering]] = {}
+        reasons: dict[int, str] = {}
+        failed: dict[str, str] = {}
+        for index in pending:
+            code = items[index].courseCode
+            if code in lookups or code in failed:
+                continue
+            try:
+                budget.record_offering_call(self._harness.tool_caps)
+            except BudgetExceeded:
+                failed[code] = REASON_BUDGET
+                continue
+            try:
+                lookups[code] = self._offering_lookup(request, code, context, trace)
+            except (ToolUnavailable, ToolRejected, InvalidTool):
+                failed[code] = REASON_LOOKUP_FAILED
+
+        needs: list[tuple[int, CourseOptions]] = []
+        for index in pending:
+            item = items[index]
+            code = item.courseCode
+            if code in failed:
+                reasons[index] = failed[code]
+                continue
+            need = CourseNeed(
+                course_code=code,
+                item_teacher_key=item.teacherKey,
+                must_teacher_key=must.get(code),
+                prefer_teacher_key=prefer.get(code),
+            )
+            options = course_options(
+                need,
+                lookups[code],
+                blocks,
+                soft,
+                review_counts.get(code, {}),
+            )
+            if options.options:
+                needs.append((index, options))
+            else:
+                reasons[index] = options.reason or REASON_CONFLICT
+
+        picks = choose_sections([options.options for _, options in needs])
+        new_items = list(items)
+        assigned: list[tuple[str, str | None, str]] = []
+        for (index, _), pick in zip(needs, picks, strict=True):
+            if pick is None:
+                reasons[index] = REASON_CONFLICT
+                continue
+            item = items[index]
+            teacher = item.teacherKey
+            # Fill the teacher only when the tools confirm that teacher teaches the course.
+            if (
+                teacher is None
+                and pick.teacher_key is not None
+                and (item.courseCode, pick.teacher_key) in facts.teacher_course_pairs
+            ):
+                teacher = pick.teacher_key
+            new_items[index] = item.model_copy(
+                update={"classId": pick.class_id, "teacherKey": teacher}
+            )
+            assigned.append((item.courseCode, teacher, pick.class_id))
+
+        if assigned:
+            facts = replace(
+                facts,
+                class_ids=facts.class_ids | {class_id for _, _, class_id in assigned},
+                course_class_pairs=facts.course_class_pairs
+                | {(code, class_id) for code, _, class_id in assigned},
+                teacher_course_class_triples=facts.teacher_course_class_triples
+                | {
+                    (code, teacher, class_id)
+                    for code, teacher, class_id in assigned
+                    if teacher is not None
+                },
+            )
+        issues = [
+            Issue(
+                code="SECTION_NOT_ASSIGNED",
+                message=f"课程 {items[index].courseCode}：{reasons[index]}",
+                field=f"items[{index}].classId",
+                retryable=False,
+            )
+            for index in sorted(reasons)
+        ]
+        return new_items, facts, issues
+
+    def _offering_lookup(
+        self,
+        request: PlanningRequest,
+        course_code: str,
+        context: ExecutionContext,
+        trace: TracePort,
+    ) -> list[CourseOffering]:
+        """One listOfferings call for one course in the plan's offering snapshot.
+
+        Java's listOfferings takes a single courseCode and has no cursor, so this is
+        one call per course. The budget is checked by the caller.
+        """
+        trace.emit("TOOL_CALLED", tool_name="listOfferings")
+        started = datetime.now(UTC)
+        rows = cast(
+            list[CourseOffering],
+            self._tools.call(
+                "listOfferings",
+                None,
+                context,
+                params={
+                    "curriculumSnapshotId": request.curriculumSnapshotId,
+                    "offeringSnapshotId": request.offeringSnapshotId,
+                    "courseCode": course_code,
+                    "limit": 100,
+                },
+            ),
+        )
+        duration_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
+        trace.emit("TOOL_RETURNED", tool_name="listOfferings", duration_ms=duration_ms)
+        return [row for row in rows if row.courseCode == course_code]
 
     def _propose(
         self,

@@ -69,6 +69,16 @@ python -m uvicorn agent_runtime.api.app:app --port 8000
 
 ## 当前限制（如实）
 
+- 班次选定（`application/section_assignment.py`，docs/36）：规划给出课程后，Runner 按
+  `offeringSnapshotId` 对每门课调用一次 `listOfferings`（Java 只接受单个 `courseCode`，没有游标），
+  再在 Java 返回的结构化 `meetings` 上做确定性选班：MUST 教师硬过滤、PREFER 教师和必避/偏好时段
+  排序、评价覆盖次数次之、`classId` 稳定排序。时间冲突只按 Java 返回的 `meetings` 判断，不解析
+  `meetingTextRaw`，最终判决仍以 `validatePlan` 为准。`UNPARSED`/`INVALID` 班次不会被自动选中。
+  无无冲突组合时只留出最少的课程不选班次，并在 `unknowns` 里给出 `SECTION_NOT_ASSIGNED` 与原因。
+- 班次查询单独计数：`Budget.max_offering_calls`（默认 4，`harness/tool_policy.yaml` 中 listOfferings
+  同为 4）不占用 `maxToolCalls=6`。RunManifest 契约中尚无该字段，运行报告不记录这一上限；
+  `usage.toolCalls` 也不含班次查询次数。超过上限的课程不选班次，并说明原因。
+- 模型已给出 `classId` 的条目保持原样，不参与本次选班的冲突计算，仍由 `validatePlan` 核验。
 - `FakeModelAdapter` 只从工具返回的课程 id 里挑候选，不是真实模型；只要走到假模型，
   `PlanningAnswer.unknowns` 就有 `FAKE_MODEL`。核验器假工具固定 `UNKNOWN` + `COURSE_ONLY`，
   不能当成无冲突课表。工具课程集为空时返回 `UNABLE_TO_VERIFY`，不报模型输出非法。

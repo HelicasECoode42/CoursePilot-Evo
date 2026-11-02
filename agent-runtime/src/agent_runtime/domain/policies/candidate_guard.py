@@ -33,6 +33,9 @@ class ReviewFact:
     dimensions: tuple[str, ...]
     excerpt: str
     source_ref_id: str
+    # Teacher key from the review record, used only to order sections by review
+    # coverage. Not an admission rule (the guard never reads it).
+    teacher_key: str | None = None
 
 
 @dataclass(frozen=True)
