@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from datetime import UTC, datetime
 
 from agent_runtime.adapters.model_client import (
@@ -34,6 +35,15 @@ from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.ids import new_id
 
 logger = logging.getLogger(__name__)
+
+# 发给模型的候选课程上限。候选按相关度排序后截取；模型只能引用这里列出的课程。
+MAX_CANDIDATE_COURSES = 25
+# 发给模型的历史只保留最近几条，每条截断。更早的对话不再重复计费。
+MAX_HISTORY_MESSAGES = 4
+MAX_HISTORY_CHARS = 500
+# 系统指令（约 500 个中文字符）加上消息外壳的固定开销，按 token 估计。
+PROMPT_OVERHEAD_TOKENS = 700
+MAX_UNKNOWN_COURSES = 40
 
 
 def _bigram_relevance(query: str, text: str) -> float:
@@ -281,6 +291,10 @@ class AdviceChatService:
                 course.courseCode,
             ),
         )
+        # 只把相关度最高的一部分候选交给模型；引用校验也只认这一部分。
+        prioritized_courses = prioritized_courses[:MAX_CANDIDATE_COURSES]
+        selected_courses = prioritized_courses
+        course_by_code = {c.courseCode: c for c in selected_courses}
         for course in prioritized_courses[:review_limit]:
             queried.add(course.courseCode)
             page = call_page("searchReviews", {"courseCode": course.courseCode, "limit": 5})
@@ -343,16 +357,26 @@ class AdviceChatService:
                 else "UNAVAILABLE"
             ),
         }
-        history = [m.model_dump(mode="json") for m in request.history]
+        history = [
+            {"role": m.role, "text": m.text[:MAX_HISTORY_CHARS]}
+            for m in request.history[-MAX_HISTORY_MESSAGES:]
+        ]
         while True:
             encoded = json.dumps({**model_payload, "history": history}, ensure_ascii=False)
-            estimated_input_tokens = (len(encoded.encode("utf-8")) + 2) // 3 + 250
+            estimated_input_tokens = (
+                len(encoded.encode("utf-8")) + 2
+            ) // 3 + PROMPT_OVERHEAD_TOKENS
             if estimated_input_tokens <= self._budget.max_input_tokens:
                 break
             if history:
                 history.pop(0)
                 continue
-            raise BudgetExceeded("对话事实和本轮消息超过 input token 预算")
+            # 学校进度已压缩，正常情况不会走到这里。走到这里说明事实本身超过单次输入上限，
+            # 本轮没有调用模型，也没有消耗会话额度；提示要说清楚，不能冒充额度用完。
+            raise BudgetExceeded(
+                "本轮的课程事实超过单次回答的输入上限，模型未调用，未消耗会话额度。"
+                "请缩小已选课程范围后重试。"
+            )
         model_messages = [{"role": "user", "content": encoded}]
         tracker.record_model_call()
         try:
@@ -461,20 +485,23 @@ class AdviceChatService:
 
     @staticmethod
     def _model_progress(progress: SchoolProgressImportResult | None) -> dict | None:
+        """学校进度的模型视图：只给课程计数和未知项。
+
+        学校进度树（上百行）和逐门课程不进模型上下文。有缺口的类别已由
+        schoolReportGaps 给出（同一份事实，不重复发送）；已修课程已由候选范围排除。
+        成绩、学号、节点 ID 都不发给模型。
+        """
         if not progress:
             return None
-        # Grades and school credentials are deliberately omitted.
+        outcome_counts = Counter(c.outcome for c in progress.snapshot.courses)
+        unknown_courses = [
+            {"courseCode": c.courseCode, "name": c.name}
+            for c in progress.snapshot.courses
+            if c.outcome == "UNKNOWN"
+        ]
         return {
             "capturedAt": progress.snapshot.capturedAt.isoformat(),
             "source": progress.snapshot.source,
-            "nodes": [n.model_dump(mode="json") for n in progress.snapshot.nodes],
-            "courses": [
-                {
-                    "courseCode": c.courseCode,
-                    "name": c.name,
-                    "credits": None if c.credits is None else float(c.credits),
-                    "outcome": c.outcome,
-                }
-                for c in progress.snapshot.courses
-            ],
+            "outcomeCounts": dict(outcome_counts),
+            "unknownCourses": unknown_courses[:MAX_UNKNOWN_COURSES],
         }

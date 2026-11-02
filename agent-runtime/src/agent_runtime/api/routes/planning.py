@@ -60,14 +60,18 @@ def plan(
             subject_id, settings.max_input_tokens, settings.max_output_tokens
         )
         try:
-            answer = runner.run(body, context)
-        except Exception as exc:
-            # 失败也可能已经花过 token：异常上带了实际用量就按实际结算，否则整笔释放。
-            reservation.settle(
-                getattr(exc, "input_tokens", None), getattr(exc, "output_tokens", None)
-            )
-            raise
-        reservation.settle(answer.usage.inputTokens, answer.usage.outputTokens)
+            try:
+                answer = runner.run(body, context)
+            except Exception as exc:
+                # 失败也可能已经花过 token：异常上带了实际用量就按实际结算，否则整笔释放。
+                reservation.settle(
+                    getattr(exc, "input_tokens", None), getattr(exc, "output_tokens", None)
+                )
+                raise
+            reservation.settle(answer.usage.inputTokens, answer.usage.outputTokens)
+        finally:
+            # 已结算时是空操作；取消等其它 BaseException 也不会留下占用的预留。
+            reservation.release()
         return envelope(x_request_id, "OK", answer).model_dump(mode="json")
 
     return idempotency.run(subject_id, "planning", idempotency_key, body_digest, produce)
