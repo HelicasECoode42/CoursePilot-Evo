@@ -11,21 +11,18 @@ import { useRoute, useRouter } from "vue-router";
 import { api } from "../api";
 import CourseSearchPicker from "../components/CourseSearchPicker.vue";
 import SchoolProgressTree from "../components/SchoolProgressTree.vue";
+import LocalAuditSummary from "../components/LocalAuditSummary.vue";
 import {
   coursesSuggestedBeforeYear,
   describeYearSuggestionGap,
 } from "../domain/academic-year";
 import { isCurriculumUsableForMode } from "../domain/planning-request";
-import {
-  buildCourseNameIndex,
-  describeCourse,
-  limitCourseCodes,
-} from "../domain/course-names";
+import { buildCourseNameIndex, limitCourseCodes } from "../domain/course-names";
+import { courseTitle, usableName } from "../domain/school-categories";
 import type { CompletedCourse, Course, CourseOutcome } from "../contracts";
 import {
   describeCompleteness,
   duplicateCourseCodes,
-  explainAuditUnknown,
   recordSourceLabel,
   groupAuditItems,
 } from "../domain/academic-record";
@@ -171,8 +168,37 @@ async function pickCurriculum(snapshotId: string) {
   await store.loadRecords();
 }
 
+/**
+ * 课程名查表：学校报告里读到的名字优先（学生导入的就是这份），
+ * 其次是课程目录。两边都没有就只显示课程号，不编。
+ */
+const schoolCourseNames = computed<Record<string, string>>(() => {
+  const names: Record<string, string> = {};
+  for (const course of store.schoolProgress?.snapshot.courses ?? []) {
+    const name = usableName(course.name);
+    if (name) names[course.courseCode] = name;
+  }
+  return names;
+});
+function nameOf(courseCode: string): string | null {
+  return (
+    schoolCourseNames.value[courseCode] ?? courseNames.value[courseCode] ?? null
+  );
+}
 function courseLabel(courseCode: string): string {
-  return describeCourse(courseCode, (code) => courseNames.value[code] ?? null);
+  return courseTitle(courseCode, nameOf(courseCode));
+}
+
+/** 「核对无误后勾选」：把记录切到可编辑，并把焦点放到那个勾选框上。 */
+// eslint-disable-next-line no-undef
+const transcriptCheckbox = ref<HTMLInputElement | null>(null);
+let completeFocusHandled = false;
+async function focusCompleteCheckbox() {
+  if (!store.selectedRecord) return;
+  if (!editingRecord.value) editRecord();
+  await nextTick();
+  transcriptCheckbox.value?.scrollIntoView?.({ block: "center" });
+  transcriptCheckbox.value?.focus();
 }
 
 function auditCodes(requirementId: string, courseCodes: readonly string[]) {
@@ -249,6 +275,15 @@ async function prepareRecordsPage() {
     }
     await Promise.all(requests);
     if (store.selectedRecord) await ensureCourseNames();
+    // 从 /me 的「去勾选记录已完整」进来：只处理一次，免得每次刷新都抢焦点。
+    if (
+      route.query.focus === "complete" &&
+      !completeFocusHandled &&
+      store.selectedRecord
+    ) {
+      completeFocusHandled = true;
+      await focusCompleteCheckbox();
+    }
   } finally {
     pagePreparing.value = false;
   }
@@ -722,13 +757,19 @@ async function goToCredits() {
             <span class="microcopy">
               · {{ record.transcriptComplete ? "已填完整" : "尚未确认填全" }}
             </span>
-            <p class="microcopy">
-              {{
-                record.completedCourses
-                  .map((course) => course.courseCode)
-                  .join("、")
-              }}
-            </p>
+            <details class="record-course-names">
+              <summary>
+                展开 {{ record.completedCourses.length }} 门课程
+              </summary>
+              <ul class="summary-list">
+                <li
+                  v-for="(course, at) in record.completedCourses"
+                  :key="`${course.courseCode}-${at}`"
+                >
+                  {{ courseLabel(course.courseCode) }}
+                </li>
+              </ul>
+            </details>
           </li>
         </ul>
         <button
@@ -756,6 +797,7 @@ async function goToCredits() {
           (store.records.length === 0 || editingRecord)
         "
         class="manual-record-details"
+        :open="editingRecord"
       >
         <summary>
           {{ editingRecord ? "展开修改课程" : "手动补录已修课程" }}
@@ -904,6 +946,7 @@ async function goToCredits() {
           <label class="field-label" for="transcript-complete">
             <input
               id="transcript-complete"
+              ref="transcriptCheckbox"
               type="checkbox"
               :checked="transcriptComplete"
               @change="
@@ -999,17 +1042,16 @@ async function goToCredits() {
               </li>
             </ul>
           </div>
-          <div
-            v-if="store.audit.unknowns.length"
-            class="notice notice--warning"
-            role="note"
-          >
-            <p>以下内容无法确认：</p>
-            <ul class="summary-list">
-              <li v-for="issue in store.audit.unknowns" :key="issue.code">
-                {{ explainAuditUnknown(issue.code, issue.message) }}
-              </li>
-            </ul>
+          <div class="notice notice--warning" role="note">
+            <LocalAuditSummary :audit="store.audit" :lookup-name="nameOf" />
+            <button
+              v-if="!store.audit.transcriptComplete"
+              class="button button--secondary"
+              type="button"
+              @click="focusCompleteCheckbox"
+            >
+              核对无误后勾选「记录已完整」
+            </button>
           </div>
         </div>
       </details>

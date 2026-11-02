@@ -634,3 +634,118 @@ describe("个人控制台 · 学业记录来源", () => {
     );
   });
 });
+
+describe("个人控制台 · 学校类别与核对摘要", () => {
+  it("我学了什么按学校类别分组，名字读不出来时用课程目录补", async () => {
+    const { wrapper, store } = await mountDashboard(true, true);
+    store.$patch({
+      records: [
+        {
+          academicRecordId: "rec-1",
+          revision: 1,
+          curriculumSnapshotId: "curr-real",
+          completedCourses: [
+            {
+              courseCode: "C-WITH-REVIEWS",
+              earnedCredits: 4,
+              outcome: "PASSED",
+              completedTerm: null,
+            },
+            {
+              courseCode: "X-LOOSE",
+              earnedCredits: null,
+              outcome: "IN_PROGRESS",
+              completedTerm: null,
+            },
+          ],
+          transcriptComplete: false,
+          sourceKind: "USER_IMPORT",
+          createdAt: "2026-10-30T00:00:00Z",
+        } as never,
+      ],
+      schoolProgress: {
+        receipt: {
+          schoolProgressId: "progress-1",
+          contentHash: "hash-1",
+          importedAt: "2026-10-30T00:00:00Z",
+          reused: true,
+        },
+        snapshot: {
+          nodes: [
+            {
+              nodeId: "g",
+              parentId: null,
+              schoolNodeId: null,
+              leaf: true,
+              name: "",
+              requiredCredits: 4,
+              earnedCredits: 4,
+              remainingCredits: 0,
+            },
+          ],
+          courses: [
+            {
+              nodeId: "g",
+              courseCode: "C-WITH-REVIEWS",
+              name: "",
+              credits: 4,
+              outcome: "PASSED",
+              completedYear: null,
+              completedTerm: null,
+              grade: null,
+              makeup: null,
+              retake: null,
+              suggestedYear: null,
+              suggestedTerm: null,
+            },
+          ],
+        },
+        academicRecord: {},
+      } as never,
+    });
+    await flushPromises();
+    wrapper
+      .findAll("button")
+      .find((button) => button.text() === "我学了什么")!
+      .trigger("click");
+    await flushPromises();
+    expect(
+      wrapper.findAll(".learned-group > summary").map((el) => el.text()),
+    ).toEqual(["类别名未读出 · 1 门课程", "其他 · 1 门课程"]);
+    expect(wrapper.get(".learned-group").text()).toContain("有评价的课");
+    expect(wrapper.get(".learned-group").text()).toContain("C-WITH-REVIEWS");
+    expect(wrapper.get(".learned-group").text()).toContain("4 学分");
+    expect(wrapper.get(".learned-group").text()).toContain("已修");
+    expect(wrapper.text()).not.toContain("· C-WITH-REVIEWS ·");
+  });
+
+  it("本地核对默认收起成一段摘要，并给出去勾选记录已完整的入口", async () => {
+    const { wrapper, store } = await mountDashboard(true, true);
+    store.$patch({
+      schoolProgress: {
+        receipt: { importedAt: "2026-10-30T00:00:00Z" },
+        snapshot: { nodes: [], courses: [] },
+        academicRecord: {},
+      } as never,
+      audit: {
+        ...audit,
+        unknowns: [
+          {
+            code: "COURSE_NOT_IN_CATALOG",
+            message: "课程 Z1 不在课程库中，无法归类",
+            field: "completedCourses",
+            retryable: false,
+          },
+        ],
+      },
+    });
+    await flushPromises();
+    const details = wrapper.get(".dashboard-panel > .record-help");
+    expect(details.attributes("open")).toBeUndefined();
+    expect(details.text()).toContain("本地核对暂无法给出结论");
+    expect(details.text()).toContain("1 门课无法归入本专业培养要求");
+    expect(wrapper.find('a[href="/records?focus=complete"]').exists()).toBe(
+      true,
+    );
+  });
+});

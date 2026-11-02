@@ -63,9 +63,72 @@ describe("学校学业进度树", () => {
         .map((el) => el.text().replace(/\s+/g, " ").trim()),
     ).toEqual(["查看子类别", "查看关联课程 · 1 门课程"]);
     expect(wrapper.text()).toContain("课程样例 · CP001");
-    expect(wrapper.text()).toContain("已通过");
+    expect(wrapper.text()).toContain("已修");
     expect(
       wrapper.findAll(".school-category__remaining dd").map((el) => el.text()),
     ).toEqual(["6", "待确认"]);
+  });
+
+  it("类别名或课程名读不出来时写明未读出，不留空白项目符号", async () => {
+    const wrapper = mount(SchoolProgressTree, {
+      props: {
+        nodes: [
+          {
+            nodeId: "top",
+            parentId: null,
+            schoolNodeId: null,
+            leaf: false,
+            name: "",
+            requiredCredits: 12,
+            earnedCredits: 2,
+            remainingCredits: 10,
+          },
+          {
+            nodeId: "mid",
+            parentId: "top",
+            schoolNodeId: null,
+            leaf: false,
+            name: "()",
+            requiredCredits: 4,
+            earnedCredits: 0,
+            remainingCredits: 4,
+          },
+        ],
+        courses: [
+          {
+            nodeId: "mid",
+            courseCode: "2200R200",
+            name: "",
+            credits: null,
+            outcome: "IN_PROGRESS",
+            completedYear: null,
+            completedTerm: null,
+            grade: null,
+            makeup: null,
+            retake: null,
+            suggestedYear: null,
+            suggestedTerm: null,
+          },
+        ],
+        nameLookup: (code: string) =>
+          code === "2200R200" ? "形势与政策" : null,
+      },
+    });
+    expect(
+      wrapper
+        .findAll(
+          ".school-progress-tree:not(.school-progress-tree--nested) > .school-category > h3",
+        )
+        .map((el) => el.text()),
+    ).toEqual(["类别名未读出"]);
+    expect(
+      wrapper.findAll(".school-category h3").map((el) => el.text()),
+    ).toEqual(["类别名未读出", "类别名未读出"]);
+    await wrapper.findAll("summary")[1]!.trigger("click");
+    expect(wrapper.get(".school-courses li").text()).toContain(
+      "形势与政策 · 2200R200",
+    );
+    expect(wrapper.get(".school-courses li").text()).toContain("学分待确认");
+    expect(wrapper.get(".school-courses li").text()).toContain("在读");
   });
 });

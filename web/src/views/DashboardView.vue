@@ -15,10 +15,13 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api";
 import type { CareerDirection, Course, ReviewNote } from "../contracts";
 import SchoolProgressTree from "../components/SchoolProgressTree.vue";
+import LearnedCourseGroups from "../components/LearnedCourseGroups.vue";
+import LocalAuditSummary from "../components/LocalAuditSummary.vue";
 import ReviewSummary from "../components/ReviewSummary.vue";
 import AdviceChat from "../components/AdviceChat.vue";
 import { groupAuditItems, recordSourceLabel } from "../domain/academic-record";
 import { isCurriculumUsableForMode } from "../domain/planning-request";
+import { groupLearnedCourses, usableName } from "../domain/school-categories";
 import { usePlanningStore } from "../stores/planning";
 
 const store = usePlanningStore();
@@ -38,12 +41,6 @@ const sourceLabel = computed(
       SYNTHETIC: "虚构示例",
     })[store.selectedCurriculum?.sourceValidation ?? "UNVERIFIED"],
 );
-const outcomeLabels = {
-  PASSED: "已通过",
-  FAILED: "未通过",
-  IN_PROGRESS: "在读",
-  UNKNOWN: "状态待确认",
-};
 
 type Load = "idle" | "loading" | "ready" | "error";
 
@@ -114,14 +111,37 @@ const courseGroups = computed(() => {
 const courseCount = computed(
   () => new Set(courses.value.map((course) => course.courseCode)).size,
 );
-const importedCourseNames = computed(() => {
-  const names = new Map(
-    courses.value.map((course) => [course.courseCode, course.name]),
-  );
-  for (const course of store.schoolProgress?.snapshot.courses ?? [])
-    names.set(course.courseCode, course.name);
+/**
+ * 课程名查表：课程目录打底，学校报告里读到了名字的覆盖它。
+ * 空串不算名字，免得学校报告的空名把目录里的好名字盖掉。
+ */
+const courseNameIndex = computed(() => {
+  const names = new Map<string, string>();
+  for (const course of courses.value) {
+    const name = usableName(course.name);
+    if (name) names.set(course.courseCode, name);
+  }
+  for (const course of store.schoolProgress?.snapshot.courses ?? []) {
+    const name = usableName(course.name);
+    if (name) names.set(course.courseCode, name);
+  }
   return names;
 });
+const lookupCourseName = (courseCode: string): string | null =>
+  courseNameIndex.value.get(courseCode) ?? null;
+
+/** 「我学了什么」：按学校类别分组；学校报告没有归属的课程放「其他」。 */
+const learnedGroups = computed(() =>
+  groupLearnedCourses({
+    nodes: store.schoolProgress?.snapshot.nodes ?? [],
+    courses: store.schoolProgress?.snapshot.courses ?? [],
+    recordCourses: store.selectedRecord?.completedCourses ?? [],
+    lookupName: lookupCourseName,
+  }),
+);
+const learnedCount = computed(() =>
+  learnedGroups.value.reduce((sum, group) => sum + group.items.length, 0),
+);
 
 function formatCredits(value: number | null): string {
   if (value === null) return "学分未注明";
@@ -470,9 +490,13 @@ onUnmounted(() => controller?.abort());
           >
         </div>
         <template v-else-if="store.schoolProgress">
-          <SchoolProgressTree :nodes="store.schoolProgress.snapshot.nodes" />
+          <SchoolProgressTree
+            :nodes="store.schoolProgress.snapshot.nodes"
+            :courses="store.schoolProgress.snapshot.courses"
+            :name-lookup="lookupCourseName"
+          />
           <details class="record-help">
-            <summary>本地培养方案核对与资料来源</summary>
+            <summary>本地培养方案核对（默认收起）</summary>
             <p>
               {{
                 sourceLabel
@@ -483,17 +507,19 @@ onUnmounted(() => controller?.abort());
                 >查看资料并核对</RouterLink
               >
             </p>
-            <ul v-else class="dash-audit">
-              <li v-for="group in auditGroups" :key="group.key">
-                <strong>{{ group.label }}</strong>
-                <ul>
-                  <li v-for="item in group.items" :key="item.requirementId">
-                    {{ item.category ?? "类别未注明" }} ·
-                    {{ formatGap(item.gapCredits) }}
-                  </li>
-                </ul>
-              </li>
-            </ul>
+            <template v-else>
+              <LocalAuditSummary
+                :audit="store.audit"
+                :lookup-name="lookupCourseName"
+              />
+              <p class="microcopy">
+                核对无误后勾选「记录已完整」，无法确认的项目才会变成可确认的结论。<RouterLink
+                  class="cta-link"
+                  :to="{ path: '/records', query: { focus: 'complete' } }"
+                  >去勾选「记录已完整」</RouterLink
+                >
+              </p>
+            </template>
           </details>
         </template>
         <template v-else-if="store.audit">
@@ -530,25 +556,12 @@ onUnmounted(() => controller?.abort());
           <p v-if="!store.selectedRecord">本次会话还没有学业记录。</p>
           <template v-else
             ><p class="microcopy">
-              已读取
-              {{ store.selectedRecord.completedCourses.length }}
-              条记录；在读课程尚未计入已获学分。
+              共
+              {{ learnedCount }}
+              门课程，按学校类别分组；在读课程尚未计入已获学分。
             </p>
-            <ul class="dash-learned">
-              <li
-                v-for="(done, index) in store.selectedRecord.completedCourses"
-                :key="`${done.courseCode}-${index}`"
-              >
-                <span>{{
-                  importedCourseNames.get(done.courseCode) || done.courseCode
-                }}</span
-                ><span
-                  >{{ outcomeLabels[done.outcome] }} ·
-                  {{ formatCredits(done.earnedCredits) }}</span
-                >
-              </li>
-            </ul></template
-          >
+            <LearnedCourseGroups :groups="learnedGroups"
+          /></template>
         </div>
       </section>
       <section
@@ -715,7 +728,7 @@ onUnmounted(() => controller?.abort());
             <p v-if="item.courseCodes.length" class="microcopy">
               相关课程：{{
                 item.courseCodes
-                  .map((code) => importedCourseNames.get(code) || code)
+                  .map((code) => lookupCourseName(code) ?? code)
                   .join("、")
               }}
             </p>

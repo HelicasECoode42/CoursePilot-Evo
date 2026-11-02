@@ -1,5 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import type { CourseNameLookup } from "../domain/course-names";
+import {
+  courseDisplayName,
+  creditsLabel,
+  nodeName,
+  SCHOOL_OUTCOME_LABELS,
+  UNREAD_CATEGORY_NAME,
+} from "../domain/school-categories";
 import type {
   SchoolProgressCourse,
   SchoolProgressNode,
@@ -10,8 +18,10 @@ const props = withDefaults(
     nodes: SchoolProgressNode[];
     courses?: SchoolProgressCourse[];
     parentId?: string | null;
+    /** 课程名的备用来源（课程目录）。学校报告里的课程名读不出来时用它补。 */
+    nameLookup?: CourseNameLookup;
   }>(),
-  { parentId: null, courses: () => [] },
+  { parentId: null, courses: () => [], nameLookup: undefined },
 );
 const visibleNodes = computed(() =>
   props.nodes.filter((node) => node.parentId === props.parentId),
@@ -22,14 +32,11 @@ const coursesOf = (id: string) =>
   (props.courses ?? []).filter((course) => course.nodeId === id);
 const creditLabel = (value: number | null) =>
   value === null ? "待确认" : String(value);
-const outcomeLabel = (outcome: SchoolProgressCourse["outcome"]) =>
-  ({
-    PASSED: "已通过",
-    FAILED: "未通过",
-    IN_PROGRESS: "在读",
-    NOT_TAKEN: "未修",
-    UNKNOWN: "状态待确认",
-  })[outcome];
+const titleOf = (node: SchoolProgressNode) => nodeName(node);
+const isUnnamed = (node: SchoolProgressNode) =>
+  nodeName(node) === UNREAD_CATEGORY_NAME;
+const courseName = (course: SchoolProgressCourse) =>
+  courseDisplayName(course.courseCode, course.name, props.nameLookup);
 </script>
 
 <template>
@@ -38,7 +45,9 @@ const outcomeLabel = (outcome: SchoolProgressCourse["outcome"]) =>
     :class="{ 'school-progress-tree--nested': parentId !== null }"
   >
     <li v-for="node in visibleNodes" :key="node.nodeId" class="school-category">
-      <h3>{{ node.name }}</h3>
+      <h3 :class="{ 'school-category__unnamed': isUnnamed(node) }">
+        {{ titleOf(node) }}
+      </h3>
       <dl>
         <div>
           <dt>要求</dt>
@@ -65,14 +74,12 @@ const outcomeLabel = (outcome: SchoolProgressCourse["outcome"]) =>
             v-for="(course, index) in coursesOf(node.nodeId)"
             :key="`${course.courseCode}:${index}`"
           >
-            <span>{{ course.name }} · {{ course.courseCode }}</span>
+            <span class="school-course-name"
+              >{{ courseName(course) }} · {{ course.courseCode }}</span
+            >
             <span class="school-course-meta">
-              {{
-                course.credits === null
-                  ? "学分待确认"
-                  : `${course.credits} 学分`
-              }}
-              · {{ outcomeLabel(course.outcome) }}
+              {{ creditsLabel(course.credits) }} ·
+              {{ SCHOOL_OUTCOME_LABELS[course.outcome] }}
             </span>
           </li>
         </ul>
@@ -81,6 +88,7 @@ const outcomeLabel = (outcome: SchoolProgressCourse["outcome"]) =>
           :nodes="nodes"
           :courses="courses"
           :parent-id="node.nodeId"
+          :name-lookup="nameLookup"
         />
       </details>
     </li>
@@ -153,6 +161,10 @@ const outcomeLabel = (outcome: SchoolProgressCourse["outcome"]) =>
 }
 .school-course-meta {
   color: var(--soft);
+}
+.school-category__unnamed {
+  color: var(--soft);
+  font-weight: 400;
 }
 .school-progress-tree--nested {
   grid-template-columns: 1fr;
