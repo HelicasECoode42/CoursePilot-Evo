@@ -195,8 +195,9 @@ def test_one_lookup_per_course_and_tool_budget_unchanged(
     answer = _run(_request(planning_request), tools, _cs101_math201_items())
 
     assert tools.offering_lookups == ["CS101", "MATH201"]
-    # usage.toolCalls counts only the six-call run budget; lookups are not in it.
-    non_offering = [call for call in tools.calls if call != "listOfferings"]
+    # usage.toolCalls counts only the six-call run budget; offering and review
+    # lookups have their own caps and are not in it.
+    non_offering = [call for call in tools.calls if call not in {"listOfferings", "searchReviews"}]
     assert answer.usage.toolCalls == len(non_offering)
     assert answer.usage.toolCalls <= 6
 

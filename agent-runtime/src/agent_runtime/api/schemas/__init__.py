@@ -66,6 +66,8 @@ from .offering import (
     Meeting,
     OfferingImport,
     OfferingSourceKind,
+    OfferingVerificationRequest,
+    OfferingVerificationResult,
     ParseStatus,
     Week,
 )
@@ -123,6 +125,8 @@ __all__ = [
     "Motive",
     "OfferingImport",
     "OfferingSourceKind",
+    "OfferingVerificationRequest",
+    "OfferingVerificationResult",
     "Outcome",
     "ParseStatus",
     "PlanItem",
@@ -212,4 +216,6 @@ SCHEMA_DEFS: dict[str, type[DomainModel]] = {
     "PreferenceScore": PreferenceScore,
     "ImportWorkbook": ImportWorkbook,
     "RunReport": RunReport,
+    "OfferingVerificationRequest": OfferingVerificationRequest,
+    "OfferingVerificationResult": OfferingVerificationResult,
 }

@@ -124,6 +124,13 @@ class CourseOptions:
     reason: str | None  # set when there are no options; None when options exist
 
 
+# TODO(java-conflict): this interval-overlap test is a Python copy of a conflict
+# rule. The contract (contracts/java.openapi.json) has no endpoint that decides
+# conflicts for a candidate set: validatePlan judges one fully chosen plan, and
+# calling it per search node would exceed the validation budget (2 calls). Until
+# Java exposes such an endpoint, this stays a selection aid only. Java's
+# validatePlan on the final plan remains the authority, and the runner always
+# runs it after assignment. Do not treat a True/False here as a verdict.
 def _meetings_overlap(first: Meeting, second: Meeting) -> bool:
     return (
         first.dayOfWeek == second.dayOfWeek
@@ -137,7 +144,7 @@ def sections_conflict(first: SectionOption, second: SectionOption) -> bool:
     """True when two sections share a weekday, overlapping sections and a common week.
 
     This is only a selection aid on Java's structured meetings. Java's validatePlan
-    still decides the final verdict for the chosen plan.
+    still decides the final verdict for the chosen plan. See the TODO above.
     """
     return any(_meetings_overlap(a, b) for a in first.meetings for b in second.meetings)
 

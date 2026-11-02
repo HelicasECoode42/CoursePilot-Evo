@@ -78,6 +78,10 @@ python -m uvicorn agent_runtime.api.app:app --port 8000
 - 班次查询单独计数：`Budget.max_offering_calls`（默认 4，`harness/tool_policy.yaml` 中 listOfferings
   同为 4）不占用 `maxToolCalls=6`。RunManifest 契约中尚无该字段，运行报告不记录这一上限；
   `usage.toolCalls` 也不含班次查询次数。超过上限的课程不选班次，并说明原因。
+- 评价查询同样单独计数：`Budget.max_review_calls`（默认 8，`harness/tool_policy.yaml` 中
+  searchReviews 同为 8）。Java 的 `searchReviews` 每次只接受一个课程代码，因此按课程逐次查询，
+  仅限模型可见的前 `max_course_facts` 门候选课程。超出额度的课程状态为 `NOT_QUERIED`，
+  页面应写「本次规划未查询评价」，不能写成「没有评价」。
 - 模型已给出 `classId` 的条目保持原样，不参与本次选班的冲突计算，仍由 `validatePlan` 核验。
 - `FakeModelAdapter` 只从工具返回的课程 id 里挑候选，不是真实模型；只要走到假模型，
   `PlanningAnswer.unknowns` 就有 `FAKE_MODEL`。核验器假工具固定 `UNKNOWN` + `COURSE_ONLY`，

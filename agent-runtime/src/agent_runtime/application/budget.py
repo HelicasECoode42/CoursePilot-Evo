@@ -27,6 +27,11 @@ class Budget:
     # teacher options, reviews and validation. One lookup per course, capped here.
     # RunManifest has no field for this yet, so the cap is not recorded there.
     max_offering_calls: int = 4
+    # searchReviews lookups, one per course (Java takes a single courseCode per call).
+    # Counted apart from max_tool_calls so that a review lookup can never use up the
+    # calls needed for validation. Eight covers a typical recommendation list; the
+    # per-tool cap in harness/tool_policy.yaml (searchReviews) must not exceed it.
+    max_review_calls: int = 8
 
 
 class BudgetExceeded(RuntimeError):
@@ -41,6 +46,7 @@ class BudgetTracker:
     tool_calls: int = 0
     model_calls: int = 0
     offering_calls: int = 0
+    review_calls: int = 0
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     _per_tool: dict[str, int] = field(default_factory=dict)
 
@@ -58,6 +64,21 @@ class BudgetTracker:
                 raise BudgetExceeded(f"tool_policy 不允许再调用 {name}")
             self._per_tool[name] = self._per_tool.get(name, 0) + 1
         self.offering_calls += 1
+
+    def record_review_call(self, tool_caps: dict[str, int] | None = None) -> None:
+        """Count one searchReviews lookup against maxReviewCalls and the tool cap.
+
+        Like ``record_offering_call``, this does not touch ``tool_calls``: review
+        lookups have their own cap so they cannot starve validation.
+        """
+        name = "searchReviews"
+        if self.review_calls >= self.budget.max_review_calls:
+            raise BudgetExceeded("maxReviewCalls exceeded")
+        if tool_caps is not None:
+            if name not in tool_caps or self._per_tool.get(name, 0) >= tool_caps[name]:
+                raise BudgetExceeded(f"tool_policy 不允许再调用 {name}")
+            self._per_tool[name] = self._per_tool.get(name, 0) + 1
+        self.review_calls += 1
 
     def record_tool_call(
         self,

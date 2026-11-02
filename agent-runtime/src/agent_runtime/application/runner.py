@@ -524,9 +524,6 @@ class PlanningRunner:
 
     # 需要评价才能回答的动机。其余动机（SCHEDULE、CREDIT_PROGRESS 等）在没有自由文本
     # 时不查评价；自由文本可能包含未结构化的兴趣或职业目标。
-    # 没有加载工具策略时每次运行查几门课的评价（真实部署由 tool_policy.yaml 决定）。
-    DEFAULT_REVIEW_LOOKUPS = 2
-
     REVIEW_DRIVEN_MOTIVES = frozenset({"GPA", "LOW_WORKLOAD", "LOW_ATTENDANCE", "GOOD_REVIEWS"})
 
     @staticmethod
@@ -556,10 +553,12 @@ class PlanningRunner:
         budget: BudgetTracker,
         trace: TracePort,
     ) -> tuple[tuple[ReviewFact, ...], list[str]]:
-        """按需取评价证据。
+        """按需取评价证据，每门候选课程至多一次 searchReviews。
 
-        工具预算是每次运行 6 次（docs/04 第 3 节），学校进度和学业记录读取影响剩余
-        空间。查不到评价时将查询状态交给模型，不能把「没查」当成「评价差」。
+        Java 的 searchReviews 每次只接受一个 courseCode、没有批量形式，所以按课程
+        逐次调用，并由 Budget.max_review_calls（默认 8）单独限流，不占用 6 次工具预算，
+        因此不会挤占方案核验。超出额度的课程不查询，状态为 NOT_QUERIED，页面据此写
+        「本次规划未查询评价」，不能把「没查」当成「没有评价」或「评价差」。
         """
         motives = set(request.intent.motives)
         wants_reviews = (
@@ -571,34 +570,17 @@ class PlanningRunner:
         )
         if not wants_reviews or not candidate_codes:
             return (), []
-        # 沿用 BudgetTracker.record_tool_call 的语义：tool_caps 为 None 表示没有加载
-        # 工具策略（单元测试的裸快照），放行；空字典表示策略不允许任何工具，为 0。
-        caps = self._harness.tool_caps
-        cap = self.DEFAULT_REVIEW_LOOKUPS if caps is None else caps.get("searchReviews", 0)
-        # 按运行预算的剩余量收紧，并给方案核验留一次调用。学校快照匹配请求记录时，
-        # 默认预算最多支持查询一门课程评价。
-        # 预算是部署设置（settings.py），不在 harness 白名单里，不能为了多查评价
-        # 而在这里悄悄放宽；预算调大后这里自动多查。
-        reserved_for_validation = 1
-        remaining = budget.budget.max_tool_calls - budget.tool_calls - reserved_for_validation
-        cap = min(cap, max(0, remaining))
-        if cap <= 0:
-            return (), []
+        limits = self._harness.context
         queried: list[str] = []
         facts: list[ReviewFact] = []
-        limits = self._harness.context
-        for course_code in candidate_codes[:cap]:
-            notes = cast(
-                list[ReviewNote],
-                self._call_tool(
-                    "searchReviews",
-                    None,
-                    context,
-                    budget,
-                    trace,
-                    params={"courseCode": course_code, "limit": limits.max_review_notes},
-                ),
-            )
+        budget.check_deadline()
+        # 只查模型能看到的课程（max_course_facts）：看不到的课程即使查了评价也进不了 prompt。
+        for course_code in candidate_codes[: limits.max_course_facts]:
+            try:
+                budget.record_review_call(self._harness.tool_caps)
+            except BudgetExceeded:
+                break
+            notes = self._review_lookup(course_code, limits.max_review_notes, context, trace)
             queried.append(course_code)
             for note in notes[: limits.max_review_notes]:
                 facts.append(
@@ -616,6 +598,29 @@ class PlanningRunner:
                     )
                 )
         return tuple(facts), queried
+
+    def _review_lookup(
+        self,
+        course_code: str,
+        limit: int,
+        context: ExecutionContext,
+        trace: TracePort,
+    ) -> list[ReviewNote]:
+        """One searchReviews call for one course. The budget is checked by the caller."""
+        trace.emit("TOOL_CALLED", tool_name="searchReviews")
+        started = datetime.now(UTC)
+        notes = cast(
+            list[ReviewNote],
+            self._tools.call(
+                "searchReviews",
+                None,
+                context,
+                params={"courseCode": course_code, "limit": limit},
+            ),
+        )
+        duration_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
+        trace.emit("TOOL_RETURNED", tool_name="searchReviews", duration_ms=duration_ms)
+        return notes
 
     def _assign_sections(
         self,

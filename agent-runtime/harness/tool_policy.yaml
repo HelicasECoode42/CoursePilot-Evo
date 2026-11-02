@@ -12,8 +12,10 @@ tools:
     max_calls: 2
   - name: listTeacherCourseOptions
     max_calls: 2
+  # Review lookups: one searchReviews per course, not counted in the 6-call run
+  # budget; capped by Budget.max_review_calls (8). Must not exceed that value.
   - name: searchReviews
-    max_calls: 2
+    max_calls: 8
   # Section assignment: one listOfferings per planned course. Not counted in the
   # 6-call run budget; capped by Budget.max_offering_calls (4).
   - name: listOfferings

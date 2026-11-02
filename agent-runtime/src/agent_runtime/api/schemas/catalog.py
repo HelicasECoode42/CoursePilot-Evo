@@ -11,7 +11,9 @@ from ._base import Credits, DomainModel, Id
 
 SnapshotKind = Literal["CURRICULUM", "OFFERING"]
 SnapshotState = Literal["PUBLISHED", "REJECTED"]
-SnapshotSourceKind = Literal["CURRICULUM_FILE", "BROWSER_SNAPSHOT", "OFFICIAL_DOCUMENT", "SYNTHETIC"]
+SnapshotSourceKind = Literal[
+    "CURRICULUM_FILE", "BROWSER_SNAPSHOT", "OFFICIAL_DOCUMENT", "SYNTHETIC"
+]
 SourceValidation = Literal["VERIFIED", "UNVERIFIED", "SYNTHETIC"]
 Availability = Literal["CURRENT_VERIFIED", "HISTORICAL_ONLY", "UNKNOWN"]
 

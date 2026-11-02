@@ -21,9 +21,29 @@ router = APIRouter()
 _OFFSET_CURSOR = re.compile(r"^[0-9]{1,9}$")
 
 
+_QUERY_MAX_LENGTH = 200  # java.openapi.json: query minLength 1, maxLength 200
+
+
 def _validate_cursor(cursor: str | None) -> None:
     if cursor is not None and _OFFSET_CURSOR.fullmatch(cursor) is None:
         raise InvalidQueryError("cursor 格式不合法", field="cursor")
+
+
+def _normalize_query(query: str | None) -> str | None:
+    """Apply Java's query limits here so a bad name never reaches Java as a 400.
+
+    Java answering 400 means this service built a bad request, which the
+    contract treats as a violation (502). A blank query is just "no name filter";
+    a query over 200 characters is the caller's input error (400).
+    """
+    if query is None:
+        return None
+    stripped = query.strip()
+    if not stripped:
+        return None
+    if len(stripped) > _QUERY_MAX_LENGTH:
+        raise InvalidQueryError(f"query 不能超过 {_QUERY_MAX_LENGTH} 个字符", field="query")
+    return stripped
 
 
 @router.post("/api/v1/requirements/audit")
@@ -83,7 +103,7 @@ def list_courses(
         context,
         params={
             "curriculumSnapshotId": curriculum_snapshot_id,
-            "query": query,
+            "query": _normalize_query(query),
             "limit": limit,
             "cursor": cursor,
         },
@@ -114,7 +134,7 @@ def list_teacher_course_options(
         params={
             "curriculumSnapshotId": curriculum_snapshot_id,
             "courseCode": course_code,
-            "query": query,
+            "query": _normalize_query(query),
             "limit": limit,
             "cursor": cursor,
         },
