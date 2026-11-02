@@ -377,12 +377,15 @@ function errorForResponse(
       issue?.code ?? "NOT_FOUND",
     );
   }
+  // 会话额度用完：服务端已标 retryable=false，重试只会得到同样的结果，不能因为 503 而当成可重试。
   const retryable =
-    issue?.retryable === true ||
-    status === 408 ||
-    status === 429 ||
-    status === 503 ||
-    status === 504;
+    issue?.code === "BUDGET_EXCEEDED"
+      ? false
+      : issue?.retryable === true ||
+        status === 408 ||
+        status === 429 ||
+        status === 503 ||
+        status === 504;
   // 有些失败「请稍后重试」是错的建议：重试一定还是同样的结果。
   // 这几条要照实说清楚，否则学生只会一直点重试。
   const explained = EXPLAINED_ISSUE_CODES[issue?.code ?? ""];

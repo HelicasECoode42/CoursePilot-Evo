@@ -261,11 +261,15 @@ export function createPlanningStore(
     function adviceFailureDetails(error: unknown) {
       const code = error instanceof ApiFailure ? error.code : null;
       if (code === "BUDGET_EXCEEDED") {
-        // 会话累计额度已满：服务端明确不可重试。原先这里落到「重新生成回答」，
-        // 学生会一直点一个注定失败的按钮，而且看不到「请新建会话」的原因。
+        // 额度用完：服务端明确不可重试。原先这里落到「重新生成回答」，学生会一直点一个
+        // 注定失败的按钮。服务端 message 会说明是会话额度还是今日全站额度、新建会话是否重置，
+        // 优先展示它；没有可用 message 时才用固定兜底句。
+        const serverMessage =
+          error instanceof ApiFailure ? error.message.trim() : "";
         return {
           retryMode: "none" as const,
           message:
+            serverMessage ||
             "本会话的对话额度已用完，无法再生成回答。请重新开始会话后再试。",
         };
       }

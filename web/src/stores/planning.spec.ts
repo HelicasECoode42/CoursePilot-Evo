@@ -246,26 +246,34 @@ describe("planning session store", () => {
     );
   });
 
-  it("tells the student the session advice budget is spent and offers no retry that cannot succeed", async () => {
+  it("shows the server's budget message verbatim and offers no retry that cannot succeed", async () => {
+    const serverText =
+      "今日全站模型额度已用完（所有会话合计达到每日上限）。新建会话不会重置，请明天（UTC 0 点后）再试。";
     const adviceChat = vi
       .fn()
       .mockRejectedValue(
-        new ApiFailure(
-          "本会话累计 output token 已达上限，请新建会话",
-          "http",
-          503,
-          "BUDGET_EXCEEDED",
-        ),
+        new ApiFailure(serverText, "http", 503, "BUDGET_EXCEEDED"),
       );
     const store = createPlanningStore(fakeClient({ adviceChat }))();
     await store.startSession();
     expect(await store.sendAdviceMessage("再问一个问题")).toBe(false);
     expect(store.adviceFailure?.retryMode).toBe("none");
-    expect(store.adviceError).toContain("对话额度已用完");
+    expect(store.adviceError).toBe(serverText);
     expect(store.adviceError).not.toContain("重新生成");
     expect(await store.retryAdviceMessage()).toBe(false);
     expect(await store.regenerateAdviceMessage()).toBe(false);
     expect(adviceChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the generic budget sentence only when the server sent no message", async () => {
+    const adviceChat = vi
+      .fn()
+      .mockRejectedValue(new ApiFailure("", "http", 503, "BUDGET_EXCEEDED"));
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    expect(await store.sendAdviceMessage("再问一个问题")).toBe(false);
+    expect(store.adviceFailure?.retryMode).toBe("none");
+    expect(store.adviceError).toContain("对话额度已用完");
   });
 
   it("uses a new explicit key to regenerate terminal model failures and preserves adopted preferences", async () => {

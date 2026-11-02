@@ -1337,6 +1337,34 @@ describe("HTTP API client · 服务端错误说明与未导入", () => {
     expect(error.message).toBe("课程目录暂时读取失败，请稍后再试");
   });
 
+  it("额度用完（503 BUDGET_EXCEEDED）时保留服务端中文原句，且不标为可重试", async () => {
+    const serverText =
+      "本会话额度已用完（会话累计输出 token 已达上限）。请新建会话后再试；新建会话只重置本会话额度，今日全站额度不变。";
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          503,
+          envelope("ERROR", null, [
+            {
+              code: "BUDGET_EXCEEDED",
+              message: serverText,
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    const error = await client
+      .listCourses("curriculum-2026")
+      .catch((failure) => failure);
+    expect(error.message).toBe(serverText);
+    expect(error.code).toBe("BUDGET_EXCEEDED");
+    expect(error.retryable).toBe(false);
+  });
+
   it("服务端只给英文原文和错误码时，兜底文案带上错误码", async () => {
     const fetcher = vi
       .fn()
