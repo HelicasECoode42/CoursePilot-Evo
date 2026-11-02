@@ -62,7 +62,7 @@ const SOURCE_LABEL: Record<ReviewNote["sourceKind"], string> = {
       暂无评价依据。
     </p>
     <p v-else-if="reviewBasisStatus === 'NOT_QUERIED'" class="microcopy">
-      未查询评价。
+      本次规划未查询评价。
     </p>
     <p v-else-if="reviewBasisStatus === null" class="microcopy">
       评价依据状态未记录。

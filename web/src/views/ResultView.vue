@@ -17,6 +17,7 @@ import type {
   Meeting,
   PlanItem,
   PlanningAnswer,
+  PlanSection,
   PlanValidation,
   Recommendation,
   ReviewNote,
@@ -26,6 +27,15 @@ import {
   describeVerification,
   type VerificationView,
 } from "../domain/answer-display";
+import {
+  SECTION_TITLE,
+  hasSections,
+  sectionLines,
+  sectionTone,
+  unmodeledRulesNote,
+  verdictBadge,
+  type SectionLine,
+} from "../domain/plan-sections";
 import {
   explainUnknownIssue,
   isVerificationLevelUnknown,
@@ -269,6 +279,39 @@ function verdictClass(view: VerificationView): string {
 
 function issuesOf(validation: PlanValidation): Issue[] {
   return [...validation.violations, ...validation.unknownChecks];
+}
+
+/** 两个分项（课表 / 毕业要求）。旧后端不返回 sections 时为空，页面退回合并展示。 */
+function sectionsOf(validation: PlanValidation | null): PlanSection[] {
+  if (validation === null || !hasSections(validation)) return [];
+  return validation.sections ?? [];
+}
+
+function sectionLinesOf(section: PlanSection): SectionLine[] {
+  return sectionLines(section, explainUnknown);
+}
+
+/**
+ * 分项的绿色门禁只看它自己的依据，不用整份方案的判决：
+ *   - 课表分项要真实班次（REAL_TIMETABLE）；
+ *   - 毕业要求分项不依赖班次，只排除模拟方案；
+ *   - 两者都不能带受控缺口标记（假模型/假工具）。
+ */
+function sectionClassOf(
+  section: PlanSection,
+  validation: PlanValidation | null,
+  view: VerificationView,
+): string {
+  const scope = validation?.scope ?? null;
+  const realCheck =
+    view.tone !== "simulated" &&
+    (section.scope === "TIMETABLE"
+      ? scope === "REAL_TIMETABLE"
+      : scope !== null && scope !== "SIMULATION");
+  const tone = sectionTone(section.verdict, realCheck);
+  if (tone === "pass") return "notice--success";
+  if (tone === "fail") return "notice--error";
+  return "notice--warning";
 }
 
 function planIssueText(
@@ -1099,6 +1142,42 @@ async function goBackToQuestions() {
             <p class="microcopy">
               课程已从方案中移除。返回问卷后可以重新生成方案。
             </p>
+          </div>
+          <div
+            v-else-if="entry.view && sectionsOf(entry.plan.verification).length"
+            class="plan-sections"
+            aria-label="方案核验分项"
+          >
+            <p class="microcopy">
+              总体：{{ entry.view.label }}（取两项中较差的结果）
+            </p>
+            <section
+              v-for="section in sectionsOf(entry.plan.verification)"
+              :key="section.scope"
+              class="notice"
+              :class="
+                sectionClassOf(section, entry.plan.verification, entry.view)
+              "
+              role="status"
+              :aria-label="SECTION_TITLE[section.scope]"
+            >
+              <strong
+                >{{ SECTION_TITLE[section.scope] }}：{{
+                  verdictBadge(section.verdict)
+                }}</strong
+              >
+              <ul v-if="sectionLinesOf(section).length" class="summary-list">
+                <li v-for="line in sectionLinesOf(section)" :key="line.key">
+                  {{ line.text }}
+                </li>
+              </ul>
+              <p v-else-if="section.verdict === 'VALID'" class="microcopy">
+                已核对，未发现冲突或不满足项。
+              </p>
+              <p v-if="unmodeledRulesNote(section)" class="microcopy">
+                {{ unmodeledRulesNote(section) }}
+              </p>
+            </section>
           </div>
           <div
             v-else-if="entry.view"

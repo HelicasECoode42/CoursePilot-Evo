@@ -769,6 +769,17 @@ const planConstraint = {
 };
 
 function planVerification(verdict: "VALID" | "UNKNOWN") {
+  const unknownChecks =
+    verdict === "UNKNOWN"
+      ? [
+          {
+            code: "CLASS_NOT_SELECTED",
+            message: "CS103 尚未选定班次（测试数据）",
+            field: null,
+            retryable: false,
+          },
+        ]
+      : [];
   return {
     verifierResultId: "verifier-test",
     verdict,
@@ -777,19 +788,18 @@ function planVerification(verdict: "VALID" | "UNKNOWN") {
     offeringSnapshotId: "offering-2026",
     recordRevision: 1,
     violations: [],
-    unknownChecks:
-      verdict === "UNKNOWN"
-        ? [
-            {
-              code: "CLASS_NOT_SELECTED",
-              message: "CS103 尚未选定班次（测试数据）",
-              field: null,
-              retryable: false,
-            },
-          ]
-        : [],
+    unknownChecks,
     performedChecks: ["PLAN_TIME_OVERLAP"],
     sourceRefIds: [],
+    sections: [
+      { scope: "TIMETABLE", verdict, violations: [], unknownChecks },
+      {
+        scope: "CURRICULUM",
+        verdict: "VALID",
+        violations: [],
+        unknownChecks: [],
+      },
+    ],
   };
 }
 

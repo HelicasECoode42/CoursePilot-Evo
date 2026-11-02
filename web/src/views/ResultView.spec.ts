@@ -233,6 +233,14 @@ function stubOfferings(overrides: Record<string, CourseOffering[]> = {}) {
     });
 }
 
+/** 未建模培养规则的 unknown（Java 原文格式，合成数据）。 */
+const UNMODELED_RULES_ISSUE = {
+  code: "UNMODELED_CURRICULUM_RULES",
+  message: "本培养方案有 1 条规则系统未建模、不参与核验（原表位置：测试表!A7）",
+  field: "curriculumSnapshotId",
+  retryable: false,
+};
+
 describe("result page course search and replacement", () => {
   let router: ReturnType<typeof createRouter>;
   let store: ReturnType<typeof usePlanningStore>;
@@ -1023,5 +1031,94 @@ describe("result page course search and replacement", () => {
       verification: null,
       empty: true,
     });
+  });
+
+  it("shows timetable and curriculum as two blocks with separate verdicts and an overall line", async () => {
+    const result = answer();
+    result.recommendations[0].verification = validation({
+      verdict: "UNKNOWN",
+      scope: "REAL_TIMETABLE",
+      unknownChecks: [UNMODELED_RULES_ISSUE],
+      sections: [
+        {
+          scope: "TIMETABLE",
+          verdict: "VALID",
+          violations: [],
+          unknownChecks: [],
+        },
+        {
+          scope: "CURRICULUM",
+          verdict: "UNKNOWN",
+          violations: [],
+          unknownChecks: [UNMODELED_RULES_ISSUE],
+        },
+      ],
+    });
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+    const blocks = wrapper.findAll(".plan-sections > section");
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].text()).toContain("本学期课表核验：通过");
+    expect(blocks[0].classes()).toContain("notice--success");
+    expect(blocks[1].text()).toContain("毕业要求核对：无法确认");
+    expect(blocks[1].classes()).toContain("notice--warning");
+    expect(blocks[1].text()).toContain("测试表!A7");
+    expect(blocks[1].text()).toContain(
+      "这些培养方案规则需要人工确认，系统暂不自动判断。",
+    );
+    expect(wrapper.find(".plan-sections").text()).toContain(
+      "总体：部分条件无法确认（取两项中较差的结果）",
+    );
+  });
+
+  it("shows a timetable conflict as its own failing block and keeps each block's own pass state", async () => {
+    const result = answer();
+    result.recommendations[0].verification = validation({
+      verdict: "INVALID",
+      scope: "REAL_TIMETABLE",
+      violations: [
+        {
+          code: "TIME_CONFLICT",
+          message: "周一 1-2 节两门课冲突",
+          field: "items",
+          retryable: false,
+        },
+      ],
+      sections: [
+        {
+          scope: "TIMETABLE",
+          verdict: "INVALID",
+          violations: [
+            {
+              code: "TIME_CONFLICT",
+              message: "周一 1-2 节两门课冲突",
+              field: "items",
+              retryable: false,
+            },
+          ],
+          unknownChecks: [],
+        },
+        {
+          scope: "CURRICULUM",
+          verdict: "VALID",
+          violations: [],
+          unknownChecks: [],
+        },
+      ],
+    });
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+    const blocks = wrapper.findAll(".plan-sections > section");
+    expect(blocks[0].text()).toContain("本学期课表核验：不通过");
+    expect(blocks[0].text()).toContain("周一 1-2 节两门课冲突");
+    expect(blocks[0].classes()).toContain("notice--error");
+    expect(blocks[1].text()).toContain("毕业要求核对：通过");
+    expect(blocks[1].text()).toContain("已核对，未发现冲突或不满足项。");
+    // 毕业要求分项不依赖班次，真实的 VALID 仍可是通过；课表冲突不会把它拉成不通过。
+    expect(blocks[1].classes()).toContain("notice--success");
   });
 });

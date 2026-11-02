@@ -12,6 +12,7 @@ import type {
   PlanItem,
   PlanningAnswer,
   PlanningRequest,
+  PlanSection,
   PlanValidation,
   ReviewNote,
   RunReport,
@@ -211,24 +212,27 @@ const FIXTURE_HARD_CONSTRAINTS: Constraint[] = [
  * 已核验通过。verdict 写 VALID 只表示「在这组演示数据里没发现违规」，
  * 页面仍然不会给绿色。
  */
+const DEMO_UNKNOWN_CHECKS: PlanValidation["unknownChecks"] = [
+  {
+    code: "CLASS_NOT_SELECTED",
+    message: "CS103 尚未选定班次，上课时间无法确认（演示数据）。",
+    field: null,
+    retryable: false,
+  },
+];
 const DEMO_VERIFICATION: PlanValidation = {
   verifierResultId: "fixture-verifier-base",
-  verdict: "VALID",
+  // 演示方案有未确认的班次，总判决不能是 VALID（与 Java 的分项取最差规则一致）。
+  verdict: "UNKNOWN",
   scope: "SIMULATION",
   curriculumSnapshotId: DEMO_CURRICULUM_ID,
   offeringSnapshotId: FIXTURE_OFFERING_SNAPSHOT_ID,
   recordRevision: DEMO_RECORD.revision,
   violations: [],
-  unknownChecks: [
-    {
-      code: "CLASS_NOT_SELECTED",
-      message: "CS103 尚未选定班次，上课时间无法确认（演示数据）。",
-      field: null,
-      retryable: false,
-    },
-  ],
+  unknownChecks: DEMO_UNKNOWN_CHECKS,
   performedChecks: ["PLAN_TIME_OVERLAP", "HARD_CONSTRAINT_BLOCK_DAY"],
   sourceRefIds: ["source:fixture-offering-cs102-01"],
+  sections: timetableAndCurriculumSections("UNKNOWN", [], DEMO_UNKNOWN_CHECKS),
 };
 
 const DEMO_ANSWER: PlanningAnswer = {
@@ -422,6 +426,26 @@ const FIXTURE_RUN_REPORT: RunReport = {
   failureCategories: ["FIXTURE_NO_EVALUATION"],
 };
 
+/**
+ * 演示数据的两个分项。课表分项承载全部违规与未知项；演示数据不含毕业要求规则，
+ * 毕业要求分项记为 VALID（无可报告的问题），总判决与课表分项一致，即取两者中较差的结果。
+ */
+function timetableAndCurriculumSections(
+  verdict: PlanValidation["verdict"],
+  violations: PlanValidation["violations"],
+  unknownChecks: PlanValidation["unknownChecks"],
+): PlanSection[] {
+  return [
+    { scope: "TIMETABLE", verdict, violations, unknownChecks },
+    {
+      scope: "CURRICULUM",
+      verdict: "VALID",
+      violations: [],
+      unknownChecks: [],
+    },
+  ];
+}
+
 /** 按班次生成核验判决。判决只说明演示数据的情况，不是真实核验。 */
 function fixtureVerification(
   offering: CourseOffering,
@@ -461,6 +485,11 @@ function fixtureVerification(
     unknownChecks,
     performedChecks: ["PLAN_TIME_OVERLAP", "HARD_CONSTRAINT_BLOCK_DAY"],
     sourceRefIds: [offering.sourceRefId],
+    sections: timetableAndCurriculumSections(
+      verdict,
+      violations,
+      unknownChecks,
+    ),
   };
 }
 

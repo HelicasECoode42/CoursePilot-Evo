@@ -28,7 +28,7 @@ describe("CourseReviewBasis", () => {
     const wrapper = mount(CourseReviewBasis, {
       props: { ...base, reviewBasisStatus: "NOT_QUERIED" },
     });
-    expect(wrapper.text()).toContain("未查询评价");
+    expect(wrapper.text()).toContain("本次规划未查询评价");
     expect(wrapper.text()).not.toContain("暂无评价依据");
   });
 
