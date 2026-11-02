@@ -56,7 +56,8 @@ class ReplacementResult:
     plan_id: str
     items: list[PlanItem]
     hard_constraints: list[Constraint]
-    verification: PlanValidation
+    verification: PlanValidation | None
+    empty: bool = False
 
 
 class PlanReplacement:
@@ -125,6 +126,71 @@ class PlanReplacement:
             items=items,
             hard_constraints=constraints,
             verification=verification,
+        )
+
+    def remove(
+        self,
+        *,
+        session_id: str,
+        previous_plan_id: str,
+        course_code: str,
+        context: ExecutionContext,
+    ) -> ReplacementResult:
+        """Remove one course deterministically and revalidate the remaining plan."""
+        plan = self._require_plan(session_id, previous_plan_id)
+        _ensure_single_course(plan, course_code)
+        items = [
+            item.model_copy(deep=True) for item in plan.items if item.courseCode != course_code
+        ]
+        constraints = [
+            item.model_copy(deep=True)
+            for item in plan.hard_constraints
+            if not (
+                (item.kind == "PIN_COURSE" and item.courseCode == course_code)
+                or (item.kind == "PIN_TEACHER_COURSE" and item.courseCode == course_code)
+            )
+        ]
+        verification = None
+        if items:
+            verification = cast(
+                PlanValidation,
+                self._tools.call(
+                    "validatePlan",
+                    PlanValidationRequest(
+                        schemaVersion="1.0",
+                        curriculumSnapshotId=plan.curriculum_snapshot_id,
+                        offeringSnapshotId=plan.offering_snapshot_id,
+                        academicRecordId=plan.academic_record_id,
+                        mode=plan.mode,
+                        items=items,
+                        hardConstraints=constraints,
+                    ),
+                    context,
+                ),
+            )
+            if verification.verifierResultId == plan.verifier_result_id:
+                raise ReusedVerification
+        plan_id = new_id("plan")
+        self._plans.remember(
+            session_id=session_id,
+            plan_id=plan_id,
+            curriculum_snapshot_id=plan.curriculum_snapshot_id,
+            offering_snapshot_id=plan.offering_snapshot_id,
+            academic_record_id=plan.academic_record_id,
+            mode=plan.mode,
+            items=items,
+            hard_constraints=constraints,
+            verifier_result_id=verification.verifierResultId
+            if verification
+            else plan.verifier_result_id,
+        )
+        return ReplacementResult(
+            previous_plan_id=plan.plan_id,
+            plan_id=plan_id,
+            items=items,
+            hard_constraints=constraints,
+            verification=verification,
+            empty=not items,
         )
 
     def _selected_offering(

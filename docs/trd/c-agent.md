@@ -1,6 +1,6 @@
 # C 模块：需求理解与智能规划（业务说明与 TRD）
 
-负责人：**goat-yang**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前已有可运行实现：planning 契约的 12 个操作都有路由，81 个测试通过。模型默认走受控假实现（未配 `CP_MODEL_*` 时不调真实模型）。`harness/tool_policy.yaml` 限制每次运行各工具的调用次数，`context_policy.yaml` 限制送进模型的事实条数，`AGENTS.md` 与 `skills/` 进入系统提示；预算不在这份白名单里，默认仍是 8000/2000/6/3/45000，可用 `CP_MAX_*` 覆盖。排期见[本期任务](../19-delivery-plan.md)。
+负责人：**goat-yang**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前已有可运行实现：planning 契约的 12 个操作都有路由，81 个测试通过。模型默认走受控假实现（未配 `CP_MODEL_*` 时不调真实模型）。`harness/tool_policy.yaml` 限制每次运行各工具的调用次数，`context_policy.yaml` 限制送进模型的事实条数，`AGENTS.md` 与 `skills/` 进入系统提示；预算不在这份白名单里，默认是 8000/4000/6/3/45000（输出上限 2026-10-29 从 2000 上调），可用 `CP_MAX_*` 覆盖。排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 
@@ -92,7 +92,7 @@ PlanningAnswer decision=CLARIFY 必须有 Question 且无 recommendations；每�
 
 `POST /api/v1/planning` 带 `previousPlanId` 时，先确认该方案属于当前会话，不属于就返回 404，文案与其他「不在本会话」一致。确认之后按这次请求里的硬条件重新核验，不把旧 `verifierResultId` 当成新结果，也不因为重规划删掉请求里仍在的必须项。
 
-会话内换班先用已有 Java 工具，不新造字段：`GET /api/v1/session-offerings` 按当前会话里的 `previousPlanId` 和 `courseCode` 调 `listOfferings`；`POST /api/v1/session-plans/replace` 只替换这一门，其余课程和 `hardConstraints` 原样交给 `validatePlan`。旧 `verifierResultId` 不复用。这两条路径已随 #28 写入 `planning.openapi.json`；但 `plans/validate` 在 Java 侧尚未实现，真实环境下换班次会得到「接口不存在」。
+会话内换班使用 `GET /api/v1/session-offerings` 查询当前方案快照中的班次，`POST /api/v1/session-plans/replace` 替换单门课程并由 Java `validatePlan` 核验整份方案。`POST /api/v1/session-plans/remove-course` 从会话拥有的已保存方案确定性移除课程、该课程的 `PIN_COURSE` 与 `PIN_TEACHER_COURSE` 条件，其余课程、班次和硬条件保持原样；模型不参与删除。非空结果调用 Java 核验并保存新 planId。末课删除保存 `items=[]`、`empty=true`、`verification=null`，因为 Java 拒绝空核验输入；网页明确显示空方案且允许返回问卷重新生成。相同幂等键复用结果，旧 planId 保留供对照。当前学期真实班次快照未核验时，不得将编辑结果表述为真实课表已验证。
 
 ### 4. 正常与重规划时序
 
@@ -139,7 +139,7 @@ sequenceDiagram
 
 ModelAdapter 只允许选定模型端点，不接受文件/评价里给的 URL。Runner 读取 `tool_policy.yaml` 的 per-tool `max_calls`，超出则抛 `BudgetExceeded`，整次运行以 503 `BUDGET_EXCEEDED` 结束——**不是只跳过这一次调用**，所以不会把「没查到」当成「没有」；上限只作用于规划运行，会话内换班次的搜索/替换不经过预算计数。`context_policy.yaml` 的 `max_course_facts`、`max_offerings`、`max_review_notes` 裁剪送进模型的事实（**当前裁剪是静默的**，模型看到的是子集但不知道被截断过），不把全库、历史全部聊天塞入模型。`harness/AGENTS.md` 与 `skills/` 作为策略文本放进系统提示，不执行。
 
-默认累计 input8000/output2000 tokens、6 tools、3 model calls、45 秒；各调用按剩余预算设置 timeout。provider 自动重试关闭。无效模型 JSON 最多在模型调用预算内修复一次；超过即 MODEL_INVALID_OUTPUT，不因语言顺畅放行。
+默认累计 input8000/output4000 tokens、6 tools、3 model calls、45 秒；各调用按剩余预算设置 timeout。provider 自动重试关闭。无效模型 JSON 最多在模型调用预算内修复一次；超过即 MODEL_INVALID_OUTPUT，不因语言顺畅放行。
 
 HarnessLoader 只加载已记录 hash 的白名单快照。文件内容是策略文本/受控配置，不能 import/exec 生成代码。运行 root AGENTS.md 与 repo 工程规范不被 Evolver 修改。
 

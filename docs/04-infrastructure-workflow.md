@@ -1,6 +1,6 @@
 # 公共接口与数据契约 v1.0
 
-状态：开发基线；服务尚未实现。字段、必填与枚举以 [contracts](../contracts/README.md) 为准。本文件定义不能只靠 JSON Schema 检查的行为。任何个人 TRD 与此冲突时先修契约，不能用个人文档覆盖公共定义。
+字段、必填与枚举以 [contracts](../contracts/README.md) 为准。本文件定义不能只靠 JSON Schema 检查的行为。任何个人 TRD 与此冲突时先修契约，不能用个人文档覆盖公共定义。
 
 ## 1. 调用边界与身份
 
@@ -36,7 +36,7 @@ X-Request-Id 用于相关请求定位，不等于幂等键。合法 ID 长度/�
 - Python planning 与 academic-record 创建要求 Idempotency-Key。存键=会话+端点+键、规范化请求摘要；相同内容复用原答复，不重复花模型费用；不同内容 409。执行中同键返回 409 REQUEST_IN_PROGRESS，不开启第二次任务。保留到会话过期；过期后 401。
 - 导入自然键=规范化内容 hash+培养路径/学期+importerVersion。重导复用既有结果。错误时不发布半张快照；快照不可覆盖。
 - academicRecordId、recordRevision、curriculumSnapshotId、offeringSnapshotId、schemaVersion、javaToolApiVersion、verifierVersion、harnessVersion 均由对应服务维护。previousPlanId 必须属当前会话，输入变化后重新核验；不得复用旧 verifierResultId 当新方案结果。
-- 初始运行上限：累计 input 8000/output 2000 tokens、6 次 Tool、3 次模型调用、总 45 秒。Java HTTP 单次最多 5 秒，模型单次最多 30 秒且受剩余总截止时间限制。预算不是性能实测，不代表保证在 45 秒成功。
+- 初始运行上限：累计 input 8000/output 4000 tokens、6 次 Tool、3 次模型调用、总 45 秒。（输出上限 2026-10-29 从 2000 调到 4000：实测真实模型两次规划都在 output_tokens=2000 处finish_reason=length，JSON 写到一半被切断，报成 MODEL_OUTPUT_TRUNCATED。会话累计输出上限同步从 10000 调到 20000，保持「一个会话约可跑 5 次规划」。）Java HTTP 单次最多 5 秒，模型单次最多 30 秒且受剩余总截止时间限制。预算不是性能实测，不代表保证在 45 秒成功。
 - 不做隐藏自动重试。只读 Java 查询可对瞬时网络错误重试一次，必须在总 Tool/时间预算内；不得重试 validation/input 错误。模型默认不自动重试，重新执行由用户明确操作并建立新的幂等键。
 
 ## 4. 学业与身份事实
@@ -92,3 +92,17 @@ RunManifest 固定模型、温度、累计预算、API/数据/评分器/题集�
 ## 9. 变更与复核
 
 改契约先改 contracts、正反例与本文件，再同步 Java/Python/TS DTO、消费者与测试；破坏性变化升 schema/API 版本。接口 PR 必须有提供者和至少一个消费者复核。每次提交运行契约/自查脚本及受影响模块测试；具体要求见 [工程规范](16-engineering-and-debugging.md)。
+
+## 10. 课程咨询对话
+
+`POST /api/v1/advice/chat` 为有会话鉴权的只读咨询接口。它复用模型适配器、ToolClient、请求预算与会话用量账本，每轮最多调用一次模型；正式方案仍由现有 PlanningRunner 生成并交 Java 核验。对话不创建 planId、不修改学业事实，学生确认后由 Web 更新当前草稿。
+
+学校进度须关联当前培养方案及所选记录。未指定记录时，可使用同方案学校进度返回的本会话记录；显式指定记录时，不匹配的学校进度不进入模型或回复。学校报告缺口保留原值与来源，本地 audit 的 UNKNOWN 不因对话而提升为通过。
+
+默认主动推荐范围为专业选修课与高年级研讨课，已通过和在读课程排除，失败课程可讨论补修，状态未知不得当作已通过。公共基础退出主动推荐，但保留原记录；学生显式选择的其他类别课程仍需按事实和硬约束处理。
+
+对话返回的课程名、学分、类别与评价由服务端查询补全；模型只能引用允许的课程及同课程已查评价。未查、没有记录、资料不完整分别表示，不把评价记录数称为人数。真实模式不混入合成来源。
+
+采用兴趣、明确选课和优先考虑分别处理。明确选课进入现有 PIN_COURSE，优先考虑进入 `softPreferences` 的 `course.prefer`，不自动升级为硬条件。重复采用不重复写入，切换会话或方案后旧请求不得写回新草稿。
+
+对话要求 Idempotency-Key。成功或已有明确 token 用量的失败按键保留，同键重放不再次调用模型或重复记账；用量未知的请求失败仍可由用户显式重试。新的付费尝试使用新键。字段定义和前端操作见 [对话接口](29-advice-chat-contract.md)。

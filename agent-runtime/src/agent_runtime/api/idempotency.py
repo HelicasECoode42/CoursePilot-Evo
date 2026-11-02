@@ -26,10 +26,15 @@ class _Entry:
     digest: str
     payload: dict | None
     in_progress: bool
+    failure: Exception | None = None
 
 
 class IdempotencyStore:
-    """Key = (session, endpoint, key), matching docs/04 section 3. In-memory skeleton."""
+    """Key = (session, endpoint, key), matching docs/04 section 3.
+
+    Endpoints may cache selected terminal failures; the default keeps failures
+    retryable so existing routes retain their prior behavior.
+    """
 
     def __init__(self) -> None:
         self._lock = Lock()
@@ -46,6 +51,8 @@ class IdempotencyStore:
                 raise IdempotencyConflict
             if entry.in_progress:
                 raise RequestInProgress
+            if entry.failure is not None:
+                raise entry.failure
             return entry.payload
 
     def complete(
@@ -62,6 +69,21 @@ class IdempotencyStore:
             if entry is not None and entry.in_progress:
                 del self._entries[slot]
 
+    def complete_failure(
+        self,
+        session_id: str,
+        endpoint: str,
+        key: str,
+        body_digest: str,
+        failure: Exception,
+    ) -> None:
+        """Cache a selected terminal failure without changing other endpoint defaults."""
+        slot = (session_id, endpoint, key)
+        with self._lock:
+            self._entries[slot] = _Entry(
+                digest=body_digest, payload=None, in_progress=False, failure=failure
+            )
+
     def run(
         self,
         session_id: str,
@@ -69,14 +91,19 @@ class IdempotencyStore:
         key: str,
         body_digest: str,
         produce: Callable[[], dict],
+        *,
+        cache_failure: Callable[[Exception], bool] | None = None,
     ) -> dict:
         cached = self.begin(session_id, endpoint, key, body_digest)
         if cached is not None:
             return cached
         try:
             payload = produce()
-        except Exception:
-            self.abort(session_id, endpoint, key)
+        except Exception as exc:
+            if cache_failure is not None and cache_failure(exc):
+                self.complete_failure(session_id, endpoint, key, body_digest, exc)
+            else:
+                self.abort(session_id, endpoint, key)
             raise
         self.complete(session_id, endpoint, key, body_digest, payload)
         return payload

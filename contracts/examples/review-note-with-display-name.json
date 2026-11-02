@@ -1,0 +1,14 @@
+{
+  "reviewNoteId": "review:display-example",
+  "courseCode": "CS101",
+  "teacherKey": null,
+  "termId": null,
+  "sourceKind": "USER_IMPORT",
+  "publishedAt": null,
+  "sourceUrl": null,
+  "excerpt": "演示评价文本",
+  "dimensions": ["TEACHING"],
+  "matchStatus": "UNVERIFIED",
+  "sourceRefId": "source:display-example",
+  "teacherDisplayName": "教师姓名显示样例"
+}

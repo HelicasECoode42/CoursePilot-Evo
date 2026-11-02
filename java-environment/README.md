@@ -1,29 +1,28 @@
 # System 1：Java Environment / Truth / Verifier（部分实现）
 
-Java 21、Spring Boot（已引入 Web、Spring Data JPA、Validation；源码中尚无 `@Valid`/`@NotNull` 等校验注解在用）、H2 文件库（`./data`）、JUnit 5（经 spring-boot-starter-test）。尚未引入：Apache POI、MySQL 驱动、Flyway。首版**目标**是处理通过自动校验门槛的培养计划和 `SYNTHETIC` 班次 fixture，提供课程/要求/学分/冲突算法/计划核验/偏好指标和 typed Tool API；面向学生没有真实班次时返回 UNKNOWN。这是模块范围，不是当前能力——实际完成到哪一步见下一段。按 `../docs/trd/a-data.md`、`../docs/trd/b-verifier.md` 与[实施方案](../docs/10-java-import-and-rules.md)开发，未来浏览器采集边界见 `../docs/09-browser-adapter.md`。
+Java 21、Spring Boot（已引入 Web、Spring Data JPA、Validation；源码中尚无 `@Valid`/`@NotNull` 等校验注解在用）、H2 文件库（`./data`）、JUnit 5（经 spring-boot-starter-test）。Apache POI 5.5.1 用于 XLSX 导入；尚未引入 MySQL 驱动或 Flyway。首版**目标**是处理通过自动校验门槛的培养计划和 `SYNTHETIC` 班次 fixture，提供课程/要求/学分/冲突算法/计划核验/偏好指标和 typed Tool API；面向学生没有真实班次时返回 UNKNOWN。这是模块范围，不是当前能力——实际完成到哪一步见下一段。按 `../docs/trd/a-data.md`、`../docs/trd/b-verifier.md` 与[实施方案](../docs/10-java-import-and-rules.md)开发，未来浏览器采集边界见 `../docs/09-browser-adapter.md`。
 
 当前已实现：课程/班次查询（`GET /api/v1/courses`、`GET /api/v1/offerings`）、时间解析与冲突判断、学业核对
-（`POST /api/v1/requirements/audit`）、服务密钥与对象级授权。另有三个 `/api/v1/verification/*` 接口
+（`POST /api/v1/requirements/audit`）、服务密钥与对象级授权。培养计划 XLSX 导入器可在显式开启的本地演示模式下
+通过 `POST /api/v1/curriculum-snapshots/import` 发布为 `SYNTHETIC/SYNTHETIC`，不支持真实来源发布。另有三个 `/api/v1/verification/*` 接口
 （`credit-gap`、`parse-time`、`conflicts`）已实现，但未在 `contracts/java.openapi.json` 中声明，属于契约外的既有接口。
-**尚未实现**：培养快照列表（`GET /api/v1/curriculum-snapshots`，实现在未合入的 PR #29 中）、
-`POST /api/v1/plans/validate`、教师与课程评价实体、
-学业记录聚合实体（`GET /api/v1/academic-records` 与 `…/{recordId}` 目前是桩，返回 UNKNOWN 说明缺口，
-空 items 不代表该主体没有学业记录；`POST /api/v1/academic-records` 写入也未实现）、
-各 `import` 端点、MySQL/Flyway（当前是 H2）。现有数据全是 `SYNTHETIC` 演示种子，
+**尚未实现**：`POST /api/v1/plans/validate`、教师与课程评价实体、
+班次/评价导入、MySQL/Flyway（当前是 H2）。现有数据全是 `SYNTHETIC` 演示种子，
 没有真实教学计划或真实班次。
 
 ## 本地启动
 
-需要 JDK 21 或更高。先设服务密钥，再起服务：
+需要 JDK 21 或更高。先设服务密钥，再起服务。密钥不写进仓库，取仓库外的本地配置（与网关 `CP_SERVICE_KEY` 同值）：
 
 ```bash
-# macOS / Linux（zsh、bash）
-COURSEPILOT_SERVICE_KEY=local-dev-key ./mvnw spring-boot:run
+# macOS / Linux（zsh、bash）：只读取，不打印
+export COURSEPILOT_SERVICE_KEY="$(sed -n 's/^CP_SERVICE_KEY=//p' ../data/private/stack.env)"
+./mvnw spring-boot:run
 ```
 
 ```powershell
 # Windows PowerShell —— 上面那种「变量=值 命令」的写法在 PowerShell 里不认
-$env:COURSEPILOT_SERVICE_KEY = "local-dev-key"
+$env:COURSEPILOT_SERVICE_KEY = "<从 data/private/stack.env 复制 CP_SERVICE_KEY 的值>"
 .\mvnw.cmd spring-boot:run
 ```
 
@@ -33,17 +32,82 @@ $env:COURSEPILOT_SERVICE_KEY = "local-dev-key"
 与它一致（契约 `java.openapi.json` 的 `security: serviceKey`），**没配时整个
 `/api/v1` 一律返回 503 而不是放行**——没有密钥就分辨不出调用方，放行等于默认开放。
 密钥只从环境变量读，仓库里不放默认值（`../docs/04-infrastructure-workflow.md`）。
-`local-dev-key` 只是本地占位，别写进代码、配置文件或提交信息。
+旧的公开示例值 `local-dev-key` 已出现在 git 历史中，已作废，不要再用；也不要把任何真实密钥写进代码、配置文件或提交信息。
+
+### 本地 synthetic 培养计划导入
+
+本地导入接口默认关闭，由 `COURSEPILOT_SYNTHETIC_IMPORT_ENABLED=true` 显式启用；接口仅接受 loopback 调用，并要求 `X-Service-Key` 和 `X-Admin-Key`。上传限制为 10 MiB，仅接受 `.xlsx`；有阻断级模板/规则问题的文件会被拒绝。
+
+`sourceKind` 默认为 `SYNTHETIC`。对经授权且具有来源记录的 A1 培养计划工作簿，可显式传 `sourceKind=CURRICULUM_FILE`；Java 会沿用相同的解析、校验与事务发布流程创建独立快照，并标记为 `CURRICULUM_FILE/UNVERIFIED`。该选项不接受客户端设置 `sourceValidation`，也不会把快照提升为 `VERIFIED`。同一工作簿再次导入会复用该来源类型对应的快照；已有 `SYNTHETIC` 快照保留不变。
+
+```bash
+COURSEPILOT_ADMIN_KEY=local-admin-key \
+COURSEPILOT_SYNTHETIC_IMPORT_ENABLED=true \
+./mvnw spring-boot:run
+```
+
+另一终端用本机生成的演示工作簿时省略 `sourceKind`；上传有来源记录的授权 A1 工作簿时显式传 `CURRICULUM_FILE`，示例如下：
+
+```bash
+curl -X POST 'http://127.0.0.1:8081/api/v1/curriculum-snapshots/import' \
+  -H "X-Service-Key: $COURSEPILOT_SERVICE_KEY" \
+  -H 'X-Admin-Key: local-admin-key' \
+  -H 'X-Subject-Id: teacher:demo' \
+  -H 'X-Request-Id: curriculum-import-1' \
+  -F 'schemaVersion=1.0' \
+  -F 'trackId=cs-general' \
+  -F 'sourceKind=CURRICULUM_FILE' \
+  -F 'file=@./path/to/authorized-curriculum.xlsx'
+```
+
+对上例明确指定的 `CURRICULUM_FILE`，快照列表显示 `sourceKind=CURRICULUM_FILE`、`sourceValidation=UNVERIFIED`，响应来源 `provenance[0].kind` 为 `CURRICULUM`。响应中的 `snapshotId` 可用于 `GET /api/v1/curriculum-snapshots` 和 `GET /api/v1/courses?curriculumSnapshotId=...`。如省略 `sourceKind`，响应来源为 `SYNTHETIC`；两类快照使用独立 ID 和幂等回执。
 
 调接口时三个头一起带。`X-Subject-Id` 是调用方代为断言的主体，Java 信任它的前提
 是 `X-Service-Key` 已经证明调用方是已认证的 Python 服务（`../docs/16-engineering-and-debugging.md`）：
 
 ```bash
-curl -H 'X-Service-Key: local-dev-key' \
+curl -H "X-Service-Key: $COURSEPILOT_SERVICE_KEY" \
      -H 'X-Subject-Id: S001' \
      -H 'X-Request-Id: req-1' \
      http://127.0.0.1:8081/api/v1/courses
 ```
+
+### 本地私有教师评价导入
+
+`data/private/a3/review-import/delivery/` 中的 ReviewImport JSON 与姓名 sidecar 可在本机按
+`reviewNoteId`、`sourceRefId`、`courseCode` 三字段联接。合并脚本只把姓名写入可选的
+`teacherDisplayName` 显示字段；不会生成 `teacherKey` 或改变 JSON 内的 `matchStatus`。
+输入文件应留在 `data/private`，输出文件也只写在该目录中：
+
+```bash
+python3 java-environment/scripts/prepare_review_import.py \
+  --reviews data/private/a3/review-import/delivery/review-import-faculty-history.json \
+  --sidecar data/private/a3/review-import/delivery/teacher-display-sidecar.csv \
+  --output data/private/a3/review-import/delivery/review-import-faculty-history-with-display-names.json
+```
+
+对 `review-import-winter.json` 重复运行并更换输入、输出文件名。服务默认绑定 `127.0.0.1`（可用 `COURSEPILOT_BIND_ADDRESS` 覆盖），
+分别对每个不超过 200 条的 JSON 文件调用导入端点；导入需要服务密钥、管理员密钥和主体头：
+
+```bash
+COURSEPILOT_ADMIN_KEY=local-admin-key \
+./mvnw spring-boot:run -Dspring-boot.run.arguments=--server.address=127.0.0.1
+```
+
+另一终端调用：
+
+```bash
+curl -X POST 'http://127.0.0.1:8081/api/v1/reviews/import' \
+  -H 'Content-Type: application/json' \
+  -H "X-Service-Key: $COURSEPILOT_SERVICE_KEY" \
+  -H 'X-Admin-Key: local-admin-key' \
+  -H 'X-Subject-Id: teacher:local-review-import' \
+  -H 'X-Request-Id: review-import-faculty-1' \
+  --data-binary @data/private/a3/review-import/delivery/review-import-faculty-history-with-display-names.json
+```
+
+旧 JSON 不带 `teacherDisplayName` 时仍可导入。按课程查询结果会返回该显示字段；课程级或未核验评价仍
+按其 `matchStatus` 展示为受限证据，姓名文本不用于教师绑定。
 
 ## 测试
 
@@ -134,7 +198,7 @@ H2 控制台默认关闭——它在同一端口上提供免认证的任意 SQL 
 直接读整张成绩表。临时需要时用命令行参数打开，不要写回仓库：
 
 ```bash
-COURSEPILOT_SERVICE_KEY=local-dev-key ./mvnw spring-boot:run \
+./mvnw spring-boot:run \
   -Dspring-boot.run.jvmArguments="-Dspring.h2.console.enabled=true"
 ```
 

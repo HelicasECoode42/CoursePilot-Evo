@@ -1,4 +1,5 @@
-import type { Motive, SnapshotSummary } from "../contracts";
+import type { Motive, PlanningMode, SnapshotSummary } from "../contracts";
+import { isCurriculumUsableForMode } from "./planning-request";
 import type { ClassPreferenceId } from "./class-preferences";
 
 export type QuestionId =
@@ -26,6 +27,21 @@ export interface TeacherPick {
 }
 
 export interface PlanningDraft {
+  /**
+   * 学生自己打的问题（控制台的「问一问」）。
+   *
+   * 和 careerText 分开存：careerText 进 promptText 时会被加上「职业方向补充：」
+   * 前缀，拿它装一个通用问题会把问题框成职业方向，模型读到的就是歪的。
+   */
+  questionText: string;
+  /**
+   * 要改的那份方案的 planId。
+   *
+   * 契约和 Runner 本来就支持续问（docs/04：previousPlanId 必须属于本会话），
+   * 但前端一直把它写死成 null，所以学生在结果页只能手动搜课换课，
+   * 没法回头跟模型说「按这个改」。
+   */
+  previousPlanId: string | null;
   motives: Motive[];
   classPreferences: ClassPreferenceId[];
   classPreferencesReviewed: boolean;
@@ -35,6 +51,8 @@ export interface PlanningDraft {
   careerReviewed: boolean;
   teacherHandoffAccepted: boolean;
   teacherPicks: TeacherPick[];
+  selectedCourseCodes: string[];
+  preferredCourseCodes: string[];
   mustSlots: string[];
   mustReviewed: boolean;
   preferSlots: string[];
@@ -44,6 +62,8 @@ export interface PlanningDraft {
 }
 
 export const emptyPlanningDraft = (): PlanningDraft => ({
+  questionText: "",
+  previousPlanId: null,
   motives: [],
   classPreferences: [],
   classPreferencesReviewed: false,
@@ -53,6 +73,8 @@ export const emptyPlanningDraft = (): PlanningDraft => ({
   careerReviewed: false,
   teacherHandoffAccepted: false,
   teacherPicks: [],
+  selectedCourseCodes: [],
+  preferredCourseCodes: [],
   mustSlots: [],
   mustReviewed: false,
   preferSlots: [],
@@ -65,23 +87,30 @@ export interface QuestionContext {
   draft: PlanningDraft;
   curricula: SnapshotSummary[];
   selectedCurriculumId: string | null;
+  mode: PlanningMode;
 }
 
 export function questionSequence({
   curricula,
-}: Pick<QuestionContext, "curricula">): QuestionId[] {
+  mode,
+}: Pick<QuestionContext, "curricula" | "mode">): QuestionId[] {
   const sequence: QuestionId[] = [];
-  if (
-    curricula.filter(
-      (item) => item.kind === "CURRICULUM" && item.state === "PUBLISHED",
-    ).length > 1
-  ) {
+  const published = curricula.filter(
+    (item) => item.kind === "CURRICULUM" && item.state === "PUBLISHED",
+  );
+  // 按「可用数量」而不是「总数量」决定是否需要这一步，和 store 的自动选择规则对齐。
+  // 恰好一个可用时自动选中，不必多问；其余情况都要让人看见有哪些方案、为什么不能用。
+  // 原来只在「超过一个」时才加这一步：于是只列出一个、而它又不可用时，用户既看不到
+  // 方案列表也选不了，一路走到第 8 步才被拦下。
+  const usable = published.filter((item) =>
+    isCurriculumUsableForMode(item, mode),
+  );
+  if (published.length > 0 && usable.length !== 1) {
     sequence.push("curriculum");
   }
   sequence.push(
     "goals",
     "preferences",
-    "career",
     "interest",
     "teacher",
     "schedule",
@@ -97,8 +126,8 @@ export function firstIncompleteQuestion(context: QuestionContext): QuestionId {
     return "curriculum";
   if (context.draft.motives.length === 0) return "goals";
   if (!context.draft.classPreferencesReviewed) return "preferences";
-  if (!context.draft.careerReviewed) return "career";
-  if (!context.draft.interestReviewed) return "interest";
+  if (!context.draft.careerReviewed || !context.draft.interestReviewed)
+    return "interest";
   if (!context.draft.teacherHandoffAccepted) return "teacher";
   if (!context.draft.mustReviewed || !context.draft.preferReviewed)
     return "schedule";
@@ -118,6 +147,7 @@ export function resolveQuestion(
   requested: string,
   context: QuestionContext,
 ): QuestionId {
+  if (requested === "career") requested = "interest";
   const sequence = questionSequence(context);
   const current = firstIncompleteQuestion(context);
   const targetIndex = sequence.indexOf(requested as QuestionId);

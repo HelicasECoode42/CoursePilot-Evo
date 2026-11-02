@@ -167,3 +167,9 @@ sequenceDiagram
 字段以 [contracts](../../contracts/README.md) 为真源，行为以 [公共契约](../04-infrastructure-workflow.md) 为准。提交提供者/消费者 DTO、正反例和受影响测试；Schema 破坏性变更升版本，不能边跑 Benchmark 边改。调试和提交要求见 [工程规范](../16-engineering-and-debugging.md)。
 
 任务完成至少包含：实现目录、输入/输出、正常和失败证据、限制；fixture 不算真实接入，HTML 不算生产前端，手工改 Prompt 不算 RSI。每次 PR 使用仓库模板自查，接口 PR 由相邻模块复核。
+
+### 当前可验证实现补充（2026-10-28）
+
+课程目录中的 `Course` 只作为跨版本的课程编号身份；名称、学分、类别存于 `CurriculumCourse` 的快照关联，来源元数据单独存于 `SourceReference`，目录响应携带 `sourceRefIds` 和完整的 `provenance`。课程查询、学业核对及 `MAX_CREDITS` 均按请求的培养快照读取关联属性。合成种子只写入新建的合成培养快照，不依据旧 `Course` 行或旧关联推导版本属性/来源。
+
+升级到该模型后，旧快照关联的新增字段保持空值，不会被全局课程信息自动补齐。课程查询遇到缺属性或缺来源的关联返回 `SNAPSHOT_COURSE_FACTS_UNKNOWN`（HTTP 409）；学业核对和方案学分上限保留 UNKNOWN。该行为需要后续导入流程提供来源和快照字段后才能恢复确定核验。目前仓库没有真实授权培养计划数据，本实现和测试均为 synthetic；不构成真实课程来源或真实规则验收。属性和来源实体已可持久化，导入发布事务仍未接入。

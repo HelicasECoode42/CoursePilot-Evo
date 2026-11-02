@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import { api } from "../api";
 import { ApiFailure } from "../api/client";
 import type {
+  Course,
   ReviewNote,
   SnapshotSummary,
   TeacherCourseOption,
@@ -16,6 +17,7 @@ import TeacherView from "./TeacherView.vue";
 vi.mock("../api", () => ({
   api: {
     mode: "fixture",
+    listCourses: vi.fn(),
     listTeacherCourseOptions: vi.fn(),
     searchReviews: vi.fn(),
   },
@@ -29,6 +31,13 @@ const curriculum: SnapshotSummary = {
   termId: null,
   createdAt: "2026-10-01T00:00:00Z",
   sourceValidation: "VERIFIED",
+};
+const course: Course = {
+  courseCode: "CS103",
+  name: "数据结构",
+  credits: 3,
+  category: "专业基础",
+  sourceRefIds: ["source:curriculum-cs103"],
 };
 
 const zhang: TeacherCourseOption = {
@@ -73,6 +82,7 @@ const courseOnly: ReviewNote = {
   dimensions: ["OVERALL"],
   matchStatus: "COURSE_ONLY",
   sourceRefId: "source:review-cs103-course",
+  teacherDisplayName: "教师姓名显示样例",
 };
 const unverified: ReviewNote = {
   reviewNoteId: "review-wang-unverified",
@@ -93,6 +103,7 @@ describe("teacher comparison page", () => {
   let store: ReturnType<typeof usePlanningStore>;
   let pinia: ReturnType<typeof createPinia>;
   const listOptions = vi.mocked(api.listTeacherCourseOptions);
+  const listCourses = vi.mocked(api.listCourses);
   const listReviews = vi.mocked(api.searchReviews);
 
   beforeEach(async () => {
@@ -109,7 +120,23 @@ describe("teacher comparison page", () => {
       selectedCurriculumId: curriculum.snapshotId,
       draft: emptyPlanningDraft(),
     });
-    listOptions.mockResolvedValue({ items: [zhang, wang], status: "OK" });
+    listOptions.mockImplementation(async (_id, code, _signal, query) => ({
+      items: [zhang, wang].filter(
+        (option) =>
+          (code === null || option.courseCode === code) &&
+          (!query || option.teacherDisplayName.includes(query)),
+      ),
+      status: "OK",
+    }));
+    listCourses.mockImplementation(async (_id, _cursor, _signal, query) => ({
+      items:
+        !query ||
+        course.courseCode.includes(query) ||
+        course.name.includes(query)
+          ? [course]
+          : [],
+      nextCursor: null,
+    }));
     listReviews.mockResolvedValue({
       items: [matched, courseOnly, unverified],
       status: "OK",
@@ -135,8 +162,9 @@ describe("teacher comparison page", () => {
     );
 
   const search = async (wrapper: VueWrapper, code = "CS103"): Promise<void> => {
-    await wrapper.get("#course-code").setValue(code);
-    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+    await wrapper.get("#teacher-search-input").setValue(code);
+    await wrapper.get("form.teacher-search").trigger("submit");
     await flushPromises();
   };
 
@@ -170,14 +198,169 @@ describe("teacher comparison page", () => {
     const wrapper = mountPage();
     await search(wrapper);
 
+    expect(listCourses).toHaveBeenCalledWith(
+      curriculum.snapshotId,
+      null,
+      undefined,
+      "CS103",
+    );
     expect(listOptions).toHaveBeenCalledWith(curriculum.snapshotId, "CS103");
+    expect(wrapper.find("#teacher-search-input").element.tagName).toBe("INPUT");
+    expect(wrapper.findAll("form")).toHaveLength(1);
     const text = wrapper.text();
     expect(text).toContain("张伟（合成）");
     expect(text).toContain("王芳（合成）");
     expect(text).toContain("仅有历史资料");
-    expect(text).toContain("本学期状态未知");
+    expect(text).toContain("目标学期开课状态未知");
     expect(text).toContain("1 个班次");
     expect(text).toContain("暂无班次资料");
+  });
+
+  it("allows teacher-name searches and shows associated courses", async () => {
+    const wrapper = mountPage();
+    await wrapper.get("#teacher-search-input").setValue("张伟");
+    await wrapper.get("form.teacher-search").trigger("submit");
+    await flushPromises();
+    expect(listOptions).toHaveBeenCalledWith(
+      curriculum.snapshotId,
+      null,
+      undefined,
+      "张伟",
+    );
+    expect(wrapper.text()).toContain("张伟");
+    expect(wrapper.text()).toContain("CS103 · 数据结构");
+    expect(
+      wrapper.find('a[href="https://cs.shu.edu.cn/szdw/jsml.htm"]').exists(),
+    ).toBe(true);
+  });
+
+  it("shows search results with code, name, credits and category, and pages with the cursor", async () => {
+    listCourses
+      .mockResolvedValueOnce({ items: [course], nextCursor: "page-2" })
+      .mockResolvedValueOnce({
+        items: [{ ...course, courseCode: "CS104", name: "离散数学" }],
+        nextCursor: null,
+      });
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get("#teacher-search-input").setValue("数");
+    await wrapper.get("form.teacher-search").trigger("submit");
+    await flushPromises();
+
+    expect(listCourses).toHaveBeenNthCalledWith(
+      1,
+      curriculum.snapshotId,
+      null,
+      undefined,
+      "数",
+    );
+    expect(wrapper.text()).toContain("数据结构");
+    expect(wrapper.text()).toContain("CS103 · 数据结构");
+    expect(wrapper.text()).toContain("CS104 · 离散数学");
+    expect(listCourses).toHaveBeenNthCalledWith(
+      2,
+      curriculum.snapshotId,
+      "page-2",
+      undefined,
+      "数",
+    );
+    expect(wrapper.text()).toContain("CS103");
+  });
+
+  it("keeps a course visible when no confirmed teacher association exists", async () => {
+    const softwareEngineering: Course = {
+      ...course,
+      courseCode: "SE201",
+      name: "软件工程",
+      credits: 4,
+    };
+    listCourses.mockResolvedValue({
+      items: [softwareEngineering],
+      nextCursor: null,
+    });
+    listOptions.mockResolvedValue({ items: [], status: "OK" });
+    listReviews.mockResolvedValue({
+      items: [matched, courseOnly, unverified].map((note) => ({
+        ...note,
+        reviewNoteId: `${note.reviewNoteId}-se201`,
+        courseCode: softwareEngineering.courseCode,
+      })),
+      status: "OK",
+    });
+
+    const wrapper = mountPage();
+    await search(wrapper, "软件工程");
+
+    const courseCard = wrapper.get('[aria-label="课程结果"] li');
+    expect(courseCard.text()).toContain("SE201 · 软件工程");
+    expect(courseCard.text()).toContain("4 学分");
+    expect(courseCard.text()).toContain("暂无已确认的教师关联");
+    expect(courseCard.find(".seg").exists()).toBe(false);
+    expect(courseCard.text()).not.toContain("必须保留");
+
+    await courseCard.get("button").trigger("click");
+    await flushPromises();
+    expect(listReviews).toHaveBeenCalledWith("SE201", null);
+    const summary = courseCard.get('[aria-label="课程评价维度汇总"]');
+    for (const dimension of summary.findAll("details.review-summary__group")) {
+      await dimension.get("summary").trigger("click");
+    }
+    expect(
+      new Set(summary.findAll("li").map((item) => item.get("p").text())).size,
+    ).toBe(3);
+  });
+
+  it("shows review excerpts immediately and keeps raw source references collapsed", async () => {
+    const wrapper = mountPage();
+    await search(wrapper);
+    await toggle(wrapper, "张伟");
+    await flushPromises();
+    const summary = wrapper.get('[aria-label="课程评价维度汇总"]');
+    expect(summary.text()).toContain("给分方式 · 2 条");
+    expect(summary.text()).toContain("来源资料");
+    const dimension = summary
+      .findAll("details.review-summary__group")
+      .find((item) => item.text().includes("给分方式"))!;
+    expect(dimension.attributes("open")).toBeUndefined();
+    await dimension.get("summary").trigger("click");
+    expect(dimension.text()).toContain(unverified.excerpt);
+    expect(dimension.find(".review-summary__source[open]").exists()).toBe(
+      false,
+    );
+    expect(summary.find(`[title="${unverified.sourceRefId}"]`).exists()).toBe(
+      true,
+    );
+    expect(summary.text()).toContain("数量不等于评价人数");
+  });
+
+  it("returns to the teacher preference question", async () => {
+    const wrapper = mountPage();
+    store.$patch({ sessionStatus: "idle", selectedCurriculumId: null });
+    await flushPromises();
+    await wrapper.get('a[href="/plan/questions/teacher"]').trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe("/plan/questions/teacher");
+  });
+
+  it("provides a direct route back to record confirmation", async () => {
+    const wrapper = mountPage();
+    store.$patch({
+      draft: {
+        ...emptyPlanningDraft(),
+        motives: ["GPA"],
+        classPreferencesReviewed: true,
+        interestReviewed: true,
+        careerReviewed: true,
+        teacherHandoffAccepted: true,
+        mustReviewed: true,
+        preferReviewed: true,
+        priorityOrder: ["GPA"],
+        prioritiesConfirmed: true,
+      },
+    });
+    await wrapper.get('a[href="/plan/questions/ready"]').trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe("/plan/questions/ready");
   });
 
   it("shows each review's source, year, dimensions and match status after expanding a teacher", async () => {
@@ -186,14 +369,13 @@ describe("teacher comparison page", () => {
     await toggle(wrapper, "张伟");
 
     expect(listReviews).toHaveBeenCalledWith("CS103", "teacher-zhang-02");
-    const items = wrapper.findAll("ol li");
-    expect(items).toHaveLength(3);
-    const first = items[0].text();
-    expect(first).toContain("合成样例（非真实评价）");
-    expect(first).toContain("发布于 2025 年");
-    expect(first).toContain("工作量、小组任务、给分方式");
-    expect(first).toContain("课程与教师均已对应");
-    expect(items[0].classes()).not.toContain("review-limited");
+    const summary = wrapper.get('[aria-label="课程评价维度汇总"]');
+    for (const dimension of summary.findAll("details.review-summary__group")) {
+      await dimension.get("summary").trigger("click");
+    }
+    expect(summary.text()).toContain("合成样例（非真实评价）");
+    expect(summary.text()).toContain(matched.excerpt);
+    expect(summary.text()).toContain("课程与教师均已对应");
   });
 
   it("labels COURSE_ONLY and UNVERIFIED evidence as limited, not as this teacher's evidence", async () => {
@@ -201,13 +383,14 @@ describe("teacher comparison page", () => {
     await search(wrapper);
     await toggle(wrapper, "张伟");
 
-    const items = wrapper.findAll("ol li");
-    expect(items[1].text()).toContain(
-      "依据有限：只能确认是这门课，不能确认是这位老师",
+    const summary = wrapper.get('[aria-label="课程评价维度汇总"]');
+    for (const dimension of summary.findAll("details.review-summary__group")) {
+      await dimension.get("summary").trigger("click");
+    }
+    const items = summary.findAll("li");
+    expect(items.map((item) => item.text()).join(" ")).toContain(
+      "只能确认课程",
     );
-    expect(items[1].classes()).toContain("review-limited");
-    expect(items[2].text()).toContain("依据有限：来源未经核验");
-    expect(items[2].classes()).toContain("review-limited");
     expect(wrapper.text()).toContain("证据之间有分歧");
   });
 
@@ -216,8 +399,9 @@ describe("teacher comparison page", () => {
     await search(wrapper);
     await toggle(wrapper, "张伟");
 
-    const courseOnlyItem = wrapper.findAll("ol li")[1];
-    expect(courseOnlyItem.text()).toContain("年份未知");
+    expect(wrapper.get('[aria-label="课程评价维度汇总"]').text()).toContain(
+      "年份未知",
+    );
   });
 
   it("marks synthetic sources prominently and never presents them as real reviews", async () => {
@@ -229,7 +413,9 @@ describe("teacher comparison page", () => {
       "本列表含合成样例，仅用于演示流程，不是真实学生的评价",
     );
     expect(wrapper.find(".notice--demo").exists()).toBe(true);
-    expect(wrapper.findAll("ol li")[0].text()).toContain("合成样例");
+    expect(wrapper.get('[aria-label="课程评价维度汇总"]').text()).toContain(
+      matched.excerpt,
+    );
   });
 
   it("renders no star, score or rating anywhere on the page", async () => {
@@ -265,6 +451,9 @@ describe("teacher comparison page", () => {
     await pick(wrapper, "张伟", "必须保留");
     await pick(wrapper, "王芳", "优先考虑");
     expect(
+      optionItem(wrapper, "王芳").find(".teacher-option__cancel").exists(),
+    ).toBe(true);
+    expect(
       wrapper
         .get('button[aria-label="张伟（合成） 必须保留"]')
         .attributes("aria-pressed"),
@@ -293,13 +482,10 @@ describe("teacher comparison page", () => {
         .attributes("aria-pressed"),
     ).toBe("true");
 
-    const summary = wrapper
-      .get(".teacher-picks dl")
-      .text()
-      .replace(/\s+/g, " ");
+    const summary = wrapper.get(".teacher-picks").text().replace(/\s+/g, " ");
     expect(summary).toContain("CS103 · 张伟（合成）");
     expect(summary).toContain("CS103 · 王芳（合成）");
-    expect(summary).toContain("这一项留空了");
+    expect(summary.match(/CS103 · 王芳（合成）/g)).toHaveLength(1);
 
     // 再点同一档位即取消，另一个选择不受影响。
     await pick(wrapper, "王芳", "必须保留");
@@ -326,7 +512,7 @@ describe("teacher comparison page", () => {
         .get('button[aria-label="张伟（合成） 优先考虑"]')
         .attributes("aria-pressed"),
     ).toBe("true");
-    expect(wrapper.get(".teacher-picks dl").text()).toContain(
+    expect(wrapper.get(".teacher-picks").text()).toContain(
       "CS103 · 张伟（合成）",
     );
   });
@@ -366,25 +552,27 @@ describe("teacher comparison page", () => {
     wrapper.unmount();
   });
 
-  it("explains a course with no teacher options as normal, not as an error", async () => {
-    listOptions.mockResolvedValueOnce({ items: [], status: "OK" });
+  it("explains when the course search finds nothing", async () => {
+    listCourses.mockResolvedValueOnce({ items: [], nextCursor: null });
     const wrapper = mountPage();
-    await search(wrapper, "CS999");
+    await flushPromises();
+    await wrapper.get("#teacher-search-input").setValue("zzz");
+    await wrapper.get("form.teacher-search").trigger("submit");
+    await flushPromises();
 
-    expect(wrapper.text()).toContain("没有可比较的教师资料");
-    expect(wrapper.text()).toContain("这是正常说明，不是错误");
+    expect(wrapper.text()).toContain("没有找到与 zzz 匹配的课程和教师关联");
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
     expect(wrapper.find("li.teacher-option").exists()).toBe(false);
   });
 
-  it("says an UNKNOWN teacher list cannot be confirmed instead of saying there are none", async () => {
-    listOptions.mockResolvedValueOnce({ items: [], status: "UNKNOWN" });
+  it("asks for a search term before searching", async () => {
     const wrapper = mountPage();
-    await search(wrapper, "CS999");
+    await flushPromises();
+    await wrapper.get("form.teacher-search").trigger("submit");
+    await flushPromises();
 
-    expect(wrapper.text()).toContain("教师资料无法确认");
-    expect(wrapper.text()).not.toContain("没有可比较的教师资料");
-    expect(wrapper.text()).not.toContain("这是正常说明");
+    expect(wrapper.text()).toContain("请输入课程号、课程名或教师姓名");
+    expect(listOptions).not.toHaveBeenCalled();
     expect(wrapper.find("li.teacher-option").exists()).toBe(false);
   });
 
@@ -410,7 +598,9 @@ describe("teacher comparison page", () => {
     expect(wrapper.text()).toContain("没有找到评价");
     expect(wrapper.text()).not.toContain("评价良好");
     expect(wrapper.text()).not.toContain("好评");
-    expect(wrapper.findAll("ol li")).toHaveLength(0);
+    expect(wrapper.find('[aria-label="课程评价维度汇总"]').exists()).toBe(
+      false,
+    );
   });
 
   it("says an UNKNOWN review list cannot be confirmed instead of saying none were found", async () => {
@@ -434,7 +624,9 @@ describe("teacher comparison page", () => {
     await search(wrapper);
     await toggle(wrapper, "张伟");
 
-    expect(wrapper.findAll("ol li")).toHaveLength(2);
+    expect(wrapper.get('[aria-label="课程评价维度汇总"]').text()).toContain(
+      matched.excerpt,
+    );
     expect(wrapper.text()).toContain("下面的评价资料无法确认");
     expect(wrapper.text()).not.toContain("没有找到评价");
   });
@@ -452,7 +644,8 @@ describe("teacher comparison page", () => {
 
     await wrapper.get('[role="alert"] button').trigger("click");
     await flushPromises();
-    expect(listOptions).toHaveBeenCalledTimes(2);
+    expect(listOptions).toHaveBeenCalledTimes(4);
+    await search(wrapper);
     expect(wrapper.text()).toContain("张伟（合成）");
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
   });
@@ -470,7 +663,9 @@ describe("teacher comparison page", () => {
     expect(wrapper.text()).not.toContain("没有找到评价");
     await wrapper.get('[role="alert"] button').trigger("click");
     await flushPromises();
-    expect(wrapper.findAll("ol li")).toHaveLength(3);
+    expect(wrapper.get('[aria-label="课程评价维度汇总"]').text()).toContain(
+      matched.excerpt,
+    );
   });
 
   it("renders review excerpts as text, never as HTML", async () => {

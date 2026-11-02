@@ -84,6 +84,15 @@ SPECS: tuple[Spec, ...] = (
     Spec("CP_CORS_ORIGINS", "api", "http://127.0.0.1:5173", False, "只允许配置的 Web origin；禁通配"),
     Spec("CP_MODEL_BASE_URL", "api", "", False, "模型端点；留空 = 用受控 stub（C 的 W1 行为）"),
     Spec("CP_MODEL_API_KEY", "api", "", True, "模型密钥；留空表示不需要"),
+    # 配了地址和密钥却仍是占位符时，网关启动即 ModelConfigError（model_client.build_model_adapter）。
+    # 不登记这个键，写进 stack.env 也会被 resolve 忽略，于是服务起不来却看不出原因。
+    Spec(
+        "CP_MODEL_ID",
+        "api",
+        "DEPLOYMENT_MODEL_PLACEHOLDER",
+        False,
+        "模型名；配了地址和密钥就必须换掉占位符（例：deepseek-chat）",
+    ),
     Spec("CP_HEALTH_TIMEOUT_SECONDS", "common", "60", False, "就绪等待上限（秒）"),
     Spec("CP_HEALTH_POLL_SECONDS", "common", "2", False, "就绪轮询间隔（秒）"),
     Spec("CP_START_COMMAND_TIMEOUT_SECONDS", "common", "180", False, "启动命令的等待上限（秒）"),
@@ -210,6 +219,12 @@ def validate(values: dict[str, str]) -> list[tuple[str, str, str]]:
 
     if not (values.get("CP_MODEL_BASE_URL") or "").strip():
         problems.append(("warning", "CP_MODEL_BASE_URL", "留空 → 走受控 stub 模型；真实模型全链路属每周验收另跑"))
+    elif (values.get("CP_MODEL_API_KEY") or "").strip() and (values.get("CP_MODEL_ID") or "").strip() in (
+        "",
+        "DEPLOYMENT_MODEL_PLACEHOLDER",
+    ):
+        # 在配置校验这一步报出来，比让 api 服务启动失败、再去翻 runs/stack/api.log 快得多。
+        problems.append(("error", "CP_MODEL_ID", "已配置模型地址和密钥，但模型名仍是占位符（例：deepseek-chat）"))
     return problems
 
 

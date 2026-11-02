@@ -212,6 +212,88 @@ def test_replace_keeps_other_courses_and_passes_java_verdict_through() -> None:
     assert client.app.state.plan_store.plan_ids(session_id) == ["plan:old", data["planId"]]
 
 
+def test_remove_course_is_deterministic_and_revalidates_remaining_plan() -> None:
+    tools = ScriptedTools(verdict="UNKNOWN")
+    client = _app(tools)
+    session_id, token = _session(client)
+    _remember(client.app, session_id)
+    client.app.state.plan_store.remember(
+        session_id=session_id,
+        plan_id="plan:pinned",
+        curriculum_snapshot_id="curr:demo",
+        offering_snapshot_id="offer:demo",
+        academic_record_id="record:demo",
+        mode="REAL",
+        items=[
+            PlanItem(courseCode="CS101", teacherKey="teacher:old", classId="class:old"),
+            PlanItem(courseCode="MATH201", teacherKey="teacher:math", classId="class:math"),
+        ],
+        hard_constraints=[
+            _CONSTRAINT,
+            Constraint(
+                kind="PIN_COURSE",
+                courseCode="CS101",
+                teacherKey=None,
+                dayOfWeek=None,
+                section=None,
+                value=None,
+                sourceText="必修",
+            ),
+            Constraint(
+                kind="PIN_TEACHER_COURSE",
+                courseCode="CS101",
+                teacherKey="teacher:old",
+                dayOfWeek=None,
+                section=None,
+                value=None,
+                sourceText="指定教师",
+            ),
+        ],
+        verifier_result_id="verify:pinned",
+    )
+    response = client.post(
+        "/api/v1/session-plans/remove-course",
+        json={"previousPlanId": "plan:pinned", "courseCode": "CS101"},
+        headers=_headers(token, key="idem:remove-cs101"),
+    )
+    data = response.json()["data"]
+    assert response.status_code == 200
+    assert data["items"] == [
+        {"courseCode": "MATH201", "teacherKey": "teacher:math", "classId": "class:math"}
+    ]
+    assert data["hardConstraints"] == [_CONSTRAINT.model_dump(mode="json")]
+    assert data["verification"]["verdict"] == "UNKNOWN"
+    assert tools.calls == ["validatePlan"]
+    saved = client.app.state.plan_store.get(session_id, data["planId"])
+    assert saved is not None and [item.courseCode for item in saved.items] == ["MATH201"]
+
+
+def test_removing_last_course_saves_explicit_empty_plan_without_java_call() -> None:
+    tools = ScriptedTools()
+    client = _app(tools)
+    session_id, token = _session(client)
+    client.app.state.plan_store.remember(
+        session_id=session_id,
+        plan_id="plan:single",
+        curriculum_snapshot_id="curr:demo",
+        offering_snapshot_id="offer:demo",
+        academic_record_id="record:demo",
+        mode="REAL",
+        items=[PlanItem(courseCode="CS101", teacherKey="teacher:old", classId="class:old")],
+        hard_constraints=[_CONSTRAINT],
+        verifier_result_id="verify:single",
+    )
+    body = {"previousPlanId": "plan:single", "courseCode": "CS101"}
+    headers = _headers(token, key="idem:remove-last")
+    first = client.post("/api/v1/session-plans/remove-course", json=body, headers=headers)
+    second = client.post("/api/v1/session-plans/remove-course", json=body, headers=headers)
+    data = first.json()["data"]
+    assert first.status_code == 200
+    assert data["items"] == [] and data["empty"] is True and data["verification"] is None
+    assert second.json() == first.json()
+    assert tools.calls == []
+
+
 def test_unknown_verdict_is_not_rewritten() -> None:
     tools = ScriptedTools(verdict="UNKNOWN")
     client = _app(tools)
@@ -268,11 +350,18 @@ def test_foreign_plan_and_unknown_class_are_rejected() -> None:
         },
         headers=_headers(owner_token, key="idem:missing-class"),
     )
+    foreign_remove = client.post(
+        "/api/v1/session-plans/remove-course",
+        json={"previousPlanId": "plan:old", "courseCode": "CS101"},
+        headers=_headers(other_token, key="idem:foreign-remove"),
+    )
 
     assert foreign.status_code == 404
     assert foreign.json()["issues"][0]["message"] == "方案不在当前会话"
     assert rejected.status_code == 404
     assert rejected.json()["issues"][0]["field"] == "selectedClassId"
+    assert foreign_remove.status_code == 404
+    assert foreign_remove.json()["issues"][0]["message"] == "方案不在当前会话"
     assert "validatePlan" not in tools.calls
     assert client.app.state.plan_store.plan_ids(owner_id) == ["plan:old"]
 

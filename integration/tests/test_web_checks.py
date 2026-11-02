@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from check_web import blocked_rows
+from check_web import blocked_rows, start_controlled_stub
 from stack_checks import BLOCKED, FAIL, PASS, PLAN, StepResult, exit_code
 from web_checks import (
     HttpProbeDriver,
@@ -27,7 +27,7 @@ DOC = (
     '<!doctype html><html lang="zh-CN"><head><title>CoursePilot · 学期规划</title></head>'
     '<body><div id="app"></div><script type="module" src="/src/main.ts"></script></body></html>'
 )
-SHELL_TEXT = "CoursePilot 真实服务模式 你可以返回修改条件。课程规划不会替你登录教务系统或提交选课。"
+SHELL_TEXT = "CoursePilot 本地测试服务 你可以返回修改条件。CoursePilot · 下学期选课规划"
 
 
 class FakeDriver:
@@ -96,6 +96,12 @@ def test_shell_passes_with_shell_and_badge():
     assert check_shell(driver, URL).verdict == PASS
 
 
+def test_shell_footer_marker_matches_current_app_footer():
+    from web_checks import FOOTER_TEXT
+
+    assert FOOTER_TEXT == "CoursePilot · 下学期选课规划"
+
+
 def test_api_down_branch_is_blocked_while_python_is_up():
     driver = FakeDriver({URL: LoadedPage(URL, 200, text=SHELL_TEXT)})
     result = check_api_down(driver, URL, api_reachable=True)
@@ -137,9 +143,36 @@ def test_api_down_passes_with_retry_hint():
 
 def test_unknown_is_blocked_without_a_controlled_stub():
     driver = FakeDriver({URL: LoadedPage(URL, 200, text=SHELL_TEXT)})
-    result = check_unknown(driver, None)
+    result = check_unknown(driver, URL, None)
     assert result.verdict == BLOCKED
     assert "受控假响应" in result.detail
+
+
+def test_unknown_requires_a_driver_that_completes_the_full_flow():
+    from web_checks import check_unknown
+
+    driver = FakeDriver({URL: LoadedPage(URL, 200, text=SHELL_TEXT + "资料无法核验")})
+    result = check_unknown(driver, URL, "http://127.0.0.1:8099")
+    assert result.verdict == BLOCKED
+
+
+def test_unknown_checks_result_page_after_full_flow():
+    from web_checks import check_unknown
+
+    class FullFlowFakeDriver(FakeDriver):
+        def drive_unknown_flow(self, url, stub_url, *, screenshot=""):
+            self.flow = (url, stub_url)
+            return LoadedPage(
+                url + "/plan/result",
+                200,
+                html='<section aria-label="无法确认的项目"></section>',
+                text="这一步没能确认。以下内容目前无法确认，不能算通过。",
+            )
+
+    driver = FullFlowFakeDriver({})
+    result = check_unknown(driver, URL, "http://127.0.0.1:8099")
+    assert result.verdict == PASS
+    assert driver.flow == (URL, "http://127.0.0.1:8099")
 
 
 def test_narrow_fails_on_horizontal_overflow():
@@ -168,6 +201,23 @@ def test_stub_path_passes_when_the_question_card_renders():
     assert check_stub_path(driver, URL).verdict == PASS
 
 
+def test_stub_path_uses_current_dashboard_navigation_when_supported():
+    class GuideFakeDriver(FakeDriver):
+        def drive_stub_guide(self, url, stub_url, *, screenshot=""):
+            self.guide_call = (url, stub_url)
+            return LoadedPage(
+                url + "/plan/questions/goals",
+                200,
+                html='<section class="question-card"><h1 id="question-title">目标</h1></section>',
+                text=SHELL_TEXT,
+            )
+
+    driver = GuideFakeDriver({})
+    result = check_stub_path(driver, URL, "http://127.0.0.1:8099")
+    assert result.verdict == PASS
+    assert driver.guide_call == (URL, "http://127.0.0.1:8099")
+
+
 def test_stub_path_fails_on_the_missing_curriculum_block():
     html = '<html><body><section aria-labelledby="missing-curriculum-title"><h2 id="missing-curriculum-title">没有培养方案</h2></section></body></html>'
     driver = FakeDriver({URL: LoadedPage(URL, 200, html=html, text=SHELL_TEXT)})
@@ -185,6 +235,23 @@ def test_run_web_checks_marks_stub_path_blocked_without_the_flag(monkeypatch):
     stub_row = next(r for r in rows if r.step == "web_stub_path")
     assert stub_row.verdict == BLOCKED
     assert "--with-stub" in stub_row.detail
+
+
+def test_start_controlled_stub_returns_the_actual_isolated_url(monkeypatch):
+    import stub_upstream
+
+    class StubServer:
+        def serve_forever(self):
+            return None
+
+    server = StubServer()
+    monkeypatch.setattr(stub_upstream, "serve", lambda **kwargs: (server, "http://127.0.0.1:58123", object()))
+    ready, url, result_server = start_controlled_stub(
+        type("Args", (), {"with_stub": True, "plan": False, "api_url": None})(), {}
+    )
+    assert ready is True
+    assert url == "http://127.0.0.1:58123"
+    assert result_server is server
 
 
 def test_reconcile_downgrades_api_down_when_the_page_cannot_reach_a_working_upstream():

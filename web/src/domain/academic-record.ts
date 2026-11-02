@@ -70,6 +70,15 @@ export function describeCompleteness(
     : "未声明完整，无法判断的要求会显示为「无法确认」。";
 }
 
+/** Use the student-facing explanation already defined for common audit UNKNOWN codes. */
+export function explainAuditUnknown(code: string, fallback: string): string {
+  if (code === "TRANSCRIPT_COMPLETENESS_UNKNOWN")
+    return "已修课程可能还未填全，暂时无法确定剩余要求。";
+  if (code === "REQUIREMENT_SOURCE_REFS_MISSING")
+    return "部分培养要求缺少可核对的来源，暂时无法确定。";
+  return fallback;
+}
+
 /** 返回重复出现的课程编号，前端只提前拦这一类明显错误。 */
 export function duplicateCourseCodes(
   courses: readonly CompletedCourse[],

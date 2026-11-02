@@ -16,6 +16,7 @@ from agent_runtime.api.schemas import (
     Recommendation,
     Usage,
 )
+from agent_runtime.api.schemas.answer import CourseRationale, ExplorationDirection
 
 
 class AnswerCompiler:
@@ -67,6 +68,8 @@ class AnswerCompiler:
         explanation: str,
         review_note_ids: list[str],
         verdict: PlanValidation,
+        course_rationales: list[CourseRationale] | None = None,
+        exploration_directions: list[ExplorationDirection] | None = None,
     ) -> Recommendation:
         # ``verdict`` is passed through unchanged by design.
         return Recommendation(
@@ -75,6 +78,8 @@ class AnswerCompiler:
             explanation=explanation,
             reviewNoteIds=review_note_ids,
             verification=verdict,
+            courseRationales=course_rationales or [],
+            explorationDirections=exploration_directions or [],
         )
 
     def recommendations(

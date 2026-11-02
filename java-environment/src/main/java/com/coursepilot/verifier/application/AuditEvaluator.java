@@ -1,24 +1,34 @@
 package com.coursepilot.verifier.application;
 
 import com.coursepilot.verifier.domain.AuditOutcome;
-import com.coursepilot.verifier.persistence.entity.*;
-import com.coursepilot.verifier.persistence.repo.*;
+import com.coursepilot.verifier.persistence.entity.Requirement;
+import com.coursepilot.verifier.persistence.entity.Transcript;
+import com.coursepilot.verifier.persistence.repo.CourseRepository;
+import com.coursepilot.verifier.persistence.repo.RequirementRepository;
+import com.coursepilot.verifier.persistence.repo.TranscriptRepository;
+import com.coursepilot.verifier.web.dto.AuditDtos;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
+/**
+ * 契约外的 credit-gap 排查视图（GET /api/v1/verification/credit-gap）。
+ * 数据源与规则和 AuditResultAssembler 共用 AcademicLedger，这里只把结果压成
+ * PASS / FAIL / UNKNOWN 与中文原因。
+ */
 @Service
 public class AuditEvaluator {
 
     private final RequirementRepository requirementRepo;
-    private final AcademicRecordRepository recordRepo;
+    private final TranscriptRepository transcriptRepo;
     private final CourseRepository courseRepo;
 
     public AuditEvaluator(RequirementRepository requirementRepo,
-                          AcademicRecordRepository recordRepo,
+                          TranscriptRepository transcriptRepo,
                           CourseRepository courseRepo) {
         this.requirementRepo = requirementRepo;
-        this.recordRepo = recordRepo;
+        this.transcriptRepo = transcriptRepo;
         this.courseRepo = courseRepo;
     }
 
@@ -29,61 +39,28 @@ public class AuditEvaluator {
                 List.of("培养方案 " + planId + " 没有类别要求，无法核对"));
         }
 
-        List<AcademicRecord> records = recordRepo.findByStudentId(studentId);
-        // 重修去重：同一课程只取第一次通过的记录
-        Map<String, AcademicRecord> firstPassed = new LinkedHashMap<>();
-        records.stream()
-            .filter(AcademicRecord::isPassed)
-            .sorted(Comparator.comparingInt(AcademicRecord::getAttemptNo))
-            .forEach(r -> firstPassed.putIfAbsent(r.getCourseCode(), r));
+        Transcript transcript = transcriptRepo.findByStudentId(studentId).orElse(null);
+        AcademicLedger ledger = AcademicLedger.of(transcript, courseRepo::findById);
 
-        Map<String, Double> earned = new LinkedHashMap<>();
-        Set<String> unknownCategories = new HashSet<>();
-        List<String> unknownReasons = new ArrayList<>();
-
-        for (AcademicRecord record : firstPassed.values()) {
-            Course course = courseRepo.findById(record.getCourseCode()).orElse(null);
-            if (course == null) {
-                return new AuditOutcome(AuditOutcome.Status.UNKNOWN,
-                    List.of("课程 " + record.getCourseCode() + " 不在课程库中，无法归类"));
-            }
-            if (course.getCategory() == null || course.getCategory().isBlank()) {
-                return new AuditOutcome(AuditOutcome.Status.UNKNOWN,
-                    List.of("课程 " + course.getCourseCode() + " 类别为空"));
-            }
-
-            Double credits = record.getCreditsEarned() != null
-                ? record.getCreditsEarned() : course.getCredits();
-            if (credits == null) {
-                unknownCategories.add(course.getCategory());
-                unknownReasons.add("课程 " + course.getCourseCode() + " 学分未知");
-                continue;
-            }
-            earned.merge(course.getCategory(), credits, Double::sum);
-        }
-
-        boolean anyFail = false;
         List<String> failReasons = new ArrayList<>();
         boolean anyUnknown = false;
-
         for (Requirement req : requirements) {
-            if (unknownCategories.contains(req.getCategory())) {
-                anyUnknown = true;
-                continue;
-            }
-            double got = earned.getOrDefault(req.getCategory(), 0.0);
-            if (got < req.getRequiredCredits()) {
-                anyFail = true;
+            AuditDtos.State state = ledger.stateFor(req);
+            if (state == AuditDtos.State.UNSATISFIED) {
                 failReasons.add(req.getCategory() + " 还差 "
-                    + (req.getRequiredCredits() - got) + " 学分");
+                    + (req.getRequiredCredits() - ledger.earned(req.getCategory())) + " 学分");
+            } else if (state == AuditDtos.State.UNKNOWN) {
+                anyUnknown = true;
             }
         }
 
-        if (anyFail) {
+        if (!failReasons.isEmpty()) {
             return new AuditOutcome(AuditOutcome.Status.FAIL, failReasons);
         }
-        if (anyUnknown) {
-            return new AuditOutcome(AuditOutcome.Status.UNKNOWN, unknownReasons);
+        if (anyUnknown || !ledger.issues().isEmpty()) {
+            List<String> reasons = ledger.issues().stream().map(AuditDtos.Issue::message).toList();
+            return new AuditOutcome(AuditOutcome.Status.UNKNOWN,
+                reasons.isEmpty() ? List.of("部分类别无法确认") : reasons);
         }
         return new AuditOutcome(AuditOutcome.Status.PASS, List.of("所有类别学分已满足"));
     }

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0",
+  "curriculumSnapshotId": "curr:demo",
+  "academicRecordId": null,
+  "mode": "REAL",
+  "message": "请推荐适合人工智能方向的专业选修课。",
+  "history": [],
+  "interestText": "人工智能",
+  "selectedCourseCodes": [],
+  "preferredCourseCodes": []
+}

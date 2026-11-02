@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>导出学业进度</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; width: 340px; padding: 14px; color: #20352b; }
+      button { background: #266e50; color: white; border: 0; border-radius: 8px; padding: 9px 12px; cursor: pointer; }
+      button:disabled { background: #929e97; }
+      .school-link { display: inline-block; color: #266e50; margin: 0 0 12px; }
+      table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+      th, td { text-align: left; border-bottom: 1px solid #e5ece7; padding: 6px 2px; }
+      p { line-height: 1.5; }
+    </style>
+    <script defer src="popup.js"></script>
+  </head>
+  <body>
+    <h2>导出学业进度</h2>
+    <p>在上海大学“学生学业情况查询”页面点击读取，确认后下载学分汇总。</p>
+    <a class="school-link" href="https://jwxt.shu.edu.cn/jwglxt/xsxy/xsxyqk_cxXsxyqkIndex.html?echarts=1&amp;gnmkdm=N105515&amp;layout=default" target="_blank" rel="noopener noreferrer">打开学校学业情况页面 ↗</a>
+    <br />
+    <button id="read">读取当前页面</button>
+    <p id="message" role="status"></p>
+    <table id="summary" hidden>
+      <thead><tr><th>类别</th><th>要求</th><th>获得</th><th>未获得</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <button id="download" disabled>下载学分汇总 JSON</button>
+  </body>
+</html>

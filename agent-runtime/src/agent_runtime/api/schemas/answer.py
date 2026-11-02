@@ -40,12 +40,37 @@ class Usage(DomainModel):
     elapsedMs: Annotated[int, Field(ge=0)]
 
 
+class ReviewEvidenceRef(DomainModel):
+    reviewNoteId: Id
+    sourceRefId: Id
+
+
+class CourseRationale(DomainModel):
+    courseCode: Id
+    reason: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+    reviewNoteIds: list[Id] = Field(max_length=10)
+    courseSourceRefIds: list[Id] = Field(default_factory=list, max_length=20)
+    reviewBasisStatus: Literal["HAS_EVIDENCE", "NO_RECORDS", "NOT_QUERIED"] | None = None
+    rationaleSource: Literal["MODEL", "COURSE_FACTS"] | None = None
+    reviewEvidenceRefs: list[ReviewEvidenceRef] = Field(default_factory=list, max_length=10)
+
+
+class ExplorationDirection(DomainModel):
+    title: Annotated[str, StringConstraints(min_length=1, max_length=100)]
+    description: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+    steps: list[Annotated[str, StringConstraints(min_length=1, max_length=300)]] = Field(
+        min_length=1, max_length=5
+    )
+
+
 class Recommendation(DomainModel):
     planId: Id
     items: list[PlanItem] = Field(min_length=1, max_length=30)
     explanation: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
     reviewNoteIds: list[Id] = Field(max_length=20)
     verification: PlanValidation
+    courseRationales: list[CourseRationale] = Field(default_factory=list, max_length=30)
+    explorationDirections: list[ExplorationDirection] = Field(default_factory=list, max_length=3)
 
 
 class PlanningAnswer(DomainModel):

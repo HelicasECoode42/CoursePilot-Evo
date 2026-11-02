@@ -1,8 +1,9 @@
 name: integration-checks
 
 # D2（Issue #12 / D-F3）：组合启动与集成检查入口。
-# 挂法 B：只手动触发 + 每天定时，不进 PR 门禁。现在会红是因为 Java/MySQL 尚未落地，
-# 缺服务不该反过来挡住别人的 PR；等各模块到位后再提为必过。
+# 挂法 B：只手动触发 + 每天定时，不进 PR 门禁，免得一个模块的整栈问题挡住别人的 PR。
+# Java 核验服务（H2 文件库，8081）与 Python 网关、Vue 页面都已有实现；真实链路是否全通，以本作业的结果为准。
+# 任何必需服务缺失或步骤不是 PASS，本作业就失败，不把 SKIP 当通过。
 # 判定语义：任一必需服务缺失、步骤不是 PASS，job 就失败；不允许 SKIP 算通过。
 
 on:
@@ -51,6 +52,9 @@ jobs:
       CP_CORS_ORIGINS: http://127.0.0.1:5173
       CP_MODEL_BASE_URL: ""
       CP_MODEL_API_KEY: ""
+      CP_TEST_CURRICULUM_SNAPSHOT_ID: PLAN_CS_2025
+      CP_TEST_PINNED_COURSE_CODE: CS102
+      VITE_COURSEPILOT_MODE: simulation
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -88,34 +92,31 @@ jobs:
           python -m pip install playwright
           python -m playwright install --with-deps chromium
 
-      - name: 全链路检查（配置校验 → 组合启动 → 主链路 → 异常覆盖 → 浏览器）
+      - name: 受控模型回归（真实 Java/API + 隔离浏览器响应场景）
         id: stack
         continue-on-error: true
-        run: python integration/check_all.py --driver playwright
+        run: python integration/check_all.py --driver playwright --web-with-stub --controlled-model
 
-      - name: 浏览器检查（受控上游：页面能否进入引导第一问）
-        id: web-stub
-        continue-on-error: true
-        run: |
-          python integration/start_stack.py --only web --keep || true
-          code=0
-          python integration/check_web.py --driver playwright --with-stub || code=$?
-          python integration/start_stack.py --stop || true
-          exit $code
-
+      # 本仓库是公开仓库：Actions 工件对任何人可下载。所以这里只留排查必需的内容，
+      # 并排除会外泄本机信息的文件；保留期也收短。真实学生数据不得在 CI 里跑，
+      # CI 只用 SYNTHETIC 种子（AGENTS.md：REAL 不能用 synthetic，反之同样不许混）。
       - name: 证据留存（五段式失败块、服务日志与截图）
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: stack-evidence
-          path: runs/stack/
+          # pids.json 里是 runner 上的绝对路径与 argv，排查用不到，却会暴露目录结构。
+          path: |
+            runs/stack/
+            !runs/stack/pids.json
+          retention-days: 7
           if-no-files-found: warn
 
       - name: 门禁：任一检查未通过即失败
         if: always()
         run: |
           failed=""
-          for pair in "浏览器安装:${{ steps.browser.outcome }}" "全链路检查:${{ steps.stack.outcome }}" "受控上游浏览器:${{ steps.web-stub.outcome }}"; do
+          for pair in "浏览器安装:${{ steps.browser.outcome }}" "全链路检查:${{ steps.stack.outcome }}"; do
             name="${pair%%:*}"
             outcome="${pair#*:}"
             if [ "$outcome" != "success" ]; then
@@ -130,9 +131,7 @@ jobs:
           fi
           echo "全链路检查通过。"
 
-      - name: 收尾：兜底停止可能残留的服务（check_all 正常跑完会自己 --stop）
+      - name: 收尾：兜底停止可能残留的服务
         if: always()
         run: |
-          python integration/start_stack.py --stop || true
-          pkill -f "uvicorn agent_runtime" || true
-          pkill -f "vite" || true
+          python integration/start_stack.py --stop

@@ -1,9 +1,13 @@
 import type {
+  AdviceChatAnswer,
+  AdviceChatRequest,
   AcademicRecord,
   AcademicRecordInput,
   AcademicRecordList,
   AuditResult,
+  CareerDirection,
   Constraint,
+  Course,
   CourseOffering,
   PlanItem,
   PlanningAnswer,
@@ -12,13 +16,22 @@ import type {
   ReviewNote,
   RunReport,
   SessionPlanReplaceInput,
+  SessionPlanEditInput,
+  SessionPlanEditResult,
   SessionPlanReplacement,
+  SnapshotSummary,
   TeacherCourseOption,
 } from "../contracts";
+import type {
+  SchoolProgressImportRequest,
+  SchoolProgressImportResult,
+} from "../domain/school-progress";
 import {
   ApiFailure,
   type CoursePilotApiClient,
   type CurriculumResult,
+  type OfferingSnapshotResult,
+  type CourseSearch,
   type ReviewNoteSearch,
   type SessionOfferingSearch,
   type SessionView,
@@ -32,6 +45,22 @@ const DEMO_SESSION: SessionView = {
 const DEMO_SESSION_TOKEN = "fixture-token-0123456789abcdef0123456789abcdef";
 const DEMO_RECORD_ID = "fixture-academic-record-e1";
 const DEMO_CURRICULUM_ID = "fixture-curriculum-computer-science";
+const DEMO_COURSES: Course[] = [
+  {
+    courseCode: "CS102",
+    name: "程序设计基础（演示）",
+    credits: null,
+    category: "演示课程",
+    sourceRefIds: ["source:fixture-course-cs102"],
+  },
+  {
+    courseCode: "CS103",
+    name: "数据结构与算法（演示）",
+    credits: null,
+    category: "演示课程",
+    sourceRefIds: ["source:fixture-course-cs103"],
+  },
+];
 
 const DEMO_CURRICULA: CurriculumResult = {
   items: [
@@ -86,6 +115,7 @@ const DEMO_AUDIT: AuditResult = {
   requirements: [
     {
       requirementId: "req:major-core",
+      category: "必修",
       courseCodes: ["CS101"],
       requiredCredits: 4,
       earnedCredits: 4,
@@ -95,6 +125,7 @@ const DEMO_AUDIT: AuditResult = {
     },
     {
       requirementId: "req:math-core",
+      category: "通识",
       courseCodes: ["MATH201"],
       requiredCredits: 3,
       earnedCredits: 0,
@@ -104,6 +135,7 @@ const DEMO_AUDIT: AuditResult = {
     },
     {
       requirementId: "req:physics",
+      category: "专业选修",
       courseCodes: ["PHYS110"],
       requiredCredits: 3,
       earnedCredits: null,
@@ -134,6 +166,19 @@ const DEMO_AUDIT: AuditResult = {
  */
 export const FIXTURE_PREVIOUS_PLAN_ID = "fixture-plan-e4-v1";
 const FIXTURE_OFFERING_SNAPSHOT_ID = "fixture-offering-e4";
+
+/** 演示开课快照：SYNTHETIC，只在演示模式可用；与规划结果里写死的 FIXTURE_OFFERING_SNAPSHOT_ID 一致。 */
+const DEMO_OFFERING_SNAPSHOTS: SnapshotSummary[] = [
+  {
+    snapshotId: FIXTURE_OFFERING_SNAPSHOT_ID,
+    kind: "OFFERING",
+    state: "PUBLISHED",
+    sourceKind: "SYNTHETIC",
+    termId: "2025-FALL",
+    createdAt: "2026-10-01T00:00:00Z",
+    sourceValidation: "SYNTHETIC",
+  },
+];
 const WEEKS_1_TO_16 = Array.from({ length: 16 }, (_, index) => index + 1);
 
 /**
@@ -452,6 +497,38 @@ export class FixtureApiClient implements CoursePilotApiClient {
     return { items: [...DEMO_CURRICULA.items], unknownMessages: [] };
   }
 
+  async listOfferingSnapshots(
+    signal?: AbortSignal,
+  ): Promise<OfferingSnapshotResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    return { items: [...DEMO_OFFERING_SNAPSHOTS], unknownMessages: [] };
+  }
+
+  async listCourses(
+    curriculumSnapshotId: string,
+    cursor: string | null = null,
+    signal?: AbortSignal,
+    query: string | null = null,
+  ): Promise<CourseSearch> {
+    void cursor;
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    if (curriculumSnapshotId !== DEMO_CURRICULUM_ID) {
+      return { items: [], nextCursor: null };
+    }
+    const needle = query?.trim().toLowerCase() ?? "";
+    const items = DEMO_COURSES.filter(
+      (course) =>
+        needle === "" ||
+        course.courseCode.toLowerCase().includes(needle) ||
+        course.name.toLowerCase().includes(needle),
+    );
+    return { items: structuredClone(items), nextCursor: null };
+  }
+
   async listSessionRecords(signal?: AbortSignal): Promise<AcademicRecordList> {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (!this.sessionToken)
@@ -501,6 +578,58 @@ export class FixtureApiClient implements CoursePilotApiClient {
     if (!this.sessionToken)
       throw new Error("Fixture session has not been created");
     return structuredClone(DEMO_ANSWER);
+  }
+
+  async adviceChat(
+    body: AdviceChatRequest,
+    _idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<AdviceChatAnswer> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    const query = body.message.trim();
+    const courses = query
+      ? DEMO_COURSES.slice(0, 2).map((course) => ({
+          ...structuredClone(course),
+          reason: "（合成）可结合培养方案课程资料继续了解。",
+          reviewNoteIds: [],
+          reviews: [],
+          reviewStatus: "NOT_QUERIED" as const,
+        }))
+      : [];
+    return {
+      schemaVersion: "1.0",
+      reply:
+        "（合成演示）我可以根据培养方案中的课程资料讨论方向。当前演示不会调用真实模型。",
+      question: null,
+      courses,
+      suggestions: courses[0]
+        ? [
+            {
+              suggestionId: `fixture-interest-${courses[0].courseCode}`,
+              kind: "SELECT_COURSE",
+              label: `把 ${courses[0].name} 加入待选课程`,
+              value: courses[0].courseCode,
+            },
+          ]
+        : [],
+      schoolProgress: null,
+      unknowns: [
+        {
+          code: "FIXTURE_ADVICE_CHAT",
+          message: "演示对话使用合成内容，不代表真实服务回答。",
+          field: null,
+          retryable: false,
+        },
+      ],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 0,
+        elapsedMs: 0,
+      },
+    };
   }
 
   async searchSessionOfferings(
@@ -567,10 +696,80 @@ export class FixtureApiClient implements CoursePilotApiClient {
     };
   }
 
+  async removeSessionPlanCourse(
+    body: SessionPlanEditInput,
+    _idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    const items = FIXTURE_PLAN_BASE_ITEMS.filter(
+      (item) => item.courseCode !== body.courseCode,
+    ).map((item) => ({ ...item }));
+    const hardConstraints = FIXTURE_HARD_CONSTRAINTS.filter(
+      (constraint) =>
+        !(
+          (constraint.kind === "PIN_COURSE" ||
+            constraint.kind === "PIN_TEACHER_COURSE") &&
+          constraint.courseCode === body.courseCode
+        ),
+    ).map((constraint) => ({ ...constraint }));
+    const remainingOffering =
+      items.length > 0
+        ? FIXTURE_OFFERINGS.get(items[0].courseCode)?.[0]
+        : undefined;
+    return {
+      previousPlanId: body.previousPlanId,
+      planId: `${body.previousPlanId}-without-${body.courseCode}`,
+      items,
+      hardConstraints,
+      empty: items.length === 0,
+      verification:
+        items.length === 0 || !remainingOffering
+          ? null
+          : fixtureVerification(remainingOffering, "VALID"),
+    };
+  }
+
+  async saveSchoolProgress(
+    _body: SchoolProgressImportRequest,
+    _idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    throw new ApiFailure(
+      "fixture 模式不支持导入学业进度",
+      "http",
+      501,
+      "NOT_IMPLEMENTED",
+    );
+  }
+
+  async importSchoolProgress(
+    body: SchoolProgressImportRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult> {
+    return this.saveSchoolProgress(body, idempotencyKey, signal);
+  }
+
+  async getSchoolProgress(
+    signal?: AbortSignal,
+  ): Promise<SchoolProgressImportResult | null> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    return null;
+  }
+
   async listTeacherCourseOptions(
     _curriculumSnapshotId: string,
     courseCode: string | null,
     signal?: AbortSignal,
+    query?: string | null,
   ): Promise<TeacherCourseOptionSearch> {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (!this.sessionToken)
@@ -579,7 +778,12 @@ export class FixtureApiClient implements CoursePilotApiClient {
     return {
       items: structuredClone(
         FIXTURE_TEACHER_OPTIONS.filter(
-          (option) => courseCode === null || option.courseCode === courseCode,
+          (option) =>
+            (courseCode === null || option.courseCode === courseCode) &&
+            (!query?.trim() ||
+              option.teacherDisplayName
+                .toLowerCase()
+                .includes(query.trim().toLowerCase())),
         ),
       ),
       status: "OK",
@@ -607,6 +811,24 @@ export class FixtureApiClient implements CoursePilotApiClient {
       items: structuredClone(matches.slice(0, 5)),
       status: "OK",
     };
+  }
+
+  /** 演示模式下的职业方向：虚构内容，description 自带标记，页面照原样显示。 */
+  async listCareerDirections(signal?: AbortSignal): Promise<CareerDirection[]> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    return [
+      {
+        directionId: "DIR_DEMO_BACKEND",
+        subjectTags: ["计算机", "后端开发"],
+        title: "后端与业务系统开发",
+        description:
+          "【演示数据】偏向服务端开发，需要扎实的编程和数据结构基础。",
+        courseCodes: ["CS101", "CS102"],
+        sourceRefIds: ["fixture:career:demo"],
+      },
+    ];
   }
 
   async getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport> {

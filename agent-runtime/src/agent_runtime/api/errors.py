@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from agent_runtime.adapters.model_client import (
     ModelInvalidOutput,
+    ModelOutputTruncated,
     ModelTimeout,
     ModelUpstreamError,
 )
@@ -72,6 +73,24 @@ def _transient(status_code: int) -> bool:
     return status_code in (429, 503, 504)
 
 
+# Java 的业务拒绝：请求本身合规，是被指到的对象或状态不满足规则。这些不是契约不一致，
+# 原样透给调用方才有用——学生选了不存在的培养方案，该看到「没这个培养方案」，
+# 不是「网关坏了」。对照 java-environment/.../web/ApiExceptionHandler.java 的分支：
+#   422 SNAPSHOT_NOT_FOUND                （:88-89）
+#   409 CONFLICT                          （:81-82）
+#   409 SNAPSHOT_COURSE_FACTS_UNKNOWN     （:102-103）
+#   409 SNAPSHOT_MISMATCH                 （:109-110）
+# 这两个状态码在 planning.openapi.json 的每个相关端点都已声明。
+# Java 的 400（INVALID_INPUT / INVALID_QUERY / MISSING_PARAMETER / MALFORMED_JSON 等）
+# 不在此列：那表示本服务把请求拼错了，确实是违约，仍然判 502。
+_JAVA_BUSINESS_REJECTIONS: dict[tuple[int, str], tuple[int, str]] = {
+    (422, "SNAPSHOT_NOT_FOUND"): (422, "INVALID_INPUT"),
+    (409, "CONFLICT"): (409, "CONFLICT"),
+    (409, "SNAPSHOT_COURSE_FACTS_UNKNOWN"): (409, "CONFLICT"),
+    (409, "SNAPSHOT_MISMATCH"): (409, "CONFLICT"),
+}
+
+
 def _rejected_response(exc: ToolRejected) -> tuple[int, str, Issue]:
     """Decide what the browser sees when Java answered with an error envelope.
 
@@ -112,6 +131,12 @@ def _rejected_response(exc: ToolRejected) -> tuple[int, str, Issue]:
             retryable=_transient(429),
         )
         return 429, "ERROR", issue
+    mapped = _JAVA_BUSINESS_REJECTIONS.get((exc.status_code, exc.issue_code))
+    if mapped is not None:
+        status_code, envelope_status = mapped
+        # 保留 Java 的原始 code：前端要据此区分「快照不存在」和「记录版本不一致」。
+        issue = Issue(code=exc.issue_code, message=_bounded(str(exc)), field=None, retryable=False)
+        return status_code, envelope_status, issue
     issue = Issue(
         code="TOOL_CONTRACT_VIOLATION",
         message=_bounded(
@@ -183,10 +208,30 @@ class InvalidInputError(ApiError):
         self.issue_code = code
 
 
+class InvalidQueryError(ApiError):
+    status_code = 400
+    status = "INVALID_INPUT"
+    issue_code = "INVALID_QUERY"
+
+
 class ForbiddenError(ApiError):
     status_code = 403
     status = "FORBIDDEN"
     issue_code = "FORBIDDEN"
+
+
+class RateLimitedError(ApiError):
+    """建会话超出配额。429 在 planning.openapi.json 的 /sessions 已声明。
+
+    retryable=True：等窗口过去就能再试，和「配置错了」那类不可重试的失败不同。
+    """
+
+    status_code = 429
+    status = "ERROR"
+    issue_code = "RATE_LIMITED"
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=True)
 
 
 def _request_id(request: Request) -> str:
@@ -199,6 +244,21 @@ def _request_id(request: Request) -> str:
 def _json(request: Request, status_code: int, status: str, issues: list[Issue]) -> JSONResponse:
     body = envelope(_request_id(request), status, {}, issues=issues)
     return JSONResponse(status_code=status_code, content=body.model_dump(mode="json"))
+
+
+def payload_too_large_response(request: Request) -> JSONResponse:
+    """请求体超过 CP_MAX_BODY_BYTES。
+
+    HTTP 状态是 413，信封里的 code 复用既有的 INVALID_INPUT，不新造错误码
+    （Java 侧超大请求也是这样回的）。供纯 ASGI 中间件使用，那里拿不到异常处理器。
+    """
+    issue = Issue(
+        code="INVALID_INPUT",
+        message="请求体超过大小上限",
+        field=None,
+        retryable=False,
+    )
+    return _json(request, 413, "INVALID_INPUT", [issue])
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -237,13 +297,39 @@ def register_error_handlers(app: FastAPI) -> None:
         )
         return _json(request, 503, "ERROR", [issue])
 
+    @app.exception_handler(ModelOutputTruncated)
+    async def model_output_truncated(request: Request, exc: ModelOutputTruncated) -> JSONResponse:
+        # 输出被预算截断不是「模型输出非法」：JSON 不完整只是因为被切断了。
+        # 报成 MODEL_INVALID_OUTPUT 会让人去查提示词和 schema，而真正要改的是
+        # 输出预算（docs/04 第 3 节）或单次回复的长度。
+        # retryable=False：同样的预算和同样的提示词，重试还是会在同一处断掉。
+        issue = Issue(
+            code="MODEL_OUTPUT_TRUNCATED",
+            message=_bounded(str(exc)),
+            field=None,
+            retryable=False,
+        )
+        return _json(request, 422, "ERROR", [issue])
+
     @app.exception_handler(ModelInvalidOutput)
     async def model_invalid_output(request: Request, exc: ModelInvalidOutput) -> JSONResponse:
         # Bad model output is a deterministic defect in this request, not a transient fault.
+        diagnostics = exc.diagnostics
+        if str(diagnostics.get("stage", "")).startswith("advice_chat"):
+            message = {
+                "COURSE_REFERENCE_MISMATCH": "课程引用不匹配",
+                "REVIEW_REFERENCE_MISMATCH": "课程评价引用不匹配",
+                "SUGGESTION_REFERENCE_MISMATCH": "课程建议引用不匹配",
+            }.get(str(diagnostics.get("reason_code")), "回答结构错误")
+            field = diagnostics.get("field_path")
+            safe_field = field if isinstance(field, str) else None
+        else:
+            message = _bounded(str(exc))
+            safe_field = None
         issue = Issue(
             code="MODEL_INVALID_OUTPUT",
-            message=_bounded(str(exc)),
-            field=None,
+            message=_bounded(message),
+            field=_bounded_field(safe_field),
             retryable=False,
         )
         return _json(request, 422, "ERROR", [issue])

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from agent_runtime.adapters.model_client import (
     ModelInvalidOutput,
+    ModelOutputTruncated,
     ModelTimeout,
     ModelUpstreamError,
 )
@@ -159,3 +160,22 @@ def test_long_field_is_bounded_so_the_handler_does_not_500() -> None:
     field = _issue(response)["field"]
     assert len(field) <= 200
     assert field.endswith("……[已截断]")
+
+
+def test_truncated_output_has_its_own_issue_code() -> None:
+    """MODEL_OUTPUT_TRUNCATED 要和 MODEL_INVALID_OUTPUT 分开。
+
+    两者都是 422 且不可重试，但原因和修法完全不同：一个要改提示词或 schema，
+    一个要改输出预算或单次回复长度。code 一样的话，日志和前端都没法区分。
+    ModelOutputTruncated 是 ModelInvalidOutput 的子类，所以这里同时验证
+    处理器没有被父类的那个抢走。
+    """
+    response = _client(
+        ModelOutputTruncated("模型输出在 2000 token 处被输出预算截断（上限 2000）")
+    ).get("/boom")
+
+    assert response.status_code == 422
+    issue = _issue(response)
+    assert issue["code"] == "MODEL_OUTPUT_TRUNCATED"
+    assert issue["retryable"] is False
+    assert "输出预算截断" in issue["message"]

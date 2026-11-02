@@ -109,9 +109,19 @@ function schedulePreferences(preferSlots: readonly string[]): SoftPreferences {
   ];
 }
 
+/**
+ * 送进 promptText 的自由文本。
+ *
+ * 两段分开写，不混成一句：学生自己问的问题原样带过去，职业方向那栏仍然带
+ * 「职业方向补充：」前缀。合成一段的话，模型分不清哪句是问题、哪句是背景。
+ */
 function freeText(draft: PlanningDraft): string {
-  if (!draft.careerText.trim()) return "";
-  return `职业方向补充：${draft.careerText.trim()}`;
+  const parts: string[] = [];
+  const question = draft.questionText.trim();
+  if (question) parts.push(`学生的问题：${question}`);
+  const career = draft.careerText.trim();
+  if (career) parts.push(`职业方向补充：${career}`);
+  return parts.join("\n");
 }
 
 function cleanTags(draft: PlanningDraft): string[] {
@@ -127,6 +137,35 @@ function isPriorityOrderConfirmed(draft: PlanningDraft): boolean {
         draft.motives.includes(motive) &&
         draft.priorityOrder.indexOf(motive) === index,
     )
+  );
+}
+
+/** 培养文件可提供待核验的课程建议；实际班次仍要求来源已核验。 */
+export function isCurriculumUsableForMode(
+  curriculum: Pick<SnapshotSummary, "sourceKind" | "sourceValidation"> &
+    Partial<Pick<SnapshotSummary, "kind">>,
+  mode: PlanningMode,
+): boolean {
+  if (mode !== "REAL") {
+    return (
+      curriculum.sourceKind === "SYNTHETIC" ||
+      curriculum.sourceValidation === "SYNTHETIC" ||
+      (curriculum.kind === "CURRICULUM" &&
+        curriculum.sourceKind === "CURRICULUM_FILE" &&
+        curriculum.sourceValidation === "UNVERIFIED")
+    );
+  }
+  if (
+    curriculum.sourceKind === "SYNTHETIC" ||
+    curriculum.sourceValidation === "SYNTHETIC"
+  ) {
+    return false;
+  }
+  return (
+    curriculum.sourceValidation === "VERIFIED" ||
+    ((curriculum.kind ?? "CURRICULUM") === "CURRICULUM" &&
+      curriculum.sourceKind === "CURRICULUM_FILE" &&
+      curriculum.sourceValidation === "UNVERIFIED")
   );
 }
 
@@ -150,7 +189,16 @@ export function buildPlanningRequest(
       context.curriculumSourceValidation === "SYNTHETIC"
     ) {
       problems.push("真实培养方案");
-    } else if (context.curriculumSourceValidation !== "VERIFIED") {
+    } else if (
+      !isCurriculumUsableForMode(
+        {
+          kind: "CURRICULUM",
+          sourceKind: context.curriculumSourceKind!,
+          sourceValidation: context.curriculumSourceValidation!,
+        },
+        context.mode,
+      )
+    ) {
       problems.push("已核验培养方案");
     }
   }
@@ -159,11 +207,27 @@ export function buildPlanningRequest(
   if (!draft.mustReviewed || !draft.preferReviewed) problems.push("时间安排");
   if (!isPriorityOrderConfirmed(draft)) problems.push("已确认目标优先级");
 
-  const hardConstraints = scheduleConstraints(draft.mustSlots);
+  const hardConstraints: HardConstraints = [
+    ...scheduleConstraints(draft.mustSlots),
+    ...draft.selectedCourseCodes.map((courseCode) => ({
+      kind: "PIN_COURSE" as const,
+      courseCode,
+      teacherKey: null,
+      dayOfWeek: null,
+      section: null,
+      value: null,
+      sourceText: "学生选入规划的课程",
+    })),
+  ];
   const scheduleSoft = schedulePreferences(draft.preferSlots);
   const softPreferences = [
     ...scheduleSoft,
     ...collectClassSoftPreferences(draft.classPreferences),
+    ...draft.preferredCourseCodes.map((courseCode) => ({
+      dimension: "course.prefer",
+      value: courseCode,
+      sourceText: "学生优先考虑的课程",
+    })),
   ];
   // 课程+教师的选择来自 E3 的比较页。契约字段就是为这个留的，不要把它
   // 塞进 softPreferences 或自造 dimension 名。
@@ -181,7 +245,7 @@ export function buildPlanningRequest(
   }
   if (hardConstraints.length > MAX_INTENT_ITEMS) {
     hints.push(
-      `必须避开的时段太零散（归一后 ${hardConstraints.length} 条，上限 ${MAX_INTENT_ITEMS}）。请改用整行或整列选择，或减少格子。`,
+      `所选课程和必须避开的时段归一后 ${hardConstraints.length} 条，上限 ${MAX_INTENT_ITEMS}。请减少课程，或将时段改用整行或整列选择。`,
     );
   }
   if (softPreferences.length > MAX_INTENT_ITEMS) {
@@ -215,7 +279,7 @@ export function buildPlanningRequest(
       interestTags: cleanTags(draft),
       careerDirectionIds: [],
     },
-    previousPlanId: null,
+    previousPlanId: draft.previousPlanId,
   };
 
   if (!validateRequest?.(request)) {

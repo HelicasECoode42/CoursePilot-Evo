@@ -13,8 +13,8 @@ import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-final class XlsxInputGuard {
-  static final int MAX_BYTES = 10 * 1024 * 1024;
+public final class XlsxInputGuard {
+  public static final int MAX_BYTES = 10 * 1024 * 1024;
   private static final long MAX_UNCOMPRESSED_BYTES = 64L * 1024 * 1024;
 
   byte[] read(Path path) throws ImportRejectedException {
@@ -67,7 +67,7 @@ final class XlsxInputGuard {
     }
   }
 
-  static final class ImportRejectedException extends RuntimeException {
+  public static final class ImportRejectedException extends RuntimeException {
     private final ImportModels.IssueCode code;
 
     ImportRejectedException(ImportModels.IssueCode code) {
@@ -75,7 +75,7 @@ final class XlsxInputGuard {
       this.code = code;
     }
 
-    ImportModels.IssueCode code() {
+    public ImportModels.IssueCode code() {
       return code;
     }
   }

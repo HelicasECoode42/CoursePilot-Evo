@@ -13,7 +13,7 @@ class ClarificationPolicy:
         if "teacher_vs_schedule" in resolved.missing:
             return Question(
                 questionId="tradeoff:teacher-vs-schedule",
-                text="指定教师和必须避开的上课时间可能冲突。请先保证哪一项，另一项作为次要条件。",
+                text="请确定指定教师与必须避开的上课时间的考虑顺序；两项硬条件都会保留，若两者冲突，仍需调整后再提交。",
                 choices=[
                     Choice(value="KEEP_TEACHER", label="先保留指定教师"),
                     Choice(value="KEEP_SCHEDULE", label="先保证硬时间"),

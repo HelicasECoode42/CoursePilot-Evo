@@ -6,14 +6,16 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
+from agent_runtime.adapters.fake_tools import TypedFakeToolClient
 from agent_runtime.adapters.tool_client import (
     InvalidTool,
     ToolClient,
     ToolContractViolation,
+    ToolPage,
     ToolRejected,
     ToolUnavailable,
 )
-from agent_runtime.api.schemas import AuditRequest
+from agent_runtime.api.schemas import AuditRequest, SchoolProgressImport
 from agent_runtime.application.context import ExecutionContext
 
 
@@ -60,7 +62,7 @@ def test_get_list_parses_envelope_items() -> None:
                         {
                             "courseCode": "CS101",
                             "name": "程序设计",
-                            "credits": "4.00",
+                            "credits": 4.0,
                             "category": "必修",
                             "sourceRefIds": ["source:x"],
                         }
@@ -76,6 +78,43 @@ def test_get_list_parses_envelope_items() -> None:
         "listCourses", None, _context(), params={"curriculumSnapshotId": "curr:demo"}
     )
     assert courses[0].courseCode == "CS101"
+
+
+def test_get_list_page_preserves_next_cursor() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_envelope("OK", {"items": [], "nextCursor": "20"}),
+        )
+
+    page = _client(handler).call_page("listTeacherCourseOptions", None, _context())
+    assert isinstance(page, ToolPage)
+    assert page.items == []
+    assert page.next_cursor == "20"
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"items": []},
+        {"items": [], "nextCursor": 20},
+    ],
+    ids=["missing-cursor", "non-string-cursor"],
+)
+def test_get_list_page_rejects_invalid_cursor_shape(data: dict) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_envelope("OK", data))
+
+    with pytest.raises(ToolContractViolation, match="nextCursor"):
+        _client(handler).call_page("listTeacherCourseOptions", None, _context())
+
+
+@pytest.mark.parametrize("cursor", ["-1", "1x", "1234567890"])
+def test_typed_fake_tools_reject_invalid_cursor_like_java(cursor: str) -> None:
+    with pytest.raises(ToolRejected) as caught:
+        TypedFakeToolClient().call_page("listCourses", None, _context(), params={"cursor": cursor})
+    assert caught.value.status_code == 400
+    assert caught.value.issue_code == "INVALID_QUERY"
 
 
 def test_get_path_param_uses_camel_case() -> None:
@@ -145,6 +184,145 @@ def test_post_sends_dto_and_parses_audit() -> None:
     assert result.suggestedCourseCodes == ["CS101"]
 
 
+def test_school_progress_import_uses_put_and_parses_persisted_result() -> None:
+    request_body = SchoolProgressImport.model_validate(
+        {
+            "schemaVersion": "1.0",
+            "curriculumSnapshotId": "curr:demo",
+            "snapshot": {
+                "format": "coursepilot-shu-academic-progress",
+                "version": 1,
+                "capturedAt": "2026-10-29T00:00:00Z",
+                "source": "fictional fixture",
+                "nodes": [
+                    {
+                        "nodeId": "node:1",
+                        "parentId": None,
+                        "schoolNodeId": "98",
+                        "leaf": True,
+                        "name": "公共基础课",
+                        "requiredCredits": 4,
+                        "earnedCredits": 2,
+                        "remainingCredits": 2,
+                    }
+                ],
+                "courses": [
+                    {
+                        "nodeId": "node:1",
+                        "courseCode": "CP001",
+                        "name": "虚构课程",
+                        "credits": 2,
+                        "outcome": "UNKNOWN",
+                        "completedYear": None,
+                        "completedTerm": None,
+                        "grade": None,
+                        "makeup": None,
+                        "retake": None,
+                        "suggestedYear": None,
+                        "suggestedTerm": None,
+                    }
+                ],
+            },
+        }
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert request.headers["Idempotency-Key"] == "school-key-1"
+        assert request.url.path == "/api/v1/school-progress"
+        return httpx.Response(
+            200,
+            json=_envelope(
+                "OK",
+                {
+                    "receipt": {
+                        "schoolProgressId": "school:demo",
+                        "contentHash": "a" * 64,
+                        "importedAt": "2026-10-29T00:00:00Z",
+                        "reused": False,
+                    },
+                    "snapshot": request_body.model_dump(mode="json")["snapshot"],
+                    "academicRecord": {
+                        "academicRecordId": "record:demo",
+                        "revision": 1,
+                        "curriculumSnapshotId": "curr:demo",
+                        "completedCourses": [
+                            {
+                                "courseCode": "CP001",
+                                "earnedCredits": None,
+                                "outcome": "UNKNOWN",
+                                "completedTerm": None,
+                            }
+                        ],
+                        "transcriptComplete": False,
+                        "sourceKind": "USER_IMPORT",
+                        "createdAt": "2026-10-29T00:00:00Z",
+                    },
+                },
+            ),
+        )
+
+    result = _client(handler).call(
+        "importSchoolProgress", request_body, _context(), idempotency_key="school-key-1"
+    )
+    assert result.receipt.schoolProgressId == "school:demo"
+    assert result.snapshot.courses[0].outcome == "UNKNOWN"
+    assert result.academicRecord.sourceKind == "USER_IMPORT"
+
+
+def test_plan_tool_request_serializes_max_credits_as_json_number() -> None:
+    import json
+    from decimal import Decimal
+
+    from agent_runtime.api.schemas import PlanValidationRequest
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        credit_limit = body["hardConstraints"][0]["value"]
+        assert isinstance(credit_limit, (int, float)) and not isinstance(credit_limit, bool)
+        assert credit_limit == 12.5
+        return httpx.Response(
+            200,
+            json=_envelope(
+                "UNKNOWN",
+                {
+                    "verifierResultId": "vr:credits",
+                    "verdict": "UNKNOWN",
+                    "scope": "SIMULATION",
+                    "curriculumSnapshotId": "curr:demo",
+                    "offeringSnapshotId": "offer:demo",
+                    "recordRevision": 1,
+                    "violations": [],
+                    "unknownChecks": [],
+                    "performedChecks": [],
+                    "sourceRefIds": [],
+                },
+            ),
+        )
+
+    request = PlanValidationRequest(
+        schemaVersion="1.0",
+        curriculumSnapshotId="curr:demo",
+        offeringSnapshotId="offer:demo",
+        academicRecordId="subject:demo",
+        mode="SIMULATION",
+        items=[{"courseCode": "CS101", "teacherKey": None, "classId": None}],
+        hardConstraints=[
+            {
+                "kind": "MAX_CREDITS",
+                "courseCode": None,
+                "teacherKey": None,
+                "dayOfWeek": None,
+                "section": None,
+                "value": Decimal("12.50"),
+                "sourceText": "最多12.5学分",
+            }
+        ],
+    )
+    result = _client(handler).call("validatePlan", request, _context())
+    assert result.verdict == "UNKNOWN"
+
+
 def test_http_error_is_unavailable() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, json={"status": "ERROR"})
@@ -190,7 +368,7 @@ def test_contract_violation_is_not_reported_as_unavailable() -> None:
                         {
                             "courseCode": "CS101",
                             "name": "程序设计",
-                            "credits": "4.00",
+                            "credits": 4.0,
                             "category": "必修",
                         }
                     ]
@@ -329,3 +507,55 @@ def test_get_skips_retry_when_remaining_budget_is_too_small() -> None:
         _client(handler).call("listCourses", None, context)
     # Only ~50 ms of the 200 ms budget is left after the first attempt: no retry.
     assert calls == 1
+
+
+def test_java_business_rejections_are_not_reported_as_contract_violations() -> None:
+    """Java 的 422/409 业务拒绝必须原样透出，不能变成 502。
+
+    学生指了一个不存在的培养快照时，Java 返 422 SNAPSHOT_NOT_FOUND。原来任何非
+    401/403/404/429 的 4xx 都落到 TOOL_CONTRACT_VIOLATION 502，于是页面显示的是
+    「网关坏了」，而不是「没这个培养方案」。400 仍然算违约：那表示本服务把请求拼错了。
+    """
+    from agent_runtime.adapters.tool_client import ToolRejected
+    from agent_runtime.api.errors import _rejected_response
+
+    cases = {
+        (422, "SNAPSHOT_NOT_FOUND"): (422, "INVALID_INPUT", "SNAPSHOT_NOT_FOUND"),
+        (409, "SNAPSHOT_MISMATCH"): (409, "CONFLICT", "SNAPSHOT_MISMATCH"),
+        (409, "CONFLICT"): (409, "CONFLICT", "CONFLICT"),
+        (409, "SNAPSHOT_COURSE_FACTS_UNKNOWN"): (409, "CONFLICT", "SNAPSHOT_COURSE_FACTS_UNKNOWN"),
+    }
+    for (status, code), (want_status, want_envelope, want_code) in cases.items():
+        got_status, got_envelope, issue = _rejected_response(
+            ToolRejected("createAcademicRecord", status, code, "nope")
+        )
+        assert (got_status, got_envelope, issue.code) == (want_status, want_envelope, want_code)
+
+    # 400 是本服务拼错了请求，仍然是违约。
+    status, envelope_status, issue = _rejected_response(
+        ToolRejected("createAcademicRecord", 400, "INVALID_INPUT", "bad field")
+    )
+    assert (status, envelope_status, issue.code) == (502, "ERROR", "TOOL_CONTRACT_VIOLATION")
+
+
+def test_list_offering_snapshots_hits_offering_path_and_keeps_kind() -> None:
+    # 开课快照走自己的路径，且 kind 原样保留：不能被当成培养方案返回。
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        item = {
+            "snapshotId": "OFFER_2025_FALL",
+            "kind": "OFFERING",
+            "state": "PUBLISHED",
+            "sourceKind": "SYNTHETIC",
+            "termId": "2025-FALL",
+            "createdAt": "2025-08-15T00:00:00Z",
+            "sourceValidation": "SYNTHETIC",
+        }
+        return httpx.Response(200, json=_envelope("OK", {"items": [item]}))
+
+    items = _client(handler).call("listOfferingSnapshots", None, _context())
+    assert seen == ["/api/v1/offering-snapshots"]
+    assert [i.kind for i in items] == ["OFFERING"]
+    assert items[0].sourceValidation == "SYNTHETIC"

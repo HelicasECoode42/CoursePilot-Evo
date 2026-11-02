@@ -9,6 +9,7 @@ import {
 } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { api } from "../api";
+import DirectionSuggestions from "../components/DirectionSuggestions.vue";
 import type { Motive, SnapshotSummary } from "../contracts";
 import { CLASS_PREFERENCE_OPTIONS } from "../domain/class-preferences";
 import { MOTIVE_LABELS, MOTIVE_OPTIONS } from "../domain/goals";
@@ -43,7 +44,6 @@ const progressPercent = computed(() =>
   Math.round((stepNumber.value / store.questions.length) * 100),
 );
 const selectedGoals = computed(() => store.draft.motives);
-const interestText = computed(() => store.draft.interestTags.join("，"));
 const classPreferenceLabels = new Map(
   CLASS_PREFERENCE_OPTIONS.map((option) => [option.id, option.label]),
 );
@@ -64,15 +64,6 @@ watch(
   },
 );
 
-function setInterestText(value: string) {
-  const tags = value
-    .split(/[，,、\n]/)
-    .map((tag) => tag.trim().slice(0, 80))
-    .filter(Boolean)
-    .slice(0, 20);
-  store.updateDraft("interestTags", tags);
-}
-
 function toggleMotive(motive: Motive) {
   const next = selectedGoals.value.includes(motive)
     ? selectedGoals.value.filter((item) => item !== motive)
@@ -80,22 +71,43 @@ function toggleMotive(motive: Motive) {
   store.setMotives(next);
 }
 
+function addDirection(title: string) {
+  const current = store.draft.careerText;
+  const addition = `${current.length ? "；" : ""}想了解${title}`;
+  if (
+    current.includes(`想了解${title}`) ||
+    current.length + addition.length > 1000
+  )
+    return;
+  store.updateDraft("careerText", current + addition);
+}
+
 function advance() {
   validationMessage.value = "";
   const question = selectedQuestion.value;
   if (question === "goals" && store.draft.motives.length === 0) {
-    validationMessage.value = "请至少选择一个本学期的目标。";
+    validationMessage.value = "请至少选择一个下学期的目标。";
     return;
   }
   if (question === "curriculum" && !store.selectedCurriculumId) {
     validationMessage.value = "请选择一个培养方案后继续。";
     return;
   }
+  if (
+    question === "curriculum" &&
+    store.usableOfferingSnapshots.length > 1 &&
+    !store.selectedOfferingSnapshotId
+  ) {
+    validationMessage.value = "请选择一个开课快照（班次来源）后继续。";
+    return;
+  }
   if (question === "teacher") store.updateDraft("teacherHandoffAccepted", true);
   if (question === "preferences")
     store.updateDraft("classPreferencesReviewed", true);
-  if (question === "career") store.updateDraft("careerReviewed", true);
-  if (question === "interest") store.updateDraft("interestReviewed", true);
+  if (question === "interest") {
+    store.updateDraft("careerReviewed", true);
+    store.updateDraft("interestReviewed", true);
+  }
   if (question === "schedule") {
     store.updateDraft("mustReviewed", true);
     store.updateDraft("preferReviewed", true);
@@ -217,16 +229,35 @@ onBeforeUnmount(() => {
   globalThis.document.removeEventListener("pointercancel", endGesture);
 });
 
+function offeringOptionLabel(item: SnapshotSummary): string {
+  const term = item.termId ?? "学期未注明";
+  const source =
+    item.sourceValidation === "SYNTHETIC" ? "演示数据" : "班次快照";
+  return `${term} · ${source}`;
+}
+
 function curriculumOptionLabel(item: SnapshotSummary, index: number): string {
   const date = new Intl.DateTimeFormat("zh-CN", {
     dateStyle: "medium",
     timeZone: "Asia/Shanghai",
   }).format(new Date(item.createdAt));
-  const label =
-    item.sourceValidation === "SYNTHETIC"
+  const label = item.displayName
+    ? `${item.displayName}${item.sourceValidation === "SYNTHETIC" ? "（演示）" : ""}`
+    : item.sourceValidation === "SYNTHETIC"
       ? `演示培养方案 ${index + 1}`
       : `培养方案 ${index + 1}`;
   return `${label} · 资料记录于 ${date}`;
+}
+
+/**
+ * 画像里的课程只显示编号时，学生认不出是哪门。名字来自本会话里对话返回的课程
+ * 卡片；没有对应卡片时只能退回编号，不能编造名字。
+ */
+function courseLabel(code: string): string {
+  const named = store.adviceMessages
+    .flatMap((item) => item.answer?.courses ?? [])
+    .find((course) => course.courseCode === code);
+  return named ? `${named.name}（${code}）` : code;
 }
 
 function scheduleSummary(keys: readonly string[]): string {
@@ -257,13 +288,20 @@ async function openRecords() {
     class="start-card"
     aria-labelledby="start-title"
   >
-    <p class="eyebrow">本学期课程规划</p>
+    <p class="eyebrow">下学期选课规划</p>
     <h1 id="start-title" ref="heading" tabindex="-1">先整理你的选课目标</h1>
     <p class="lead">
       我们会逐步提问，每个问题都可以留空跳过。你可以返回修改，尚未确认的内容不会交给后续规划。
     </p>
     <p v-if="api.mode === 'fixture'" class="notice notice--demo" role="note">
       当前是演示模式：页面使用虚构的示例资料，不会连接真实服务或生成真实课程推荐。
+    </p>
+    <p
+      v-else-if="api.mode === 'simulation'"
+      class="notice notice--demo"
+      role="note"
+    >
+      当前连接本地测试服务。培养资料来源以所选方案为准，模拟班次不代表下学期开课情况。
     </p>
     <p v-else class="notice" role="note">
       当前是服务连接模式。会话只保存在本次页面内存中；刷新页面后需要重新开始。
@@ -320,7 +358,12 @@ async function openRecords() {
     </button>
   </section>
 
-  <section v-else class="question-card" aria-labelledby="question-title">
+  <section
+    v-else
+    class="question-card"
+    :data-question="selectedQuestion"
+    aria-labelledby="question-title"
+  >
     <div class="progress-row">
       <span>第 {{ stepNumber }} 步，共 {{ store.questions.length }} 步</span>
       <div
@@ -364,12 +407,43 @@ async function openRecords() {
       >
         这份资料的来源尚未核验，页面不会把它当作已验证的真实课程事实。
       </p>
+      <template v-if="store.usableOfferingSnapshots.length > 1">
+        <label class="field-label" for="offering-select"
+          >开课快照（班次来源）</label
+        >
+        <select
+          id="offering-select"
+          :value="store.selectedOfferingSnapshotId ?? ''"
+          class="select-control"
+          @change="
+            store.chooseOfferingSnapshot(
+              ($event.target as HTMLSelectElement).value,
+            )
+          "
+        >
+          <option disabled value="">请选择</option>
+          <option
+            v-for="item in store.usableOfferingSnapshots"
+            :key="item.snapshotId"
+            :value="item.snapshotId"
+          >
+            {{ offeringOptionLabel(item) }}
+          </option>
+        </select>
+      </template>
+      <p
+        v-else-if="store.usableOfferingSnapshots.length === 0"
+        class="notice notice--warning"
+        role="status"
+      >
+        当前没有可用于本模式的开课快照，课表会留空，不会替你编排班次。
+      </p>
     </template>
 
     <template v-else-if="selectedQuestion === 'goals'">
       <p class="eyebrow">目标</p>
       <h1 id="question-title" ref="heading" tabindex="-1">
-        这学期你最在意什么？
+        下学期你最在意什么？
       </h1>
       <p class="lead">
         可以多选。目标表示你在意什么、先后怎样排；之后每个问题都会看到，留空即可跳过。
@@ -428,40 +502,19 @@ async function openRecords() {
     </template>
 
     <template v-else-if="selectedQuestion === 'interest'">
-      <p class="eyebrow">兴趣方向</p>
+      <p class="eyebrow">兴趣与发展方向</p>
       <h1 id="question-title" ref="heading" tabindex="-1">
-        你想多接触哪些内容？
+        你想了解什么，或者未来想做什么？
       </h1>
-      <p class="lead">写几个关键词即可；暂时没有想法也可以继续。</p>
-      <label class="field-label" for="interest-tags">感兴趣的主题</label>
-      <textarea
-        id="interest-tags"
-        class="text-control"
-        rows="3"
-        maxlength="500"
-        :value="interestText"
-        placeholder="例如：数据可视化、人工智能、硬件"
-        @input="setInterestText(($event.target as HTMLTextAreaElement).value)"
-      ></textarea>
-      <p class="microcopy">多个主题可用逗号分隔。</p>
-    </template>
-
-    <template v-else-if="selectedQuestion === 'career'">
-      <p class="eyebrow">职业方向</p>
-      <h1 id="question-title" ref="heading" tabindex="-1">
-        你对哪些职业方向感兴趣？
-      </h1>
-      <p class="lead">
-        这是可选补充。当前没有可用的来源目录时，我们不会编造职业选项。
-      </p>
-      <label class="field-label" for="career-notes">你想了解的方向</label>
+      <p class="lead">可以写兴趣、职业或科研方向；没有明确想法也可以留空。</p>
+      <label class="field-label" for="career-notes">兴趣与方向</label>
       <textarea
         id="career-notes"
         class="text-control"
         rows="3"
         maxlength="1000"
         :value="store.draft.careerText"
-        placeholder="可以写一个方向，也可以暂时留空"
+        placeholder="例如：想了解人工智能研究，也考虑软件开发；暂时没有方向也可以留空"
         @input="
           store.updateDraft(
             'careerText',
@@ -469,6 +522,10 @@ async function openRecords() {
           )
         "
       ></textarea>
+      <DirectionSuggestions
+        :selected-text="store.draft.careerText"
+        @choose="addDirection"
+      />
     </template>
 
     <template v-else-if="selectedQuestion === 'teacher'">
@@ -476,16 +533,9 @@ async function openRecords() {
       <h1 id="question-title" ref="heading" tabindex="-1">
         你有希望保留的教师吗？
       </h1>
-      <p class="lead">
-        教师必须和具体课程一起选择。你可以先继续，也可以现在去比较页按课程查看教师和历史评价。
-      </p>
-      <div class="handoff-note" role="note">
-        <strong>这里不会替你指定教师</strong>
-        <span>
-          比较页按课程列出教师、可用班次和历史评价，并标明每条证据的来源与可信程度。
-          在那里标记的“必须保留”和“优先考虑”会跟着这次规划一起提交。
-        </span>
-        <RouterLink class="handoff-link" to="/plan/teachers">
+      <p class="lead">可选。搜索课程或教师，选择希望保留的组合。</p>
+      <div class="action-row">
+        <RouterLink class="button button--secondary" to="/plan/teachers">
           去比较课程与教师
         </RouterLink>
       </div>
@@ -558,7 +608,7 @@ async function openRecords() {
           </button>
         </template>
       </div>
-      <p class="microcopy">本学期上课时间待确认，暂时不能判断是否冲突。</p>
+      <p class="microcopy">下学期上课时间待确认，暂时不能判断是否冲突。</p>
     </template>
 
     <template v-else-if="selectedQuestion === 'priorities'">
@@ -621,19 +671,77 @@ async function openRecords() {
         class="notice notice--success"
         role="status"
       >
-        <strong>演示请求已整理完成。</strong>
-        <span
-          >其中包含虚构学业记录，只用于展示流程；本页没有调用课程推荐服务。</span
+        <strong>规划资料已整理完成。</strong>
+        <span v-if="api.mode === 'fixture'"
+          >当前使用虚构资料，结果为页面演示。</span
         >
+        <span v-else-if="api.mode === 'simulation'"
+          >当前使用本地测试服务，可以继续生成规划结果。</span
+        >
+        <span v-else>可以继续生成规划结果。</span>
       </div>
       <div v-else class="handoff-note">
         <strong>你的目标已整理好</strong>
         <span v-if="api.mode === 'fixture'">
           你正在使用虚构示例资料。本页只核对并整理演示请求，不会生成课程推荐。
         </span>
-        <span v-else>
-          还不能开始真实规划：目前没有读取到你的学业记录。我们不会猜测记录编号或把空记录当作完整资料。
+        <span v-else-if="api.mode === 'simulation'">
+          请先补充学业资料，再使用本地服务生成规划结果。
         </span>
+        <span v-else-if="store.selectedRecord"
+          >资料已保存，可以核对后继续规划。</span
+        >
+        <span v-else>导入学校学业情况，读取已修课程和学分进度。</span>
+      </div>
+      <div class="materials-grid" aria-label="规划所用资料">
+        <section class="material-card">
+          <h2>培养方案</h2>
+          <p>
+            {{ store.selectedCurriculum?.displayName || "尚未命名的培养方案" }}
+          </p>
+          <p class="microcopy">课程目录与毕业要求</p>
+          <label v-if="store.curricula.length > 1" class="material-choice">
+            更换培养方案
+            <select
+              :value="store.selectedCurriculumId ?? ''"
+              @change="
+                store.chooseCurriculum(
+                  ($event.target as HTMLSelectElement).value,
+                )
+              "
+            >
+              <option
+                v-for="(item, index) in store.curricula"
+                :key="item.snapshotId"
+                :value="item.snapshotId"
+              >
+                {{ curriculumOptionLabel(item, index) }}
+              </option>
+            </select>
+          </label>
+        </section>
+        <section class="material-card">
+          <h2>我的学业进度</h2>
+          <p>
+            {{
+              store.selectedRecord
+                ? "已有学业记录，可查看或更新"
+                : "导入已修课程与学分缺口"
+            }}
+          </p>
+          <RouterLink
+            class="button button--primary"
+            to="/records?import=school"
+          >
+            {{ store.selectedRecord ? "更新学业进度" : "导入我的学业进度" }}
+          </RouterLink>
+          <RouterLink
+            v-if="store.selectedRecord"
+            class="material-link"
+            to="/records"
+            >查看已导入记录</RouterLink
+          >
+        </section>
       </div>
       <p
         v-if="store.handoffMissing.length > 0"
@@ -655,7 +763,7 @@ async function openRecords() {
       </div>
       <dl class="summary-list">
         <div>
-          <dt>本学期目标</dt>
+          <dt>下学期目标</dt>
           <dd>
             <ol class="summary-priorities">
               <li v-for="motive in store.draft.priorityOrder" :key="motive">
@@ -685,24 +793,72 @@ async function openRecords() {
           </dd>
         </div>
         <div>
-          <dt>兴趣主题</dt>
+          <dt>兴趣与发展方向</dt>
           <dd>
             {{
-              store.draft.interestTags.length > 0
-                ? store.draft.interestTags.join("、")
-                : "这一项留空了"
+              [
+                store.draft.interestTags.join("、"),
+                store.draft.careerText.trim(),
+              ]
+                .filter(Boolean)
+                .join("；") || "这一项留空了"
             }}
           </dd>
         </div>
         <div>
-          <dt>职业补充</dt>
-          <dd>
-            {{ store.draft.careerText.trim() || "这一项留空了" }}
+          <dt>教师偏好</dt>
+          <dd v-if="store.draft.teacherPicks.length === 0">
+            尚未选择具体课程与教师
+          </dd>
+          <dd v-else>
+            <ul class="summary-list">
+              <li
+                v-for="pick in store.draft.teacherPicks"
+                :key="`${pick.courseCode}:${pick.teacherKey}`"
+              >
+                {{ pick.courseCode }} ·
+                {{
+                  store.teacherPickDisplayNames[
+                    `${pick.courseCode}::${pick.teacherKey}`
+                  ] || "已选教师"
+                }}
+                ·
+                {{ pick.mode === "MUST" ? "必须保留" : "优先考虑" }}
+              </li>
+            </ul>
           </dd>
         </div>
         <div>
-          <dt>教师偏好</dt>
-          <dd>尚未选择具体课程与教师</dd>
+          <dt>已选课程</dt>
+          <dd v-if="store.draft.selectedCourseCodes.length === 0">
+            这一项留空了
+          </dd>
+          <dd v-else>
+            <ul class="summary-list">
+              <li
+                v-for="code in store.draft.selectedCourseCodes"
+                :key="`selected:${code}`"
+              >
+                {{ courseLabel(code) }} · 已选入，方案中必须保留
+              </li>
+            </ul>
+          </dd>
+        </div>
+        <div>
+          <dt>优先考虑的课程</dt>
+          <dd v-if="store.draft.preferredCourseCodes.length === 0">
+            这一项留空了
+          </dd>
+          <dd v-else>
+            <ul class="summary-list">
+              <li
+                v-for="code in store.draft.preferredCourseCodes"
+                :key="`preferred:${code}`"
+              >
+                {{ courseLabel(code) }} · 尽量优先
+              </li>
+            </ul>
+          </dd>
         </div>
         <div>
           <dt>培养方案</dt>
@@ -717,10 +873,12 @@ async function openRecords() {
                 store.selectedCurriculum?.sourceValidation === 'UNVERIFIED'
               "
             >
-              已选方案，来源待核验
+              {{ store.selectedCurriculum.displayName || "已选培养方案" }} ·
+              来源待核验
             </template>
             <template v-else-if="store.selectedCurriculum">
-              已选方案，来源已核验
+              {{ store.selectedCurriculum.displayName || "已选培养方案" }} ·
+              来源已核验
             </template>
             <template v-else>尚未选择</template>
           </dd>
@@ -729,9 +887,15 @@ async function openRecords() {
           <dt>学业记录</dt>
           <dd>
             {{
-              api.mode === "fixture"
-                ? "虚构演示记录，不含真实修读情况"
-                : "尚未读取，真实规划暂不能继续"
+              store.selectedRecord
+                ? store.selectedRecord.sourceKind === "SYNTHETIC"
+                  ? "已选择虚构学业记录"
+                  : "已选择学业记录"
+                : api.mode === "fixture"
+                  ? "虚构演示记录，不含真实修读情况"
+                  : api.mode === "simulation"
+                    ? "尚未读取，请补充虚构记录"
+                    : "尚未读取，真实规划暂不能继续"
             }}
           </dd>
         </div>
@@ -739,43 +903,46 @@ async function openRecords() {
       <details v-if="api.mode === 'http'" class="record-help">
         <summary>为什么还缺学业记录？</summary>
         <p>
-          当前接口只能在已有记录编号时读取记录，没有“查找本次会话记录”的入口；本页也没有安全的导入与核对流程。需由学业资料功能补齐课程、成绩和培养方案核对后，才能继续真实规划。
+          可以在学业资料页面查看本次会话的记录，并在缺少记录时补充课程信息。
         </p>
       </details>
-      <details v-else class="record-help">
+      <details
+        v-else-if="store.selectedCurriculum?.sourceKind === 'SYNTHETIC'"
+        class="record-help"
+      >
         <summary>演示记录包含什么？</summary>
-        <p>
-          这份记录和培养方案均为虚构样例，只用于检查页面能否整理请求，不表示你的已修课程、成绩或学分缺口。
-        </p>
+        <p>演示资料为虚构内容，不代表你的已修课程或学分缺口。</p>
       </details>
-      <button
-        class="button button--secondary"
-        type="button"
-        @click="prepareRequest"
-      >
-        检查下一步资料
-      </button>
-      <button
-        v-if="store.handoffMissing.includes('学业记录')"
-        class="button button--primary"
-        type="button"
-        @click="openRecords"
-      >
-        去补充学业资料
-      </button>
-      <button
-        v-if="store.planningHandoff"
-        class="button button--primary"
-        type="button"
-        :disabled="store.submitStatus === 'submitting'"
-        @click="submitRequest"
-      >
-        {{
-          store.submitStatus === "submitting"
-            ? "正在规划…"
-            : "提交规划并查看结果"
-        }}
-      </button>
+      <div class="action-row">
+        <button
+          class="button button--secondary"
+          type="button"
+          @click="prepareRequest"
+        >
+          检查下一步资料
+        </button>
+        <button
+          v-if="store.handoffMissing.includes('学业记录')"
+          class="button button--primary"
+          type="button"
+          @click="openRecords"
+        >
+          去补充学业资料
+        </button>
+        <button
+          v-if="store.planningHandoff"
+          class="button button--primary"
+          type="button"
+          :disabled="store.submitStatus === 'submitting'"
+          @click="submitRequest"
+        >
+          {{
+            store.submitStatus === "submitting"
+              ? "正在规划…"
+              : "提交规划并查看结果"
+          }}
+        </button>
+      </div>
     </template>
 
     <p v-if="validationMessage" class="inline-error" role="alert">
@@ -817,3 +984,53 @@ async function openRecords() {
     </nav>
   </section>
 </template>
+
+<style scoped>
+.materials-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-block: 1.25rem;
+}
+.material-card {
+  border: 1px solid var(--border, #dbe5df);
+  border-radius: 14px;
+  padding: 1.1rem;
+  background: #f1f7f3;
+  min-width: 0;
+}
+.material-card h2 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+.material-card p {
+  margin: 0.4rem 0;
+}
+.material-card .button {
+  margin-top: 0.65rem;
+}
+.material-choice {
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+.material-choice select {
+  width: 100%;
+  padding: 0.5rem;
+}
+.material-link {
+  display: inline-block;
+  margin-top: 0.65rem;
+}
+[data-question="ready"] h1 {
+  font-size: clamp(1.7rem, 4vw, 2.6rem);
+}
+[data-question="ready"] .summary-list > div {
+  padding-block: 0.75rem;
+}
+@media (max-width: 640px) {
+  .materials-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

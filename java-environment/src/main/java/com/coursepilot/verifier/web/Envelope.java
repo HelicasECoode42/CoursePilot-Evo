@@ -36,6 +36,11 @@ public class Envelope<T> {
         return e;
     }
 
+    public Envelope<T> withProvenance(List<SourceRef> refs) {
+        this.provenance = List.copyOf(refs);
+        return this;
+    }
+
     public static <T> Envelope<T> error(String requestId, String code,
                                         String message, String field, boolean retryable) {
         Envelope<T> e = new Envelope<>();
@@ -57,6 +62,7 @@ public class Envelope<T> {
 
     public record Issue(String code, String message, String field, boolean retryable) {}
 
-    /** contracts: SourceRef。当前还没有来源登记，先留空数组而不是省略字段。 */
-    public record SourceRef(String kind, String refId, String snapshotId) {}
+    /** contracts: SourceRef. */
+    public record SourceRef(String kind, String refId, String snapshotId,
+                            String locator, java.time.Instant capturedAt) {}
 }

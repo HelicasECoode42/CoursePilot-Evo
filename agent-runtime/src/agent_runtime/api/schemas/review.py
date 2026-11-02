@@ -35,6 +35,9 @@ class ReviewNote(DomainModel):
     dimensions: list[ReviewDimension] = Field(max_length=8)
     matchStatus: MatchStatus
     sourceRefId: Id
+    teacherDisplayName: Annotated[str, StringConstraints(min_length=1, max_length=120)] | None = (
+        None
+    )
 
 
 class ReviewImport(DomainModel):

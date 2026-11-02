@@ -63,6 +63,46 @@ def test_candidate_guard_rejects_unknown_ids() -> None:
     ]
 
 
+def test_candidate_guard_rejects_teacher_or_class_from_another_course() -> None:
+    facts = KnownFacts(
+        course_codes=frozenset({"CS101", "MATH201"}),
+        teacher_keys=frozenset({"t1", "t2"}),
+        class_ids=frozenset({"c1", "c2"}),
+        teacher_course_pairs=frozenset({("CS101", "t1"), ("MATH201", "t2")}),
+        course_class_pairs=frozenset({("CS101", "c1"), ("MATH201", "c2")}),
+        teacher_course_class_triples=frozenset({("CS101", "t1", "c1"), ("MATH201", "t2", "c2")}),
+    )
+    issues = CandidateGuard().check(
+        [PlanItem(courseCode="CS101", teacherKey="t2", classId="c2")], facts
+    )
+    assert {issue.code for issue in issues} == {
+        "TEACHER_COURSE_MISMATCH",
+        "CLASS_COURSE_MISMATCH",
+        "OFFERING_BINDING_MISMATCH",
+    }
+
+
+def test_candidate_guard_requires_must_teacher_pair_to_be_kept() -> None:
+    facts = KnownFacts(
+        course_codes=frozenset({"CS101"}),
+        teacher_keys=frozenset({"t1"}),
+        teacher_course_pairs=frozenset({("CS101", "t1")}),
+    )
+    pins = [TeacherPreference(courseCode="CS101", teacherKey="t1", mode="MUST")]
+    guard = CandidateGuard()
+    for items in (
+        [PlanItem(courseCode="CS101", teacherKey=None, classId=None)],
+        [],
+    ):
+        assert [issue.code for issue in guard.check(items, facts, pins)] == [
+            "MUST_TEACHER_NOT_PRESERVED"
+        ]
+    assert (
+        guard.check([PlanItem(courseCode="CS101", teacherKey="t1", classId=None)], facts, pins)
+        == []
+    )
+
+
 def test_answer_compiler_preserves_verdict() -> None:
     verdict = PlanValidation(
         verifierResultId="verify:x",

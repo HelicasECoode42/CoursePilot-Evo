@@ -20,7 +20,6 @@ const curriculum: SnapshotSummary = {
 const fixedSequence = [
   "goals",
   "preferences",
-  "career",
   "interest",
   "teacher",
   "schedule",
@@ -30,7 +29,7 @@ const fixedSequence = [
 
 describe("guided question flow", () => {
   it("shows every student the same fixed questions in order", () => {
-    expect(questionSequence({ curricula: [curriculum] })).toEqual(
+    expect(questionSequence({ curricula: [curriculum], mode: "REAL" })).toEqual(
       fixedSequence,
     );
   });
@@ -43,11 +42,12 @@ describe("guided question flow", () => {
       draft,
       curricula: [curriculum],
       selectedCurriculumId: curriculum.snapshotId,
+      mode: "REAL" as const,
     };
 
     expect(firstIncompleteQuestion(context)).toBe("preferences");
     draft.classPreferencesReviewed = true;
-    expect(firstIncompleteQuestion(context)).toBe("career");
+    expect(firstIncompleteQuestion(context)).toBe("interest");
     draft.careerReviewed = true;
     expect(firstIncompleteQuestion(context)).toBe("interest");
     draft.interestReviewed = true;
@@ -64,14 +64,15 @@ describe("guided question flow", () => {
 
   it("requires a curriculum choice only when several published options exist", () => {
     const second = { ...curriculum, snapshotId: "curriculum-math-2026" };
-    expect(questionSequence({ curricula: [curriculum] })).not.toContain(
-      "curriculum",
-    );
+    expect(
+      questionSequence({ curricula: [curriculum], mode: "REAL" }),
+    ).not.toContain("curriculum");
     expect(
       firstIncompleteQuestion({
         draft: emptyPlanningDraft(),
         curricula: [curriculum, second],
         selectedCurriculumId: null,
+        mode: "REAL" as const,
       }),
     ).toBe("curriculum");
   });
@@ -84,6 +85,7 @@ describe("guided question flow", () => {
       draft,
       curricula: [curriculum],
       selectedCurriculumId: curriculum.snapshotId,
+      mode: "REAL" as const,
     };
     expect(resolveQuestion("ready", context)).toBe("preferences");
     expect(resolveQuestion("career", context)).toBe("preferences");
@@ -99,11 +101,12 @@ describe("guided question flow", () => {
       draft,
       curricula: [curriculum],
       selectedCurriculumId: curriculum.snapshotId,
+      mode: "REAL" as const,
     };
 
     expect(resolveQuestion("schedule", context)).toBe("preferences");
     draft.classPreferencesReviewed = true;
-    expect(resolveQuestion("schedule", context)).toBe("career");
+    expect(resolveQuestion("schedule", context)).toBe("interest");
     draft.careerReviewed = true;
     expect(resolveQuestion("schedule", context)).toBe("interest");
     draft.interestReviewed = true;
@@ -114,5 +117,55 @@ describe("guided question flow", () => {
     expect(resolveQuestion("ready", context)).toBe("priorities");
     draft.prioritiesConfirmed = true;
     expect(resolveQuestion("ready", context)).toBe("ready");
+  });
+});
+
+describe("培养方案选择步骤", () => {
+  const unverified: SnapshotSummary = {
+    ...curriculum,
+    snapshotId: "curriculum-browser-2025",
+    sourceKind: "BROWSER_SNAPSHOT",
+    sourceValidation: "UNVERIFIED",
+  };
+
+  it("恰好一个可用方案时不必多问", () => {
+    expect(
+      questionSequence({ curricula: [curriculum], mode: "REAL" }),
+    ).not.toContain("curriculum");
+  });
+
+  it("只列出一个但它不可用时，仍要让人看见方案列表", () => {
+    // 这是真实踩到的死胡同：REAL 模式下过滤后只剩一个 UNVERIFIED 快照，原来
+    // 「超过一个才问」的规则让它既不被展示也不能选，用户走完 8 步才被拦下。
+    expect(
+      questionSequence({ curricula: [unverified], mode: "REAL" }),
+    ).toContain("curriculum");
+  });
+
+  it("多个可用方案时要问", () => {
+    expect(
+      questionSequence({
+        curricula: [curriculum, { ...curriculum, snapshotId: "another" }],
+        mode: "REAL",
+      }),
+    ).toContain("curriculum");
+  });
+
+  it("一个方案都没有时不问这一步", () => {
+    expect(questionSequence({ curricula: [], mode: "REAL" })).not.toContain(
+      "curriculum",
+    );
+  });
+
+  it("未核验方案不能当成已选，流程停在这一步", () => {
+    const draft = emptyPlanningDraft();
+    expect(
+      firstIncompleteQuestion({
+        draft,
+        curricula: [unverified],
+        selectedCurriculumId: null,
+        mode: "REAL",
+      }),
+    ).toBe("curriculum");
   });
 });

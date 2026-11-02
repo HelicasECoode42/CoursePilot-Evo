@@ -1,41 +1,85 @@
 package com.coursepilot.verifier.web;
 
-import com.coursepilot.verifier.persistence.entity.*;
-import com.coursepilot.verifier.persistence.repo.*;
+import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
+import com.coursepilot.verifier.persistence.entity.CurriculumSnapshot;
+import com.coursepilot.verifier.persistence.repo.CourseOfferingRepository;
+import com.coursepilot.verifier.persistence.repo.CurriculumCourseRepository;
+import com.coursepilot.verifier.persistence.repo.CurriculumSnapshotRepository;
+import com.coursepilot.verifier.persistence.repo.OffsetPageRequest;
 import com.coursepilot.verifier.web.dto.CatalogDtos;
-import com.coursepilot.verifier.web.dto.RecordDtos;
+import org.springframework.data.domain.Page;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/api/v1")
 public class QueryController {
 
-    private final CourseRepository courseRepo;
-    private final CourseOfferingRepository offeringRepo;
-    private final SubjectGuard subjects;
-    private final CatalogAssembler catalog;
+    private static final Pattern ID = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$");
+    private static final Pattern OFFSET_CURSOR = Pattern.compile("^[0-9]{1,9}$");
+    private static final int DEFAULT_LIMIT = 20;
+    private static final int MAX_LIMIT = 200;
 
-    public QueryController(CourseRepository courseRepo,
+    private final CurriculumSnapshotRepository snapshotRepo;
+    private final CurriculumCourseRepository curriculumCourseRepo;
+    private final CourseOfferingRepository offeringRepo;
+    private final CatalogAssembler catalog;
+    private final SubjectGuard subjects;
+
+    public QueryController(CurriculumSnapshotRepository snapshotRepo,
+                           CurriculumCourseRepository curriculumCourseRepo,
                            CourseOfferingRepository offeringRepo,
-                           SubjectGuard subjects,
-                           CatalogAssembler catalog) {
-        this.courseRepo = courseRepo;
+                           CatalogAssembler catalog,
+                           SubjectGuard subjects) {
+        this.snapshotRepo = snapshotRepo;
+        this.curriculumCourseRepo = curriculumCourseRepo;
         this.offeringRepo = offeringRepo;
-        this.subjects = subjects;
         this.catalog = catalog;
+        this.subjects = subjects;
     }
 
-    /** 契约 listCourses：data = { items: Course[], nextCursor }。分页未实现，nextCursor 固定为 null。 */
+    /** Courses are visible only through an explicit membership in a published curriculum snapshot. */
     @GetMapping("/courses")
     public Envelope<CatalogDtos.CourseList> courses(
         @RequestHeader(value = "X-Request-Id", required = false) String requestId,
-        @RequestParam(required = false) String category) {
-        List<Course> rows = (category == null || category.isBlank())
-            ? courseRepo.findAll() : courseRepo.findByCategory(category);
-        List<CatalogDtos.Course> items = rows.stream().map(catalog::toCourse).toList();
-        return Envelope.ok(requestId, new CatalogDtos.CourseList(items, null));
+        @RequestHeader(value = "X-Subject-Id", required = false) String subjectId,
+        @RequestParam String curriculumSnapshotId,
+        @RequestParam(required = false) String query,
+        @RequestParam(required = false) Integer limit,
+        @RequestParam(required = false) String cursor) {
+        subjects.require(subjectId);
+        requireId("curriculumSnapshotId", curriculumSnapshotId);
+        if (query != null && (query.isEmpty() || query.length() > 200)) {
+            throw new InvalidQuery("query", "query 长度须在 1 到 200 之间");
+        }
+        int size = limit == null ? DEFAULT_LIMIT : limit;
+        if (size < 1 || size > MAX_LIMIT) {
+            throw new InvalidQuery("limit", "limit 须在 1 到 " + MAX_LIMIT + " 之间");
+        }
+        int offset = offsetOf(cursor);
+        CurriculumSnapshot snapshot = snapshotRepo.findById(curriculumSnapshotId)
+            .orElseThrow(() -> new UnknownSnapshot(curriculumSnapshotId));
+        if (snapshot.getKind() != CurriculumSnapshot.Kind.CURRICULUM
+            || snapshot.getState() != CurriculumSnapshot.State.PUBLISHED) {
+            throw new UnknownSnapshot(curriculumSnapshotId);
+        }
+
+        Page<CurriculumCourse> page = curriculumCourseRepo.findCourses(
+            curriculumSnapshotId, query, new OffsetPageRequest(offset, size + 1, null));
+        List<CurriculumCourse> fetched = page.getContent();
+        boolean hasNext = fetched.size() > size;
+        List<CurriculumCourse> selected = fetched.stream().limit(size).toList();
+        selected.stream().filter(cc -> !hasCompleteFacts(cc, curriculumSnapshotId)).findFirst()
+            .ifPresent(cc -> { throw new UnknownCourseFacts(curriculumSnapshotId, cc.getCourse().getCourseCode()); });
+        List<CatalogDtos.Course> items = selected.stream().map(catalog::toCourse).toList();
+        String nextCursor = hasNext ? String.valueOf(offset + size) : null;
+        List<Envelope.SourceRef> provenance = selected.stream().map(CurriculumCourse::getSourceReference)
+            .map(source -> new Envelope.SourceRef(source.getKind(), source.getRefId(),
+                source.getSnapshotId(), source.getLocator(), source.getCapturedAt()))
+            .distinct().toList();
+        return Envelope.ok(requestId, new CatalogDtos.CourseList(items, nextCursor)).withProvenance(provenance);
     }
 
     /** 契约 listOfferings：data = { items: CourseOffering[] }。时间由 Java 重新解析 meetingTextRaw。 */
@@ -48,39 +92,27 @@ public class QueryController {
         return Envelope.ok(requestId, new CatalogDtos.OfferingList(items));
     }
 
-    /**
-     * 契约端点 listAcademicRecords。
-     *
-     * 范围由 X-Subject-Id 决定，**不接受** studentId 查询参数——让调用方自报
-     * 要查谁的成绩单，等于没有对象级授权（b-verifier.md B-F6）。
-     * 契约里这个端点也只声明了 X-Request-Id 与 X-Subject-Id 两个参数。
-     *
-     * 当前实体缺记录级的 curriculumSnapshotId / createdAt / revision，凑不出
-     * 一份合契约的 AcademicRecord，所以返回空 items 并以 UNKNOWN 说明缺口，
-     * 而不是拿默认值填出一份看起来成立的记录。契约对 items 为空的定义是
-     * 「该主体尚无学业记录」，所以这里必须用 UNKNOWN 封套把两种情况区分开。
-     */
-    @GetMapping("/academic-records")
-    public Envelope<RecordDtos.RecordList> records(
-        @RequestHeader(value = "X-Request-Id", required = false) String requestId,
-        @RequestHeader(value = "X-Subject-Id", required = false) String subjectId) {
-        subjects.require(subjectId);
-        return Envelope.unknown(requestId, new RecordDtos.RecordList(List.of()),
-            "学业记录聚合实体尚未建模（缺 curriculumSnapshotId / createdAt / revision），"
-                + "无法返回合契约的记录；空 items 不代表该主体没有已修课程");
+    private static void requireId(String field, String value) {
+        if (value == null || !ID.matcher(value).matches()) {
+            throw new InvalidQuery(field, field + " 缺失或格式不合法");
+        }
     }
 
-    /**
-     * 契约端点 getAcademicRecord。先判归属再谈返回：不属于当前主体的记录
-     * 一律按不可见处理（404），不回 403，避免暴露「这个 ID 存在」。
-     */
-    @GetMapping("/academic-records/{recordId}")
-    public Envelope<RecordDtos.AcademicRecord> record(
-        @RequestHeader(value = "X-Request-Id", required = false) String requestId,
-        @RequestHeader(value = "X-Subject-Id", required = false) String subjectId,
-        @PathVariable String recordId) {
-        subjects.requireOwnRecord(subjectId, recordId);
-        return Envelope.unknown(requestId, null,
-            "学业记录聚合实体尚未建模，无法返回合契约的记录内容");
+    private static int offsetOf(String cursor) {
+        if (cursor == null) return 0;
+        if (!OFFSET_CURSOR.matcher(cursor).matches()) {
+            throw new InvalidQuery("cursor", "cursor 格式不合法");
+        }
+        return Integer.parseInt(cursor);
+    }
+
+    private static boolean hasCompleteFacts(CurriculumCourse cc, String snapshotId) {
+        var source = cc.getSourceReference();
+        return cc.getName() != null && !cc.getName().isBlank()
+            && cc.getCategory() != null && !cc.getCategory().isBlank()
+            && source != null && source.getRefId() != null && !source.getRefId().isBlank()
+            && snapshotId.equals(source.getSnapshotId())
+            && source.getLocator() != null && !source.getLocator().isBlank()
+            && ("CURRICULUM".equals(source.getKind()) || "SYNTHETIC".equals(source.getKind()));
     }
 }

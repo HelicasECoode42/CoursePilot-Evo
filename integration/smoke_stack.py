@@ -24,7 +24,14 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_stack import Chain, classify_planning, readiness, step_sessions
+from check_stack import (
+    Chain,
+    classify_planning,
+    configure_controlled_model_request,
+    readiness,
+    step_record,
+    step_sessions,
+)
 from stack_checks import (
     BLOCKED,
     FAIL,
@@ -53,8 +60,8 @@ def case_java_unwired(chain: Chain) -> StepResult:
     example = load_contract_example("academic-record.json")
     body = {
         "schemaVersion": "1.0",
-        "curriculumSnapshotId": example["curriculumSnapshotId"],
-        "academicRecordId": example["academicRecordId"],
+        "curriculumSnapshotId": chain.curriculum_id,
+        "academicRecordId": chain.record_id or example["academicRecordId"],
     }
     if chain.java_ready:
         expect = "200 + Envelope(OK, AuditResult)（Java 已就绪，走正常分支）"
@@ -74,6 +81,10 @@ def case_no_time_claim(chain: Chain) -> StepResult:
     url = chain.api + "/api/v1/planning"
     headers = chain.headers(request_id, auth=True, idempotency=request_id)
     body = load_contract_example("planning-request.json")
+    body["curriculumSnapshotId"] = chain.curriculum_id
+    if chain.record_id:
+        body["academicRecordId"] = chain.record_id
+    configure_controlled_model_request(chain, body)
     body["offeringSnapshotId"] = None
     expect = "无班次快照：不得断言时间无冲突（给推荐时 verification.scope 不得是 REAL_TIMETABLE / SIMULATION）"
     response = chain.transport.request("POST", url, headers, body)
@@ -115,14 +126,16 @@ def case_bad_input(chain: Chain) -> StepResult:
     url = chain.api + "/api/v1/planning"
     headers = chain.headers(request_id, auth=True, idempotency=request_id)
     body = load_contract_example("invalid-block-day-with-section.json")
-    expect = "422 + Envelope(ERROR, issues 非空)：违反契约的请求必须被拒绝，不得 200"
+    expect = "422 + Envelope(INVALID_INPUT 或 ERROR, issues 非空)：违反契约的请求必须被拒绝，不得 200"
     response = chain.transport.request("POST", url, headers, body)
     result = evaluate(
         step,
         request_id,
         expect,
         response,
-        [Attempt("422 契约校验拒绝", 422, "ERROR")],
+        # domain.schema.json 的 Envelope.status 枚举里 INVALID_INPUT 是合法值，
+        # 422 用它比用笼统的 ERROR 更准；两者都接受，不把合规实现判成失败。
+        [Attempt("422 契约校验拒绝", 422, "INVALID_INPUT"), Attempt("422 契约校验拒绝", 422, "ERROR")],
         repro_curl("POST", url, headers, body),
     )
     if result.verdict == PASS and not response.issue_codes:
@@ -185,7 +198,9 @@ CASES = {
 }
 
 
-def run_smoke(plan_only: bool, transport: Any = None) -> tuple[list[StepResult], dict[str, str], str | None]:
+def run_smoke(
+    plan_only: bool, transport: Any = None, controlled_model: bool = False
+) -> tuple[list[StepResult], dict[str, str], str | None]:
     values, _sources, _file = resolve(None)
     problems = errors(validate(values))
     if problems:
@@ -208,7 +223,12 @@ def run_smoke(plan_only: bool, transport: Any = None) -> tuple[list[StepResult],
             for case in CASE_ORDER
         ]
         return planned, states, None
-    chain = Chain(values, transport or UrllibTransport(), states.get("java") == "READY")
+    chain = Chain(
+        values,
+        transport or UrllibTransport(),
+        states.get("java") == "READY",
+        controlled_model=controlled_model,
+    )
     session = step_sessions(chain)
     if session.verdict == FAIL:
         return (
@@ -226,6 +246,12 @@ def run_smoke(plan_only: bool, transport: Any = None) -> tuple[list[StepResult],
             states,
             None,
         )
+    # 两条用例要带本会话的 academicRecordId。契约样例里的 record:demo 不属于本会话，
+    # Java 的对象级授权会正确地返回 404 NOT_VISIBLE。记录写入失败时停止依赖该记录的用例。
+    if chain.java_ready:
+        record = step_record(chain)
+        if record.verdict != PASS or not chain.record_id:
+            return [record], states, None
     results = [CASES[case](chain) for case in CASE_ORDER]
     return results, states, None
 
@@ -234,9 +260,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="D2 异常与未知覆盖检查")
     ap.add_argument("--plan", action="store_true", help="只判定与打印计划，不连服务")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
+    ap.add_argument("--controlled-model", action="store_true", help="使用受控模型回归请求；不代表真实模型验收")
     args = ap.parse_args(argv)
 
-    results, states, blocked_reason = run_smoke(plan_only=args.plan)
+    results, states, blocked_reason = run_smoke(plan_only=args.plan, controlled_model=args.controlled_model)
     code = exit_code(results) if results else 1
 
     if args.json:
@@ -244,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 {
                     "mode": "plan" if args.plan else "run",
+                    "modelMode": "controlled" if args.controlled_model else "strict",
                     "services": states,
                     "blocked": blocked_reason,
                     "cases": [r.as_dict() for r in results],
@@ -257,6 +285,7 @@ def main(argv: list[str] | None = None) -> int:
         return code
 
     print("D2 异常与未知覆盖检查：" + ("计划模式（不连服务）" if args.plan else "真跑"))
+    print("模型口径：" + ("受控模型回归（不代表真实模型验收）" if args.controlled_model else "严格模式"))
     print("服务就绪：" + ("、".join(f"{k}={v}" for k, v in states.items()) or "未判定"))
     print()
     print(f"{'用例':<16} {'判定':<10} 期望摘要")

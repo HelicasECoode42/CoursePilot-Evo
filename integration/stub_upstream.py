@@ -38,7 +38,7 @@ from typing import Any
 from stack_config import ROOT
 
 RECORD_DIR = Path(ROOT) / "runs" / "stack" / "stub"
-SCENARIOS = ("degrade_unknown", "normal", "tool_unavailable")
+SCENARIOS = ("degrade_unknown", "normal", "planning_unknown", "tool_unavailable")
 DEFAULT_REQUEST_ID = "req-stub"
 SESSION_ID = "session-stub-1"
 CURRICULUM_ID = "cur-stub-2024-cs"
@@ -66,16 +66,16 @@ def _session() -> dict:
     return {"sessionId": SESSION_ID, "sessionToken": "stub-" + "token-" * 8, "expiresAt": FIXED_NOW}
 
 
-def _snapshot() -> dict:
+def _snapshot(source_validation: str = "VERIFIED", source_kind: str = "CURRICULUM_FILE") -> dict:
     """页面用 ajv 按 $defs/SnapshotSummary 校验；必须有一条非 SYNTHETIC 的已发布培养方案，页面才会进入引导。"""
     return {
         "snapshotId": CURRICULUM_ID,
         "kind": "CURRICULUM",
         "state": "PUBLISHED",
-        "sourceKind": "CURRICULUM_FILE",
+        "sourceKind": source_kind,
         "termId": None,
         "createdAt": FIXED_NOW,
-        "sourceValidation": "VERIFIED",
+        "sourceValidation": source_validation,
     }
 
 
@@ -145,9 +145,28 @@ def _routes(scenario: str, request_id: str, path: str, method: str) -> Route | N
     if path == "/api/v1/sessions" and method == "POST":
         return Route(HTTPStatus.CREATED, _envelope(request_id, "OK", _session()))
     if path == "/api/v1/curriculum-snapshots" and method == "GET":
-        return Route(HTTPStatus.OK, _envelope(request_id, "OK", {"items": [_snapshot()]}))
-    if path == "/api/v1/academic-records" and method == "GET":
+        if scenario in ("normal", "planning_unknown"):
+            snapshot = _snapshot("SYNTHETIC", "SYNTHETIC")
+        else:
+            snapshot = _snapshot()
+        return Route(HTTPStatus.OK, _envelope(request_id, "OK", {"items": [snapshot]}))
+    if path == "/api/v1/offering-snapshots" and method == "GET":
         return Route(HTTPStatus.OK, _envelope(request_id, "OK", {"items": []}))
+    if path == "/api/v1/academic-records" and method == "GET":
+        items = []
+        if scenario == "planning_unknown":
+            items = [
+                {
+                    "academicRecordId": RECORD_ID,
+                    "revision": 1,
+                    "curriculumSnapshotId": CURRICULUM_ID,
+                    "completedCourses": [],
+                    "transcriptComplete": False,
+                    "sourceKind": "SYNTHETIC",
+                    "createdAt": FIXED_NOW,
+                }
+            ]
+        return Route(HTTPStatus.OK, _envelope(request_id, "OK", {"items": items}))
     if path == "/api/v1/academic-records" and method == "POST":
         if unavailable:
             return Route(

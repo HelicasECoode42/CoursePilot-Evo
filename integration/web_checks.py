@@ -29,8 +29,8 @@ from stack_config import ROOT
 
 EVIDENCE_DIR = Path(ROOT) / "runs" / "stack" / "web"
 MOUNT_MARKERS = ('id="app"', "/src/main.ts")
-SHELL_TEXTS = ("CoursePilot", "真实服务模式", "演示模式 · 虚构内容")
-FOOTER_TEXT = "不会替你登录教务系统"
+SHELL_TEXTS = ("CoursePilot", "本机运行", "本地测试服务", "演示模式 · 虚构内容")
+FOOTER_TEXT = "CoursePilot · 下学期选课规划"
 RETRY_MARKERS = ("重试", "暂时无法", "请稍后重试")
 NARROW_OVERFLOW_TOLERANCE = 2
 
@@ -106,6 +106,35 @@ class PlaywrightDriver:
         self.resolved_channel = channel
         self._pw: Any = None
         self._browser: Any = None
+        self.api_mode = "real"
+        self.stub_url: str | None = None
+
+    def set_api_mode(self, mode: str, stub_url: str | None = None) -> None:
+        """为下一次页面加载设置 API 行为；受控场景通过浏览器路由隔离。"""
+        self.api_mode = mode
+        self.stub_url = stub_url
+
+    def _route_api(self, page: Any) -> None:
+        from urllib.parse import urlsplit
+
+        mode, stub_url = self.api_mode, self.stub_url
+
+        def route_request(route: Any) -> None:
+            if mode == "down":
+                route.abort()
+                return
+            if mode == "stub" and stub_url:
+                request = urlsplit(route.request.url)
+                target = stub_url.rstrip("/") + request.path
+                if request.query:
+                    target += "?" + request.query
+                response = route.fetch(url=target)
+                route.fulfill(response=response)
+                return
+            route.continue_()
+
+        if mode in ("down", "stub"):
+            page.route("**/api/v1/**", route_request)
 
     def _ensure_browser(self) -> Any:
         """复用同一个浏览器实例：每次检查都新起一个要 30 秒以上，七项就是四分钟。"""
@@ -139,6 +168,7 @@ class PlaywrightDriver:
         page_errors: list[str] = []
         browser = self._ensure_browser()
         page = browser.new_page()
+        self._route_api(page)
         page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
         page.on("pageerror", lambda exc: page_errors.append(str(exc)))
         try:
@@ -178,6 +208,128 @@ class PlaywrightDriver:
         finally:
             page.close()
 
+    def drive_unknown_flow(self, url: str, stub_url: str, *, screenshot: str = "") -> LoadedPage:
+        """从学业页进入完整引导、提交受控规划请求并检查结果页。"""
+        self.set_api_mode("stub", stub_url)
+        console_errors: list[str] = []
+        page_errors: list[str] = []
+        page = self._ensure_browser().new_page()
+        self._route_api(page)
+        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            dashboard_url = url.rstrip("/") + "/me"
+            page.goto(dashboard_url, wait_until="domcontentloaded", timeout=15000)
+            page.get_by_role("link", name="继续完整需求引导").click(timeout=10000)
+            page.wait_for_selector(".question-card[data-question]", timeout=10000)
+            for _ in range(10):
+                question = page.locator(".question-card").get_attribute("data-question")
+                if question == "goals":
+                    page.get_by_role("checkbox").first.check()
+                elif question == "priorities":
+                    page.get_by_role("checkbox", name="我已检查并确认这个优先顺序").check()
+                elif question == "ready":
+                    page.get_by_role("button", name="检查下一步资料").click()
+                    page.wait_for_timeout(300)
+                    if page.get_by_role("button", name="去补充学业资料").count():
+                        page.get_by_role("button", name="去补充学业资料").click()
+                        page.wait_for_selector("#records-title", timeout=10000)
+                        page.wait_for_timeout(500)
+                        page.get_by_role("button", name="返回资料确认").click()
+                        page.wait_for_selector('.question-card[data-question="ready"]', timeout=10000)
+                        page.get_by_role("button", name="检查下一步资料").click()
+                    page.get_by_role("button", name="提交规划并查看结果").click(timeout=10000)
+                    page.wait_for_url("**/plan/result", timeout=15000)
+                    page.wait_for_selector("#result-title", timeout=10000)
+                    html = page.content()
+                    text = page.inner_text("body")
+                    overflow = int(
+                        page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+                    )
+                    shot = ""
+                    if screenshot:
+                        Path(screenshot).parent.mkdir(parents=True, exist_ok=True)
+                        page.screenshot(path=screenshot, full_page=True)
+                        shot = screenshot
+                    return LoadedPage(
+                        page.url,
+                        200,
+                        html=html,
+                        text=text,
+                        console_errors=console_errors,
+                        page_errors=page_errors,
+                        overflow_px=overflow,
+                        screenshot=shot,
+                    )
+                page.get_by_role("button", name="继续").click(timeout=5000)
+                page.wait_for_timeout(100)
+            raise RuntimeError("引导步骤超过预期，未到达结果页")
+        except Exception as exc:  # noqa: BLE001
+            return LoadedPage(url, 0, console_errors=console_errors, page_errors=[f"{type(exc).__name__}: {exc}"])
+        finally:
+            page.close()
+
+    def click_start_planning(self, url: str, *, screenshot: str = "") -> LoadedPage:
+        """进入可见的目标引导路由并启动会话，用于触发 API 失败状态。"""
+        console_errors: list[str] = []
+        page_errors: list[str] = []
+        page = self._ensure_browser().new_page()
+        self._route_api(page)
+        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            page.goto(url.rstrip("/") + "/plan/questions/goals", wait_until="domcontentloaded", timeout=15000)
+            page.get_by_role("button", name="开始").click(timeout=5000)
+            page.wait_for_timeout(1000)
+            html = page.content()
+            text = page.inner_text("body")
+            shot = ""
+            if screenshot:
+                Path(screenshot).parent.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=screenshot, full_page=True)
+                shot = screenshot
+            return LoadedPage(
+                url, 200, html=html, text=text, console_errors=console_errors, page_errors=page_errors, screenshot=shot
+            )
+        except Exception as exc:  # noqa: BLE001
+            return LoadedPage(url, 0, console_errors=console_errors, page_errors=[f"{type(exc).__name__}: {exc}"])
+        finally:
+            page.close()
+
+    def drive_stub_guide(self, url: str, stub_url: str, *, screenshot: str = "") -> LoadedPage:
+        """沿页面当前入口进入完整引导首页，验证受控 API 下渲染问题卡。"""
+        self.set_api_mode("stub", stub_url)
+        console_errors: list[str] = []
+        page_errors: list[str] = []
+        page = self._ensure_browser().new_page()
+        self._route_api(page)
+        page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+        page.on("pageerror", lambda exc: page_errors.append(str(exc)))
+        try:
+            page.goto(url.rstrip("/") + "/me", wait_until="domcontentloaded", timeout=15000)
+            page.get_by_role("link", name="继续完整需求引导").click(timeout=10000)
+            page.wait_for_selector(".question-card[data-question]", timeout=10000)
+            html = page.content()
+            text = page.inner_text("body")
+            shot = ""
+            if screenshot:
+                Path(screenshot).parent.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=screenshot, full_page=True)
+                shot = screenshot
+            return LoadedPage(
+                page.url,
+                200,
+                html=html,
+                text=text,
+                console_errors=console_errors,
+                page_errors=page_errors,
+                screenshot=shot,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return LoadedPage(url, 0, console_errors=console_errors, page_errors=[f"{type(exc).__name__}: {exc}"])
+        finally:
+            page.close()
+
     def _launch(self, pw: Any) -> Any:
         candidates = [self.channel] if self.channel else ["", "msedge", "chrome"]
         last: Exception | None = None
@@ -195,6 +347,7 @@ class PlaywrightDriver:
         page_errors: list[str] = []
         browser = self._ensure_browser()
         page = browser.new_page(viewport={"width": viewport[0], "height": viewport[1]} if viewport else None)
+        self._route_api(page)
         page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
         page.on("pageerror", lambda exc: page_errors.append(str(exc)))
         try:
@@ -235,6 +388,9 @@ def click_first_action(driver: PageDriver, url: str, *, screenshot: str = "") ->
     click = getattr(driver, "click_text", None)
     if click is None:
         return None
+    start = getattr(driver, "click_start_planning", None)
+    if start is not None:
+        return start(url, screenshot=screenshot)
     return click(url, "开始", screenshot=screenshot)
 
 
@@ -411,6 +567,9 @@ def check_api_down(driver: PageDriver, url: str, api_reachable: bool, stub_activ
             detail="停掉 Python 服务（或在别的端口起一个未接通实例）后重跑本检查",
             repro="python integration/check_web.py --api-url http://127.0.0.1:8000",
         )
+    set_api_mode = getattr(driver, "set_api_mode", None)
+    if set_api_mode is not None:
+        set_api_mode("down")
     page = driver.load(url, screenshot=str(EVIDENCE_DIR / "api-down.png"))
     if page.status == 0:
         return StepResult(
@@ -476,7 +635,7 @@ def check_api_down(driver: PageDriver, url: str, api_reachable: bool, stub_activ
     )
 
 
-def check_unknown(driver: PageDriver, stub_url: str | None) -> StepResult:
+def check_unknown(driver: PageDriver, url: str, stub_url: str | None) -> StepResult:
     step = "web_unknown"
     expect = "接口答未知/无法核验时页面显示未知并可继续，不假装成功"
     if not stub_url:
@@ -492,7 +651,18 @@ def check_unknown(driver: PageDriver, stub_url: str | None) -> StepResult:
     gate = needs_browser(driver, step, expect, "页面行为只能在真浏览器里判")
     if gate:
         return gate
-    page = driver.load(stub_url, screenshot=str(EVIDENCE_DIR / "unknown.png"))
+    drive_flow = getattr(driver, "drive_unknown_flow", None)
+    if drive_flow is None:
+        return StepResult(
+            step,
+            BLOCKED,
+            "-",
+            expect,
+            "当前驱动不能完整提交规划并观察结果页",
+            detail="需要支持完整引导操作的真实浏览器驱动",
+            repro="python integration/check_web.py --driver playwright --with-stub",
+        )
+    page = drive_flow(url, stub_url, screenshot=str(EVIDENCE_DIR / "unknown.png"))
     if page.status == 0:
         return StepResult(
             step,
@@ -501,26 +671,31 @@ def check_unknown(driver: PageDriver, stub_url: str | None) -> StepResult:
             expect,
             f"受控假响应未响应（{page.failure}）",
             detail="先起假响应服务",
-            repro=f"curl -i {stub_url}",
+            repro=f"浏览器打开 {url}；页面 API 转发到 {stub_url}",
         )
-    if "未知" not in page.text and "无法核验" not in page.text:
+    if (
+        "这一步没能确认" not in page.text
+        or "给你这些课程建议" in page.text
+        or 'aria-label="无法确认的项目"' not in page.html
+        or "不能算通过" not in page.text
+    ):
         return StepResult(
             step,
             FAIL,
             "-",
             expect,
-            "正文没有未知/无法核验的说明",
-            detail="答未知时页面未如实呈现",
-            repro=f"浏览器打开 {stub_url}",
+            "结果页没有显示未知事项和未通过状态，或显示了课程建议",
+            detail="未知规划答复必须呈现未知项，且不得出现推荐成功状态",
+            repro=f"浏览器打开 {url}；页面 API 转发到 {stub_url}",
         )
     return StepResult(
         step,
         PASS,
         "-",
         expect,
-        "如实呈现未知",
+        "完成引导并提交规划；结果页明确显示未能确认，未显示课程建议",
         detail=f"截图：{page.screenshot or '未留存'}",
-        repro=f"浏览器打开 {stub_url}",
+        repro=f"浏览器打开 {url}；页面 API 转发到 {stub_url}",
     )
 
 
@@ -566,7 +741,7 @@ def check_narrow(driver: PageDriver, url: str) -> StepResult:
     )
 
 
-def check_stub_path(driver: PageDriver, url: str) -> StepResult:
+def check_stub_path(driver: PageDriver, url: str, stub_url: str | None = None) -> StepResult:
     """受控假响应当上游时，页面应进入引导第一问（而不是错误区块）。"""
     step = "web_stub_path"
     expect = (
@@ -576,7 +751,14 @@ def check_stub_path(driver: PageDriver, url: str) -> StepResult:
     gate = needs_browser(driver, step, expect, "页面渲染只能在真浏览器里判")
     if gate:
         return gate
-    page = driver.load(url, screenshot=str(EVIDENCE_DIR / "stub-path.png"))
+    set_api_mode = getattr(driver, "set_api_mode", None)
+    if set_api_mode is not None and (stub_url or getattr(driver, "stub_url", None)):
+        set_api_mode("stub", stub_url or driver.stub_url)
+    drive_guide = getattr(driver, "drive_stub_guide", None)
+    if drive_guide is not None and (stub_url or getattr(driver, "stub_url", None)):
+        page = drive_guide(url, stub_url or driver.stub_url, screenshot=str(EVIDENCE_DIR / "stub-path.png"))
+    else:
+        page = driver.load(url, screenshot=str(EVIDENCE_DIR / "stub-path.png"))
     if page.status == 0:
         return StepResult(
             step,
@@ -607,10 +789,6 @@ def check_stub_path(driver: PageDriver, url: str) -> StepResult:
             detail="受控上游已提供已发布培养方案，不应落到该分支",
             repro=f"浏览器打开 {url}",
         )
-    if 'id="question-title"' not in page.html:
-        pushed = click_first_action(driver, url, screenshot=str(EVIDENCE_DIR / "stub-path-after-click.png"))
-        if pushed is not None:
-            page = pushed
     if 'id="question-title"' not in page.html:
         return StepResult(
             step,
@@ -674,15 +852,20 @@ def reconcile(rows: list[StepResult]) -> list[StepResult]:
 
 
 def run_web_checks(
-    driver: PageDriver, url: str, api_reachable: bool, stub_url: str | None = None, with_stub: bool = False
+    driver: PageDriver,
+    url: str,
+    api_reachable: bool,
+    stub_url: str | None = None,
+    with_stub: bool = False,
+    stub_path_url: str | None = None,
 ) -> list[StepResult]:
     rows = [
         check_document(driver, url),
         check_bundle(url),
         check_shell(driver, url),
         check_api_down(driver, url, api_reachable, stub_active=with_stub and not api_reachable),
-        check_unknown(driver, stub_url),
-        check_stub_path(driver, url)
+        check_unknown(driver, url, stub_url),
+        check_stub_path(driver, url, stub_path_url)
         if with_stub
         else StepResult(
             "web_stub_path",

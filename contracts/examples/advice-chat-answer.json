@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "1.0",
+  "reply": "可以结合专业选修范围继续筛选。",
+  "question": null,
+  "courses": [],
+  "suggestions": [],
+  "schoolProgress": null,
+  "unknowns": [],
+  "usage": {"inputTokens": 12, "outputTokens": 8, "toolCalls": 2, "elapsedMs": 41}
+}

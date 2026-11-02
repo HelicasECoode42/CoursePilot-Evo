@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -10,7 +11,9 @@ from fastapi import Depends, Header, Request
 from agent_runtime.adapters.tool_client import ToolClient
 from agent_runtime.api.errors import ForbiddenError, UnauthorizedError
 from agent_runtime.api.idempotency import IdempotencyStore
+from agent_runtime.api.rate_limit import FixedWindowRateLimiter
 from agent_runtime.api.session_store import SessionNotFound, SessionStore
+from agent_runtime.application.budget import SessionSpendLedger
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.plan_store import SessionPlanStore
 from agent_runtime.application.runner import PlanningRunner
@@ -36,6 +39,14 @@ def get_runner(request: Request) -> PlanningRunner:
     return request.app.state.runner
 
 
+def get_spend_ledger(request: Request) -> SessionSpendLedger:
+    return request.app.state.spend_ledger
+
+
+def get_session_rate_limiter(request: Request) -> FixedWindowRateLimiter:
+    return request.app.state.session_rate_limiter
+
+
 def require_subject(
     store: Annotated[SessionStore, Depends(get_session_store)],
     authorization: Annotated[str | None, Header()] = None,
@@ -58,7 +69,10 @@ def require_admin(
     admin_key = request.app.state.settings.admin_key
     if not admin_key:
         raise ForbiddenError("未配置管理员密钥")
-    if x_admin_key != admin_key:
+    # 用 compare_digest 做定长比较，避免按字节比对时的时序差异泄露密钥前缀。
+    # 按 UTF-8 字节比较：str 形式的 compare_digest 遇到非 ASCII 会抛 TypeError（变成 500）。
+    presented = (x_admin_key or "").encode("utf-8")
+    if not hmac.compare_digest(presented, admin_key.encode("utf-8")):
         raise ForbiddenError("无报告权限")
 
 

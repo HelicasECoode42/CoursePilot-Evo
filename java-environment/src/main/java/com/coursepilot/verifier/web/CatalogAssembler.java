@@ -4,6 +4,7 @@ import com.coursepilot.verifier.application.TimeParser;
 import com.coursepilot.verifier.domain.MeetingTime;
 import com.coursepilot.verifier.persistence.entity.Course;
 import com.coursepilot.verifier.persistence.entity.CourseOffering;
+import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
 import com.coursepilot.verifier.web.dto.CatalogDtos;
 import com.coursepilot.verifier.web.dto.CatalogDtos.Meeting;
 import com.coursepilot.verifier.web.dto.CatalogDtos.ParseStatus;
@@ -39,6 +40,16 @@ public class CatalogAssembler {
             // 当前实体没有快照关联，来源只能落到课程行本身。它是库内记录的引用，
             // 不是培养方案或教务来源的真实出处。
             List.of("course:" + c.getCourseCode()));
+    }
+
+    public CatalogDtos.Course toCourse(CurriculumCourse membership) {
+        return new CatalogDtos.Course(
+            membership.getCourse().getCourseCode(),
+            membership.getName(),
+            membership.getCredits(),
+            membership.getCategory(),
+            List.of(membership.getSourceReference().getRefId()),
+            membership.getSuggestedTerm());
     }
 
     public CatalogDtos.CourseOffering toOffering(CourseOffering o) {

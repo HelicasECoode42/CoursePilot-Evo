@@ -26,7 +26,7 @@ from agent_runtime.api.deps import (
 )
 from agent_runtime.api.errors import InvalidInputError, NotFoundError, envelope
 from agent_runtime.api.idempotency import IdempotencyStore
-from agent_runtime.api.schemas import DomainModel, Issue
+from agent_runtime.api.schemas import DomainModel, Issue, SessionPlanCourseRemovalRequest
 from agent_runtime.api.schemas._base import Id
 from agent_runtime.application.ids import digest
 from agent_runtime.application.plan_replacement import (
@@ -83,8 +83,14 @@ def _replacement_payload(result: ReplacementResult) -> dict:
         "planId": result.plan_id,
         "items": [item.model_dump(mode="json") for item in result.items],
         "hardConstraints": [item.model_dump(mode="json") for item in result.hard_constraints],
-        "verification": result.verification.model_dump(mode="json"),
+        "verification": (
+            result.verification.model_dump(mode="json") if result.verification is not None else None
+        ),
     }
+
+
+def _removal_payload(result: ReplacementResult) -> dict:
+    return {**_replacement_payload(result), "empty": result.empty}
 
 
 @router.get("/api/v1/session-offerings")
@@ -180,4 +186,39 @@ def replace_session_plan(
 
     return idempotency.run(
         subject_id, "session-plan-replace", idempotency_key, body_digest, produce
+    )
+
+
+@router.post("/api/v1/session-plans/remove-course")
+def remove_session_plan_course(
+    request: Request,
+    body: SessionPlanCourseRemovalRequest,
+    subject_id: Annotated[str, Depends(require_subject)],
+    x_request_id: Annotated[str, Header(alias="X-Request-Id")],
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+    plans: Annotated[SessionPlanStore, Depends(get_plan_store)],
+    idempotency: Annotated[IdempotencyStore, Depends(get_idempotency)],
+    tool_client: Annotated[Any, Depends(get_tool_client)],
+) -> dict:
+    body_digest = digest(
+        json.dumps(body.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    )
+
+    def produce() -> dict:
+        context = make_context(request, subject_id, x_request_id)
+        service = PlanReplacement(plans, cast(Any, tool_client))
+        try:
+            result = service.remove(
+                session_id=subject_id,
+                previous_plan_id=body.previousPlanId,
+                course_code=body.courseCode,
+                context=context,
+            )
+        except (PlanNotInSession, CourseNotInPlan, ReusedVerification) as exc:
+            _reject(exc)
+            raise
+        return envelope(x_request_id, "OK", _removal_payload(result)).model_dump(mode="json")
+
+    return idempotency.run(
+        subject_id, "session-plan-remove-course", idempotency_key, body_digest, produce
     )

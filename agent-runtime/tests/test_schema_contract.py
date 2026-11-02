@@ -8,6 +8,7 @@ This mirrors scripts/check_contracts.py but against the Python DTOs.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -32,3 +33,17 @@ def test_example_matches_schema(definition: str, filename: str, expected_valid: 
     else:
         with pytest.raises(ValidationError):
             model.model_validate(payload)
+
+
+def test_credit_dto_keeps_decimal_in_python_and_emits_json_number() -> None:
+    course = SCHEMA_DEFS["CompletedCourse"](
+        courseCode="CS101",
+        earnedCredits=Decimal("3.10"),
+        outcome="PASSED",
+        completedTerm="2024-2025-1",
+    )
+    assert course.earnedCredits == Decimal("3.10")
+    assert isinstance(course.model_dump(mode="python")["earnedCredits"], Decimal)
+    encoded = course.model_dump(mode="json")["earnedCredits"]
+    assert isinstance(encoded, (int, float)) and not isinstance(encoded, bool)
+    assert encoded == 3.1

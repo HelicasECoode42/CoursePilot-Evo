@@ -89,7 +89,7 @@ cd integration && python -m pytest -q                      # 自测（不联网�
 | --- | --- | --- |
 | java_unwired | Java 未就绪时 audit 必须 `503` issue=`TOOL_UNAVAILABLE`，不得返回编造的核对结果 | Java 就绪时改为走 `200` 正常分支 |
 | no_time_claim | 无班次快照时不得断言时间无冲突：`verification.scope` 不得是 `REAL_TIMETABLE` / `SIMULATION` | 该情形下「答未知或先澄清」判为通过 |
-| bad_input | 违反契约的请求必须 `422` + Envelope(ERROR, issues 非空)，不得 `200` | 请求体取 `contracts/examples/invalid-block-day-with-section.json` |
+| bad_input | 违反契约的请求必须 `422` + Envelope(INVALID_INPUT 或 ERROR, issues 非空)，不得 `200`（两者都是 `domain.schema.json` 的合法 status） | 请求体取 `contracts/examples/invalid-block-day-with-section.json` |
 | no_auth | 无令牌 → `401`；假令牌 → `404`；两者都不许 `200` | 对 `GET /api/v1/academic-records` |
 
 ## 浏览器检查项（`check_web.py`）
@@ -122,8 +122,8 @@ python -m pip install playwright && python -m playwright install chromium
 ## 自动检查入口（CI job）
 
 文件 `../.github/workflows/integration-checks.yml`，**挂法 B**：只手动触发 + 每天定时，不进 PR 门禁。
-理由：门禁要防的是「假绿」，而现在会红的原因是 Java/MySQL 尚未落地；缺服务不该反过来挡住别人的 PR。
-各模块到位后，再把这个 job 提为必过。
+理由：门禁要防的是「假绿」。整栈检查要求 Java、Python 网关、Vue 页面同时在线，任何一个缺失都会红；这种整栈红不该挡住别人的 PR。
+各模块的整栈结果稳定后，再考虑把这个 job 提为必过。
 
 | 项 | 内容 |
 | --- | --- |

@@ -1,0 +1,8 @@
+{
+  "previousPlanId": "plan:demo:before",
+  "planId": "plan:demo:empty",
+  "items": [],
+  "hardConstraints": [],
+  "verification": null,
+  "empty": true
+}

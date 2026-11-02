@@ -11,10 +11,7 @@ import java.util.List;
  * 对象级授权（b-verifier.md B-F6），不能跟着响应出去。把实体直接序列化
  * 会既多字段又泄露归属，所以对外一律走这里。
  *
- * 当前实体还不足以填满这个形状：它是「一门已修课一行」，没有记录级的
- * curriculumSnapshotId、createdAt 与 revision，而契约这三项必填。缺的是
- * 聚合实体（B-F1），不是命名问题，所以不在这里编造默认值，由
- * QueryController 以 UNKNOWN 封套说明缺什么。
+ * 实体映射见 application.AcademicRecordMapper；attemptNo 只在库里，不在这里。
  */
 public final class RecordDtos {
 
@@ -42,4 +39,15 @@ public final class RecordDtos {
 
     /** listAcademicRecords 的 data 是 { items: [...] }，不是裸数组。 */
     public record RecordList(List<AcademicRecord> items) {}
+
+    /**
+     * contracts: AcademicRecordInput。schemaVersion 必须为 "1.0"，其余字段的范围与
+     * 格式由 AcademicRecordService 校验。transcriptComplete 用包装类型，缺省时能被识别为缺失。
+     */
+    public record AcademicRecordInput(
+        String schemaVersion,
+        String curriculumSnapshotId,
+        List<CompletedCourse> completedCourses,
+        Boolean transcriptComplete,
+        String sourceKind) {}
 }

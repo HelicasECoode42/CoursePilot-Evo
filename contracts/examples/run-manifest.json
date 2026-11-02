@@ -12,7 +12,7 @@
   "modelId": "DEPLOYMENT_MODEL_PLACEHOLDER",
   "temperature": 0,
   "maxInputTokens": 8000,
-  "maxOutputTokens": 2000,
+  "maxOutputTokens": 4000,
   "maxToolCalls": 6,
   "maxModelCalls": 3,
   "deadlineMs": 45000,
