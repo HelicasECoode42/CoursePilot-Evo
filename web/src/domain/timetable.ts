@@ -158,8 +158,13 @@ export function meetingsText(meetings: readonly Meeting[]): string {
     : readable.join("；");
 }
 
+/**
+ * 把课表画出来。reasons 为课程号 → 方案里 Java 给出的未排入原因（如 SECTION_NOT_ASSIGNED 的原因原文）；
+ * 有原因时未纳入课表的说明用它，没有时才退回通用说明。
+ */
 export function buildTimetable(
   sources: readonly TimetableSource[],
+  reasons: Readonly<Record<string, string>> = {},
 ): TimetableView {
   const cells = new Map<string, TimetableEntry[]>();
   const placed: PlacedCourse[] = [];
@@ -172,11 +177,12 @@ export function buildTimetable(
 
     if (offering === null || classId === null) {
       const reason =
-        source.missing === "NOT_SELECTED"
+        reasons[courseCode] ??
+        (source.missing === "NOT_SELECTED"
           ? "还没有选定班次，时间未知"
           : source.missing === "NOT_FOUND"
             ? "班次不在当前班次资料里"
-            : "这门课的时间没能从班次资料中读到";
+            : "这门课的时间没能从班次资料中读到");
       gaps.push({
         courseCode,
         classId,

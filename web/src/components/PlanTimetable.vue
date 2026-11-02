@@ -24,11 +24,15 @@ const props = withDefaults(
     sources: TimetableSource[];
     /** 课程号 → 课程名。读不到时明细里只显示课程号。 */
     courseNames?: Record<string, string>;
+    /** 课程号 → 未排进课表的真实原因（来自方案的未知项）。没有时用通用说明。 */
+    unplacedReasons?: Record<string, string>;
   }>(),
-  { courseNames: () => ({}) },
+  { courseNames: () => ({}), unplacedReasons: () => ({}) },
 );
 
-const view = computed(() => buildTimetable(props.sources));
+const view = computed(() =>
+  buildTimetable(props.sources, props.unplacedReasons),
+);
 
 /** 明细卡片：课程名、真实教师、人话时间。班次号只作小字辅助信息。 */
 const detailCards = computed(() =>

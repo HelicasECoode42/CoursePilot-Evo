@@ -10,7 +10,7 @@
  * - 模式：由所选快照推导（SYNTHETIC → SIMULATION，其余 → REAL）。
  *   fixture 客户端是纯演示，固定 SIMULATION，作为全局覆盖。
  */
-import type { PlanningMode, SnapshotSummary } from "../contracts";
+import type { PlanningMode, PlanScope, SnapshotSummary } from "../contracts";
 
 export type OfferingClientMode = "http" | "fixture" | "simulation";
 
@@ -124,4 +124,21 @@ export function offeringBanner(
     };
   }
   return null;
+}
+
+/** 学校公布的课程表且仍待人工核验：班次时间真实来源，但尚未通过核验。 */
+export function isOfficialUnverified(item: OfferingCandidate | null): boolean {
+  return (
+    item !== null &&
+    item.sourceKind === "OFFICIAL_DOCUMENT" &&
+    item.sourceValidation === "UNVERIFIED"
+  );
+}
+
+/**
+ * 方案是否用了模拟班次：只看 Java 判决的 scope。页面不再用客户端模式推断，
+ * 因为同一个模拟客户端也可能选中学校课表（真实班次）。
+ */
+export function planUsesSimulation(scopes: readonly PlanScope[]): boolean {
+  return scopes.includes("SIMULATION");
 }

@@ -29,7 +29,13 @@ import {
 import {
   explainUnknownIssue,
   isVerificationLevelUnknown,
+  sectionNotAssignedReason,
+  type UnknownContext,
 } from "../domain/unknown-explain";
+import {
+  isOfficialUnverified,
+  planUsesSimulation,
+} from "../domain/offering-selection";
 import {
   meetingsText,
   resolveTimetableSources,
@@ -181,10 +187,47 @@ const unknowns = computed<Issue[]>(() => {
   return collectUnknowns(answerLevel, validations);
 });
 
+/**
+ * 方案所用的开课快照。优先取判决里的 offeringSnapshotId 对应的快照，取不到才用当前选中的快照。
+ * 文案据此区分「学校课表待核验」与其他情况，不再笼统地说「不是模拟来源」。
+ */
+const planOfferingSnapshot = computed(() => {
+  const id =
+    recommendations.value.find(
+      (item) => item.verification.offeringSnapshotId !== null,
+    )?.verification.offeringSnapshotId ?? null;
+  if (id === null) return store.selectedOfferingSnapshot;
+  return (
+    store.offeringSnapshots.find((item) => item.snapshotId === id) ??
+    store.selectedOfferingSnapshot
+  );
+});
+
+const unknownContext = computed<UnknownContext>(() => ({
+  officialUnverified: isOfficialUnverified(planOfferingSnapshot.value),
+}));
+
 /** 显示不确定事实的用户文案；原始服务诊断只放在折叠的排查详情中。文案表见 domain/unknown-explain.ts。 */
 function explainUnknown(issue: Issue): string {
-  return explainUnknownIssue(issue, courseNames.value);
+  return explainUnknownIssue(issue, courseNames.value, unknownContext.value);
 }
+
+/** 未排进课表的真实原因：课程号 → Java 给出的原因原文（来自 SECTION_NOT_ASSIGNED）。 */
+const unplacedReasons = computed<Record<string, string>>(() => {
+  const reasons: Record<string, string> = {};
+  for (const issue of result.value?.unknowns ?? []) {
+    const parsed = sectionNotAssignedReason(issue);
+    if (parsed !== null) reasons[parsed.courseCode] = parsed.reason;
+  }
+  return reasons;
+});
+
+/** 是否有方案用了模拟班次。横幅只跟随方案的判决，不跟随客户端模式。 */
+const planIsSimulated = computed(() =>
+  planUsesSimulation(
+    recommendations.value.map((item) => item.verification.scope),
+  ),
+);
 
 const studentUnknowns = computed(() => [
   ...new Set(unknowns.value.map(explainUnknown)),
@@ -906,11 +949,7 @@ async function goBackToQuestions() {
     <p v-if="api.mode === 'fixture'" class="notice notice--demo" role="note">
       演示模式 · 虚构内容，不代表任何真实课程或核验结果。
     </p>
-    <p
-      v-else-if="api.mode === 'simulation'"
-      class="notice notice--demo"
-      role="note"
-    >
+    <p v-else-if="planIsSimulated" class="notice notice--demo" role="note">
       本地测试服务 · 模拟班次不代表下学期开课情况，培养资料来源见所选方案。
     </p>
 
@@ -1231,6 +1270,7 @@ async function goBackToQuestions() {
               :scope="entry.plan.verification.scope"
               :sources="sourcesOf(entry.plan.planId) ?? []"
               :course-names="courseNames"
+              :unplaced-reasons="unplacedReasons"
             />
             <p v-else class="microcopy" role="status" aria-live="polite">
               正在读取班次时间，请稍候。

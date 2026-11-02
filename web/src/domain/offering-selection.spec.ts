@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   defaultOfferingSnapshotId,
   isOfferingUsable,
+  isOfficialUnverified,
   offeringBanner,
+  planUsesSimulation,
   planningModeFor,
   type OfferingCandidate,
 } from "./offering-selection";
@@ -128,5 +130,37 @@ describe("offeringBanner", () => {
 
   it("shows nothing when no snapshot is selected", () => {
     expect(offeringBanner(null)).toBeNull();
+  });
+});
+
+describe("学校课表待核验与方案模拟判断", () => {
+  it("只有 OFFICIAL_DOCUMENT 且 UNVERIFIED 才算学校课表待核验", () => {
+    expect(
+      isOfficialUnverified({
+        snapshotId: "o",
+        kind: "OFFERING",
+        state: "PUBLISHED",
+        sourceKind: "OFFICIAL_DOCUMENT",
+        sourceValidation: "UNVERIFIED",
+        createdAt: "2026-11-01T00:00:00Z",
+      }),
+    ).toBe(true);
+    expect(isOfficialUnverified(null)).toBe(false);
+    expect(
+      isOfficialUnverified({
+        snapshotId: "v",
+        kind: "OFFERING",
+        state: "PUBLISHED",
+        sourceKind: "OFFICIAL_DOCUMENT",
+        sourceValidation: "VERIFIED",
+        createdAt: "2026-11-01T00:00:00Z",
+      }),
+    ).toBe(false);
+  });
+
+  it("方案判决为 REAL_TIMETABLE 或 COURSE_ONLY 时不算模拟，即使模拟客户端也一样", () => {
+    expect(planUsesSimulation(["REAL_TIMETABLE", "COURSE_ONLY"])).toBe(false);
+    expect(planUsesSimulation([])).toBe(false);
+    expect(planUsesSimulation(["REAL_TIMETABLE", "SIMULATION"])).toBe(true);
   });
 });

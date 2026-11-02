@@ -24,7 +24,7 @@ export const UNKNOWN_EXPLANATIONS: Record<string, string> = {
   OFFERING_SNAPSHOT_MISSING:
     "方案没有可用的班次资料，无法确认上课时间。可以回到第一步选择有班次资料的开课版本后重新生成。",
   TIMETABLE_UNVERIFIED:
-    "还有课程没有选定班次，或班次不是模拟来源，所以上课时间未核验，不能判为通过。可以为每门课选定班次后重新核验。",
+    "这份方案的班次时间还没有经过核验，所以上课时间是否冲突无法确认，不能判为通过。可以为每门课选定班次后重新核验。",
   TIME_UNPARSEABLE:
     "部分班次的上课时间无法识别，无法确认是否冲突。可以在结果页换一个同课程的班次后重新核验。",
   TIME_UNPARSED:
@@ -34,7 +34,7 @@ export const UNKNOWN_EXPLANATIONS: Record<string, string> = {
   PIN_TEACHER_UNKNOWN:
     "指定的教师无法从当前资料中确认。可以在目标里放宽教师要求，或改选其他教师的班次。",
   CONSTRAINT_UNVERIFIABLE:
-    "部分限制条件缺少核验所需的资料。可以在目标里放宽该条件，或补充相应资料后重新生成。",
+    "缺少已核验的班次时间，无法确认时间类条件（例如必避时段）是否满足。可以在目标里放宽该条件，或等班次资料核验后重新生成。",
   COURSE_FACTS_UNKNOWN:
     "部分课程信息无法确认。可以检查该课程是否在所选培养方案中。",
   CREDITS_UNKNOWN:
@@ -51,12 +51,37 @@ export const UNKNOWN_EXPLANATIONS: Record<string, string> = {
     "部分培养要求缺少可核对的来源。可以对照培养方案原文自行确认。",
   UNMODELED_CURRICULUM_RULES:
     "培养方案中有部分规则系统尚未纳入自动核对（例如只限选、组选、学期限制）。请以培养方案原文为准，系统不会替你判定这些规则。",
+  SECTION_NOT_ASSIGNED:
+    "这门课没有选定班次。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。",
   PENDING_COURSE_UNCATEGORIZED:
     "有一门课程尚未出结果，而且系统无法确定它属于哪个类别，所以所有要求的缺口都暂不能确定。可以在学业资料里确认它的结果，并检查课程是否在培养方案中。",
 };
 
+/**
+ * 所用开课快照是学校公布的课程表（OFFICIAL_DOCUMENT）且仍待人工核验时的文案。
+ * 与默认文案分开：这时班次时间是真实来源的数据，只是还没通过核验，不能说成「没有班次」。
+ */
+const OFFICIAL_UNVERIFIED_EXPLANATIONS = new Map<string, string>([
+  [
+    "TIMETABLE_UNVERIFIED",
+    "课表来自学校公布的课程表，正在人工核验；核验通过前不能判为通过。可以先按课表自行检查，核验完成后再重新核验。",
+  ],
+  [
+    "CONSTRAINT_UNVERIFIABLE",
+    "时间类条件（例如必避时段）需要对照班次上课时间。课表来自学校公布的课程表，正在人工核验，核验通过前无法确认是否满足。可以等核验完成后重新核验这份方案。",
+  ],
+]);
+
+/** 调用方能说明的上下文。只影响文案，不改变是否未知这一判断（那由 Java 决定）。 */
+export interface UnknownContext {
+  /** 所用开课快照是学校公布的课程表（OFFICIAL_DOCUMENT）且仍待人工核验。 */
+  officialUnverified?: boolean;
+}
+
 /** 与某一份方案的核验判决绑定的未知项：换班重新核验后，旧判决里的这些项不再适用。 */
 const VERIFICATION_LEVEL_CODES = new Set([
+  // 未选定班次描述的是换班前的方案，换班后同样过时。
+  "SECTION_NOT_ASSIGNED",
   "TIMETABLE_UNVERIFIED",
   "TIME_UNPARSEABLE",
   "TIME_UNPARSED",
@@ -92,15 +117,53 @@ function pendingCourseText(
   return `${label} 在修或结果未知，${categoryText}。可以在学业资料里把它标为已修、未修或在修，确认后再核对。`;
 }
 
+/** Java 的 SECTION_NOT_ASSIGNED message 形如「课程 CODE：原因」（全角冒号）。 */
+const SECTION_NOT_ASSIGNED_PATTERN = /^课程 (\S+)：(.+)$/;
+
+/**
+ * 解析未选定班次的原因。返回课程号与 Java 给出的原因原文（只翻译，不改写）；
+ * 格式不符时返回 null，调用方退回通用文案。
+ */
+export function sectionNotAssignedReason(
+  issue: Issue,
+): { courseCode: string; reason: string } | null {
+  if (issue.code !== "SECTION_NOT_ASSIGNED") return null;
+  const match = SECTION_NOT_ASSIGNED_PATTERN.exec(issue.message.trim());
+  if (!match) return null;
+  return { courseCode: match[1], reason: match[2] };
+}
+
+function sectionNotAssignedText(
+  issue: Issue,
+  courseNames: Readonly<Record<string, string>>,
+): string {
+  const parsed = sectionNotAssignedReason(issue);
+  if (!parsed) return UNKNOWN_EXPLANATIONS.SECTION_NOT_ASSIGNED ?? GENERIC;
+  const name = courseNames[parsed.courseCode];
+  const label =
+    name && name !== parsed.courseCode
+      ? `${name}（${parsed.courseCode}）`
+      : parsed.courseCode;
+  return `${label} 没有选定班次：${parsed.reason}。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。`;
+}
+
 /**
  * 把一条未知项翻译成学生可读的一句话。
  * courseNames 为课程号到课程名的表；读不到时只显示课程号，不编造课程名。
+ * context 说明所用开课快照的状态（例如学校课表待核验），用于选择对应文案。
  */
 export function explainUnknownIssue(
   issue: Issue,
   courseNames: Readonly<Record<string, string>> = {},
+  context: UnknownContext = {},
 ): string {
   if (issue.code === "PENDING_COURSE")
     return pendingCourseText(issue, courseNames);
+  if (issue.code === "SECTION_NOT_ASSIGNED")
+    return sectionNotAssignedText(issue, courseNames);
+  const official = context.officialUnverified
+    ? OFFICIAL_UNVERIFIED_EXPLANATIONS.get(issue.code)
+    : undefined;
+  if (official !== undefined) return official;
   return UNKNOWN_EXPLANATIONS[issue.code] ?? GENERIC;
 }

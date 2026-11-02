@@ -12,6 +12,7 @@ import type {
   CareerDirection,
   Course,
   Envelope,
+  Issue,
   PlanningAnswer,
   PlanningRequest,
   ReviewNote,
@@ -263,6 +264,34 @@ const EXPLAINED_ISSUE_CODES: Record<string, string> = {
   RATE_LIMITED: "操作太频繁了，请过几分钟再试。",
 };
 
+/**
+ * 服务端错误码 → 学生可读的一句话。码本身已能说明原因时优先用它，
+ * 不依赖服务端 message 的措辞。
+ */
+const SERVER_CODE_SENTENCES: Record<string, string> = {
+  VERIFICATION_REUSED: "核验结果重复使用，已拒绝这次操作，请重试。",
+};
+
+/** 班次与已选课程的时间冲突。码名可能是 TIME_CONFLICT / SLOT_CONFLICT 等，统一按冲突说明。 */
+const TIME_CONFLICT_CODE = /(^|_)(TIME|SLOT|CLASS|OFFERING)_CONFLICT$/;
+
+/** 含中文字符即视为服务端写给人看的句子；纯英文原文（多半是技术细节）不直接展示。 */
+const HAS_CJK = /[\u4e00-\u9fff]/;
+
+/**
+ * 服务端给出的、可直接展示的句子。没有可用句子时返回 null，由调用方决定兜底文案。
+ * 错误码与服务端 message 都来自错误信封（issues[0]），与 docs/04 的 Issue 字段一致。
+ */
+function serverSentence(issue: Issue | undefined): string | null {
+  if (!issue) return null;
+  const byCode = SERVER_CODE_SENTENCES[issue.code];
+  if (byCode !== undefined) return byCode;
+  if (TIME_CONFLICT_CODE.test(issue.code))
+    return "这个班次和已选课程时间冲突。";
+  const message = issue.message.trim();
+  return HAS_CJK.test(message) ? message : null;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -324,7 +353,7 @@ function errorForResponse(
   }
   if (status === 404) {
     return new ApiFailure(
-      "需要的资料暂不可用，请返回后重试。",
+      serverSentence(issue) ?? "需要的资料暂不可用，请返回后重试。",
       "http",
       status,
       issue?.code ?? "NOT_FOUND",
@@ -339,11 +368,15 @@ function errorForResponse(
   // 有些失败「请稍后重试」是错的建议：重试一定还是同样的结果。
   // 这几条要照实说清楚，否则学生只会一直点重试。
   const explained = EXPLAINED_ISSUE_CODES[issue?.code ?? ""];
+  // 兜底文案带上错误码，学生截图或反馈时能让人定位；没有错误码就只说「没有完成」。
+  const codeSuffix = issue?.code ? `（错误码 ${issue.code}）` : "";
+  // 可重试的失败沿用「稍后重试」；不可重试时才说服务端的原句，原句缺失就带错误码兜底。
   const fallback =
     explained ??
     (retryable
       ? "服务暂时不可用，请稍后重试。"
-      : "服务没有完成请求，请稍后重试。");
+      : (serverSentence(issue) ??
+        `服务没有完成请求${codeSuffix}，请稍后重试。`));
   return new ApiFailure(
     fallback,
     "http",
@@ -884,12 +917,21 @@ export class HttpApiClient implements CoursePilotApiClient {
   async getSchoolProgress(
     signal?: AbortSignal,
   ): Promise<SchoolProgressImportResult | null> {
-    const { response, envelope } = await this.request(
-      "/api/v1/school-progress",
-      { method: "GET", sessionToken: this.requireSession(), signal },
-    );
+    let response: Response;
+    let envelope: Envelope<unknown>;
+    try {
+      ({ response, envelope } = await this.request("/api/v1/school-progress", {
+        method: "GET",
+        sessionToken: this.requireSession(),
+        signal,
+      }));
+    } catch (error) {
+      // 本会话还没有导入学校进度时服务返回 404：这是「未导入」，不是错误。
+      // request() 对非 2xx 直接抛出，所以 404 在这里接住，不让页面当成失败。
+      if (error instanceof ApiFailure && error.status === 404) return null;
+      throw error;
+    }
     if (!isSuccessEnvelope(envelope)) {
-      if (response.status === 404) return null;
       throw errorForResponse(response.status, envelope);
     }
     if (

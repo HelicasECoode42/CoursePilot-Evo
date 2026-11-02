@@ -114,3 +114,16 @@ export function buildRecordInput(
     sourceKind: "USER_IMPORT",
   };
 }
+
+/**
+ * 学业记录的来源标签。后端 sourceKind 只有 USER_IMPORT 与 SYNTHETIC：
+ * 手动补录和学校进度导入都是 USER_IMPORT，前者标「手动补录」，后者由调用方说明来自学校进度。
+ * 只有 SYNTHETIC 才是虚构数据。
+ */
+export function recordSourceLabel(
+  sourceKind: AcademicRecord["sourceKind"],
+  fromSchoolProgress: boolean,
+): string {
+  if (sourceKind === "SYNTHETIC") return "虚构数据";
+  return fromSchoolProgress ? "学校进度导入" : "手动补录";
+}

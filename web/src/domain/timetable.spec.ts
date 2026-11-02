@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Meeting } from "../contracts";
-import { meetingsText } from "./timetable";
+import { buildTimetable, meetingsText } from "./timetable";
 
 const WEEKS = Array.from({ length: 16 }, (_, index) => index + 1);
 
@@ -40,5 +40,40 @@ describe("meetingsText", () => {
       { dayOfWeek: 2, sectionStart: 1, sectionEnd: 2, weeks: [] },
     ]);
     expect(text).toBe("周一 第1-2节 · 第1–16周；另有一段时间无法确认");
+  });
+});
+
+describe("buildTimetable 未排进课表的原因", () => {
+  it("没有选定班次时，用 Java 给出的真实原因代替通用说明", () => {
+    const view = buildTimetable(
+      [
+        {
+          courseCode: "08306029",
+          classId: null,
+          offering: null,
+          missing: "NOT_SELECTED",
+        },
+      ],
+      { "08306029": "可选班次都与学生设定的必避时段冲突" },
+    );
+    expect(view.gaps).toEqual([
+      {
+        courseCode: "08306029",
+        classId: null,
+        message: "08306029：可选班次都与学生设定的必避时段冲突，未纳入课表。",
+      },
+    ]);
+  });
+
+  it("没有原因时仍然给出通用说明", () => {
+    const view = buildTimetable([
+      {
+        courseCode: "CS101",
+        classId: null,
+        offering: null,
+        missing: "NOT_SELECTED",
+      },
+    ]);
+    expect(view.gaps[0].message).toContain("还没有选定班次");
   });
 });

@@ -1231,8 +1231,213 @@ describe("HTTP API client · 失败说明", () => {
     expect(error.message).not.toContain("请稍后重试");
   });
 
-  it("没有专门说明的失败仍然走原来的兜底文案", async () => {
-    const error = await failWith("SOMETHING_ELSE");
-    expect(error.message).toBe("服务没有完成请求，请稍后重试。");
+  it("服务端原文不是中文句子时，兜底文案带上错误码而不是只说「没有完成」", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          422,
+          envelope("ERROR", {}, [
+            {
+              code: "SOMETHING_ELSE",
+              message: "raw upstream text",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = new HttpApiClient(
+      "http://127.0.0.1:8000",
+      fetcher as unknown as typeof fetch,
+    );
+    await client.createSession();
+    const error = await client
+      .submitPlanning(
+        {
+          schemaVersion: "1.0",
+          curriculumSnapshotId: "curriculum-2026",
+          offeringSnapshotId: null,
+          academicRecordId: "record-1",
+          motives: ["EXPLORE"],
+          constraints: [],
+          selectedCourseCodes: [],
+          priorityOrder: [],
+        } as unknown as PlanningRequest,
+        "idem-explained-2",
+      )
+      .catch((failure) => failure);
+    expect(error.message).toBe(
+      "服务没有完成请求（错误码 SOMETHING_ELSE），请稍后重试。",
+    );
+  });
+});
+
+describe("HTTP API client · 服务端错误说明与未导入", () => {
+  it("课程搜索 500 时展示服务端给出的中文原句，而不是只说「没有完成请求」", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          500,
+          envelope("ERROR", null, [
+            {
+              code: "ERROR",
+              message: "课程目录暂时读取失败，请稍后再试",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    const error = await client
+      .listCourses("curriculum-2026", null, undefined, "数据库")
+      .catch((failure) => failure);
+    expect(error).toBeInstanceOf(ApiFailure);
+    expect(error.message).toBe("课程目录暂时读取失败，请稍后再试");
+  });
+
+  it("服务端只给英文原文和错误码时，兜底文案带上错误码", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          500,
+          envelope("ERROR", null, [
+            {
+              code: "CATALOG_DOWN",
+              message: "catalog timeout",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    const error = await client
+      .listCourses("curriculum-2026")
+      .catch((failure) => failure);
+    expect(error.message).toBe(
+      "服务没有完成请求（错误码 CATALOG_DOWN），请稍后重试。",
+    );
+    expect(error.code).toBe("CATALOG_DOWN");
+  });
+
+  it("换班遇到时间冲突（422 + 冲突码）时说明这个班次和已选课程时间冲突", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          422,
+          envelope("INVALID_INPUT", null, [
+            {
+              code: "TIME_CONFLICT",
+              message: "selectedClassId conflicts",
+              field: "selectedClassId",
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    const error = await client
+      .replaceSessionPlanItem(
+        {
+          previousPlanId: "plan-1",
+          courseCode: "CS101",
+          selectedClassId: "CS101-02",
+        },
+        "idem-replace-1",
+      )
+      .catch((failure) => failure);
+    expect(error.message).toBe("这个班次和已选课程时间冲突。");
+    expect(error.status).toBe(422);
+  });
+
+  it("换班遇到中文业务原句时直接展示原句", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          422,
+          envelope("INVALID_INPUT", null, [
+            {
+              code: "INVALID_INPUT",
+              message: "这份方案没有班次快照，不能替换班次",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    const error = await client
+      .replaceSessionPlanItem(
+        {
+          previousPlanId: "plan-1",
+          courseCode: "CS101",
+          selectedClassId: "CS101-02",
+        },
+        "idem-replace-2",
+      )
+      .catch((failure) => failure);
+    expect(error.message).toBe("这份方案没有班次快照，不能替换班次");
+  });
+
+  it("本会话还没有导入学校进度（404）时返回 null，不当成错误", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          404,
+          envelope("NOT_FOUND", null, [
+            {
+              code: "NOT_FOUND",
+              message: "没有学校进度",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    await expect(client.getSchoolProgress()).resolves.toBeNull();
+  });
+
+  it("404 即使没有标准信封也按未导入处理", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(new Response("Not Found", { status: 404 }));
+    const client = await authedClient(fetcher);
+    await expect(client.getSchoolProgress()).resolves.toBeNull();
+  });
+
+  it("其他错误的学校进度读取仍然抛出", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          500,
+          envelope("ERROR", null, [
+            {
+              code: "ERROR",
+              message: "读取失败",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    await expect(client.getSchoolProgress()).rejects.toBeInstanceOf(ApiFailure);
   });
 });

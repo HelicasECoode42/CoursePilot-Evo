@@ -26,6 +26,7 @@ import {
   describeCompleteness,
   duplicateCourseCodes,
   explainAuditUnknown,
+  recordSourceLabel,
   groupAuditItems,
 } from "../domain/academic-record";
 import { usePlanningStore } from "../stores/planning";
@@ -711,7 +712,11 @@ async function goToCredits() {
               学业记录 {{ index + 1 }} ·
               {{ record.completedCourses.length }} 门课程 ·
               {{
-                record.sourceKind === "USER_IMPORT" ? "用户导入" : "虚构数据"
+                recordSourceLabel(
+                  record.sourceKind,
+                  record.academicRecordId ===
+                    store.schoolProgress?.academicRecord.academicRecordId,
+                )
               }}
             </button>
             <span class="microcopy">

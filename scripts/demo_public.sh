@@ -22,8 +22,8 @@
 #   CP_ADMIN_KEY                     管理员密钥（data/private/stack.env）；映射为 Java 的 COURSEPILOT_ADMIN_KEY。
 #                                    开课/培养方案导入（X-Admin-Key）需要它，未配置时导入接口返回 ADMIN_KEY_NOT_CONFIGURED。
 #   COURSEPILOT_IMPORT_SYNTHETIC     默认 true：允许 SYNTHETIC（模拟）导入；设为 false 关闭。
-#   COURSEPILOT_WEB_MODE             默认 simulation：前端构建为模拟模式（规划用模拟开课，页面显示「演示环境：课表为模拟数据」横幅）；
-#                                    设为 http 恢复真实模式构建。
+#   COURSEPILOT_WEB_MODE             默认 http：前端构建为真实服务模式，课表与横幅跟随所选开课快照（学校课表显示「待人工核验」，模拟快照才显示模拟横幅）；
+#                                    设为 simulation 强制构建为模拟模式（规划用模拟开课，页面显示模拟横幅），仅用于本地演示对照。
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -127,8 +127,9 @@ start_api() {
 build_web() {
   local log="$LOG_DIR/web-build.log"
   echo "web：生产构建中（输出 ${log}）..."
-  # 演示默认 simulation：规划用 SYNTHETIC 模拟开课并显示「演示环境」横幅；设 COURSEPILOT_WEB_MODE=http 恢复真实模式
-  (cd "$REPO/web" && VITE_API_BASE_URL="/" VITE_COURSEPILOT_MODE="${COURSEPILOT_WEB_MODE:-simulation}" npm run build >"$log" 2>&1) || die "web 生产构建失败，看日志：$log"
+  # 默认 http（真实服务模式）：横幅与模拟/真实判断都由所选开课快照与方案判决决定。
+  # 设 COURSEPILOT_WEB_MODE=simulation 才强制模拟构建；结果页的模拟横幅仍只在方案用了模拟班次时出现。
+  (cd "$REPO/web" && VITE_API_BASE_URL="/" VITE_COURSEPILOT_MODE="${COURSEPILOT_WEB_MODE:-http}" npm run build >"$log" 2>&1) || die "web 生产构建失败，看日志：$log"
 }
 
 start_web() {

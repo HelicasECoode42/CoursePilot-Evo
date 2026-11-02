@@ -3,6 +3,7 @@ import type { Issue } from "../contracts";
 import {
   explainUnknownIssue,
   isVerificationLevelUnknown,
+  sectionNotAssignedReason,
   UNKNOWN_EXPLANATIONS,
 } from "./unknown-explain";
 
@@ -76,5 +77,92 @@ describe("未知项文案", () => {
     const text = explainUnknownIssue(issue("TIMETABLE_UNVERIFIED"));
     expect(text).toContain("选定班次");
     expect(text).toContain("重新核验");
+  });
+});
+
+describe("未选定班次与真实课表文案", () => {
+  it("SECTION_NOT_ASSIGNED 说出课程名、课程号与 Java 给出的真实原因", () => {
+    const text = explainUnknownIssue(
+      issue(
+        "SECTION_NOT_ASSIGNED",
+        "课程 08306029：可选班次都与学生设定的必避时段冲突",
+      ),
+      { "08306029": "数据库原理" },
+    );
+    expect(text).toContain("数据库原理（08306029）");
+    expect(text).toContain("可选班次都与学生设定的必避时段冲突");
+    expect(text).not.toContain("还没有选定班次");
+  });
+
+  it("SECTION_NOT_ASSIGNED 读不到课程名时只显示课程号", () => {
+    const text = explainUnknownIssue(
+      issue("SECTION_NOT_ASSIGNED", "课程 08306029：本学期没有开课"),
+    );
+    expect(text.startsWith("08306029 没有选定班次：本学期没有开课")).toBe(true);
+  });
+
+  it("SECTION_NOT_ASSIGNED 格式不符时退回这一代码的静态说明，不报错", () => {
+    const text = explainUnknownIssue(
+      issue("SECTION_NOT_ASSIGNED", "奇怪的格式"),
+    );
+    expect(text).toContain("没有选定班次");
+    expect(text).toContain("可以");
+  });
+
+  it("学校课表待核验时，TIMETABLE_UNVERIFIED 说明正在人工核验，不说「模拟来源」", () => {
+    const text = explainUnknownIssue(
+      issue("TIMETABLE_UNVERIFIED"),
+      {},
+      { officialUnverified: true },
+    );
+    expect(text).toContain(
+      "课表来自学校公布的课程表，正在人工核验；核验通过前不能判为通过",
+    );
+    expect(text).not.toContain("模拟");
+    expect(text).not.toContain("没有选定班次");
+  });
+
+  it("没有学校课表上下文时，TIMETABLE_UNVERIFIED 不再把原因说成「不是模拟来源」", () => {
+    const text = explainUnknownIssue(issue("TIMETABLE_UNVERIFIED"));
+    expect(text).not.toContain("不是模拟来源");
+    expect(text).toContain("不能判为通过");
+  });
+
+  it("学校课表待核验时，CONSTRAINT_UNVERIFIABLE 不说「缺少已核验的班次时间」", () => {
+    const official = explainUnknownIssue(
+      issue(
+        "CONSTRAINT_UNVERIFIABLE",
+        "第 0 条硬约束（BLOCK_DAY）需要已验证的班次时间",
+      ),
+      {},
+      { officialUnverified: true },
+    );
+    expect(official).toContain("学校公布的课程表");
+    expect(official).not.toContain("缺少已核验的班次时间");
+  });
+
+  it("没有班次来源时，CONSTRAINT_UNVERIFIABLE 才说缺少已核验的班次时间", () => {
+    const text = explainUnknownIssue(
+      issue(
+        "CONSTRAINT_UNVERIFIABLE",
+        "第 0 条硬约束（BLOCK_DAY）需要已验证的班次时间",
+      ),
+    );
+    expect(text).toContain("缺少已核验的班次时间");
+  });
+
+  it("sectionNotAssignedReason 只解析 SECTION_NOT_ASSIGNED 的课程号与原因", () => {
+    expect(
+      sectionNotAssignedReason(
+        issue(
+          "SECTION_NOT_ASSIGNED",
+          "课程 08306029：可选班次都与学生设定的必避时段冲突",
+        ),
+      ),
+    ).toEqual({
+      courseCode: "08306029",
+      reason: "可选班次都与学生设定的必避时段冲突",
+    });
+    expect(sectionNotAssignedReason(issue("TIMETABLE_UNVERIFIED"))).toBeNull();
   });
 });

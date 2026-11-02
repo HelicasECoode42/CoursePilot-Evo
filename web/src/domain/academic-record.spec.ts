@@ -5,6 +5,7 @@ import {
   describeCompleteness,
   duplicateCourseCodes,
   groupAuditItems,
+  recordSourceLabel,
 } from "./academic-record";
 
 function item(requirementId: string, state: AuditItem["state"]): AuditItem {
@@ -134,5 +135,20 @@ describe("buildRecordInput", () => {
     ];
     const input = buildRecordInput("curriculum-1", courses, true);
     expect(input.completedCourses).not.toBe(courses);
+  });
+});
+
+describe("recordSourceLabel", () => {
+  it("手动补录（USER_IMPORT）标为手动补录，不叫虚构数据", () => {
+    expect(recordSourceLabel("USER_IMPORT", false)).toBe("手动补录");
+  });
+
+  it("学校进度导入的记录单独说明", () => {
+    expect(recordSourceLabel("USER_IMPORT", true)).toBe("学校进度导入");
+  });
+
+  it("只有 SYNTHETIC 才是虚构数据", () => {
+    expect(recordSourceLabel("SYNTHETIC", false)).toBe("虚构数据");
+    expect(recordSourceLabel("SYNTHETIC", true)).toBe("虚构数据");
   });
 });
