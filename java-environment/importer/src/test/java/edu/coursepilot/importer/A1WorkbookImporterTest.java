@@ -133,9 +133,7 @@ class A1WorkbookImporterTest {
     // 含有约束语义的同类文字（毕业前至少修读一门全英语课程）仍是未建模规则。
     var draft =
         new A1WorkbookImporter()
-            .prepare(
-                workbookWithRule("原表注释/规则", "●毕业前至少修读一门全英语授课课程且成绩合格。"),
-                "cs-general");
+            .prepare(workbookWithRule("原表注释/规则", "●毕业前至少修读一门全英语授课课程且成绩合格。"), "cs-general");
     assertEquals(
         ImportModels.UnmodeledRule.Disposition.UNMODELED,
         draft.unmodeledRules().getFirst().disposition());

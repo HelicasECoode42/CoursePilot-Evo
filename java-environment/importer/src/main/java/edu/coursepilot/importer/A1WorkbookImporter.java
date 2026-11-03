@@ -328,14 +328,9 @@ public final class A1WorkbookImporter {
     }
   }
 
-  /**
-   * 纯说明性备注：只描述「学分分布仅供参考」「任意选修可选任何课程」或课程标记的含义，不产生任何约束。
-   * 只按整句精确匹配（忽略空白），其余备注一律保持未建模。
-   */
+  /** 纯说明性备注：只描述「学分分布仅供参考」「任意选修可选任何课程」或课程标记的含义，不产生任何约束。 只按整句精确匹配（忽略空白），其余备注一律保持未建模。 */
   private static final java.util.Set<String> INFORMATIONAL_NOTES =
-      java.util.Set.of(
-          "○学分分布供参考◇任意选修任何课程",
-          "◎专业核心课程★全英语课程");
+      java.util.Set.of("○学分分布供参考◇任意选修任何课程", "◎专业核心课程★全英语课程");
 
   static boolean isInformationalNote(String subject) {
     return INFORMATIONAL_NOTES.contains(subject.replaceAll("[\\s\\p{Z}]+", ""));
