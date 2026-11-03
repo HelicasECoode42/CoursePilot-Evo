@@ -193,5 +193,35 @@
     "file": "invalid-audit-item-unknown-source.json",
     "definition": "AuditResult",
     "valid": false
+  },
+  {
+    "file": "session-plan-add-course-request.json",
+    "definition": "SessionPlanCourseAddRequest",
+    "valid": true
+  },
+  {
+    "file": "session-plan-add-course-result.json",
+    "definition": "SessionPlanEditResult",
+    "valid": true
+  },
+  {
+    "file": "invalid-session-plan-add-course-extra-field.json",
+    "definition": "SessionPlanCourseAddRequest",
+    "valid": false
+  },
+  {
+    "file": "planning-context.json",
+    "definition": "PlanningContext",
+    "valid": true
+  },
+  {
+    "file": "invalid-planning-context-target-term.json",
+    "definition": "PlanningContext",
+    "valid": false
+  },
+  {
+    "file": "invalid-planning-context-term-without-snapshot.json",
+    "definition": "PlanningContext",
+    "valid": false
   }
 ]

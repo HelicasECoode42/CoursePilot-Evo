@@ -35,6 +35,7 @@ REASON_TEACHER_NO_OFFERING = "所选教师在本开课快照中没有该课程�
 REASON_UNPARSED = "班次时间未解析，无法判断冲突，未自动选定班次"
 REASON_BLOCKED = "可选班次都与学生设定的必避时段冲突"
 REASON_CONFLICT = "与其他推荐课程的时间冲突，无法在同一课表中同时安排"
+_WEEKDAY_NAMES = {1: "周一", 2: "周二", 3: "周三", 4: "周四", 5: "周五", 6: "周六", 7: "周日"}
 REASON_BUDGET = "本次班次查询次数已达上限，未选定班次"
 REASON_LOOKUP_FAILED = "班次查询失败，未选定班次"
 
@@ -95,6 +96,35 @@ def soft_blocks(preferences: Iterable[SoftPreference]) -> tuple[SlotBlock, ...]:
             if match:
                 blocks.append(SlotBlock(int(match.group(1)), int(match.group(2))))
     return tuple(blocks)
+
+
+def describe_block(block: SlotBlock) -> str:
+    """Human text for an avoided time, e.g. 周一整天, 每周第2节 or 周三第1节."""
+    if block.dayOfWeek is not None and block.section is not None:
+        return f"{_WEEKDAY_NAMES[block.dayOfWeek]}第{block.section}节"
+    if block.dayOfWeek is not None:
+        return f"{_WEEKDAY_NAMES[block.dayOfWeek]}整天"
+    return f"每周第{block.section}节"
+
+
+def describe_meeting(meeting: Meeting) -> str:
+    day = _WEEKDAY_NAMES[meeting.dayOfWeek]
+    if meeting.sectionStart == meeting.sectionEnd:
+        return f"{day}第{meeting.sectionStart}节"
+    return f"{day}第{meeting.sectionStart}-{meeting.sectionEnd}节"
+
+
+def _blocked_reason(parsed: Sequence[CourseOffering], blocks: Sequence[SlotBlock]) -> str:
+    """REASON_BLOCKED, naming the avoided times that actually hit the parsed sections."""
+    hit: list[SlotBlock] = []
+    for block in blocks:
+        if block in hit:
+            continue
+        if any(block.hits(meeting) for offering in parsed for meeting in offering.meetings):
+            hit.append(block)
+    if not hit:
+        return REASON_BLOCKED
+    return f"{REASON_BLOCKED}：" + "、".join(describe_block(block) for block in hit)
 
 
 @dataclass(frozen=True)
@@ -177,7 +207,7 @@ def course_options(
         if not any(block.hits(meeting) for meeting in offering.meetings for block in blocks)
     ]
     if not free:
-        return CourseOptions(need.course_code, (), REASON_BLOCKED)
+        return CourseOptions(need.course_code, (), _blocked_reason(parsed, blocks))
 
     seen: set[str] = set()
     options: list[SectionOption] = []
@@ -207,6 +237,35 @@ def course_options(
 
     options.sort(key=order)
     return CourseOptions(need.course_code, tuple(options), None)
+
+
+def conflict_names(
+    options: Sequence[SectionOption],
+    placed: Sequence[tuple[SectionOption, str]],
+) -> list[str]:
+    """Name the placed sections that clash with any of this course's options.
+
+    ``placed`` pairs each chosen section with its course label (for example
+    "人工智能（08306029）"). Each clash reads "与 <label><weekday and sections>冲突",
+    using the placed section's own meeting. Empty when nothing clashes by name.
+    """
+    named: list[str] = []
+    for pick, label in placed:
+        clash = next(
+            (
+                meeting
+                for meeting in pick.meetings
+                for option in options
+                if any(_meetings_overlap(meeting, other) for other in option.meetings)
+            ),
+            None,
+        )
+        if clash is None:
+            continue
+        text = f"与 {label}{describe_meeting(clash)}冲突"
+        if text not in named:
+            named.append(text)
+    return named
 
 
 def choose_sections(

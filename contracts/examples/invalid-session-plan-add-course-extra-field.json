@@ -1,0 +1,5 @@
+{
+  "previousPlanId": "plan:demo:before",
+  "courseCode": "CS101",
+  "ownerId": "subject:someone-else"
+}

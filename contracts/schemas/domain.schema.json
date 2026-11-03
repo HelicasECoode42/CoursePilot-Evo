@@ -1248,6 +1248,115 @@
         "courseCode"
       ]
     },
+    "SessionPlanCourseAddRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "previousPlanId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "courseCode": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "classId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "previousPlanId",
+        "courseCode"
+      ]
+    },
+    "PlanningContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "targetTerm": {
+          "const": "NEXT_SEMESTER"
+        },
+        "timetableReferenceSnapshotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timetableReferenceTermId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timetableSourceValidation": {
+          "anyOf": [
+            {
+              "enum": [
+                "VERIFIED",
+                "UNVERIFIED",
+                "SYNTHETIC"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "targetTerm",
+        "timetableReferenceSnapshotId",
+        "timetableReferenceTermId",
+        "timetableSourceValidation"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "timetableReferenceSnapshotId": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "timetableReferenceSnapshotId"
+            ]
+          },
+          "then": {
+            "properties": {
+              "timetableReferenceTermId": {
+                "type": "null"
+              },
+              "timetableSourceValidation": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
     "SessionPlanEditResult": {
       "type": "object",
       "additionalProperties": false,
@@ -2102,6 +2211,16 @@
             "outputTokens",
             "toolCalls",
             "elapsedMs"
+          ]
+        },
+        "planningContext": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanningContext"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },

@@ -975,6 +975,103 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     });
   });
 
+  it("posts add-course with an optional class and returns the revalidated plan", async () => {
+    const edit = {
+      previousPlanId: "plan-before",
+      planId: "plan-added",
+      items: [
+        { courseCode: "MATH201", teacherKey: null, classId: null },
+        { courseCode: "CS101", teacherKey: null, classId: null },
+      ],
+      hardConstraints: [],
+      verification: {
+        verifierResultId: "verify-added",
+        verdict: "UNKNOWN",
+        scope: "COURSE_ONLY",
+        curriculumSnapshotId: "curriculum-2026",
+        offeringSnapshotId: null,
+        recordRevision: 1,
+        violations: [],
+        unknownChecks: [
+          {
+            code: "SECTION_UNASSIGNED",
+            message: "未指定班次，不能声称无冲突",
+            field: "items",
+            retryable: false,
+          },
+        ],
+        performedChecks: ["COURSE_EXISTS"],
+        sourceRefIds: ["source-demo"],
+        sections: [
+          {
+            scope: "TIMETABLE",
+            verdict: "UNKNOWN",
+            violations: [],
+            unknownChecks: [
+              {
+                code: "SECTION_UNASSIGNED",
+                message: "未指定班次，不能声称无冲突",
+                field: "items",
+                retryable: false,
+              },
+            ],
+          },
+          {
+            scope: "CURRICULUM",
+            verdict: "VALID",
+            violations: [],
+            unknownChecks: [],
+          },
+        ],
+      },
+      empty: false,
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(200, envelope("OK", edit)));
+    const client = await authedClient(fetcher);
+    await expect(
+      client.addSessionPlanCourse(
+        { previousPlanId: "plan-before", courseCode: "CS101" },
+        "key-add-1",
+      ),
+    ).resolves.toEqual(edit);
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/session-plans/add-course");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body as string)).toEqual({
+      previousPlanId: "plan-before",
+      courseCode: "CS101",
+    });
+  });
+
+  it("rejects an add-course answer whose empty flag contradicts its items", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          200,
+          envelope("OK", {
+            previousPlanId: "plan-before",
+            planId: "plan-added",
+            items: [{ courseCode: "CS101", teacherKey: null, classId: null }],
+            hardConstraints: [],
+            verification: null,
+            empty: true,
+          }),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    await expect(
+      client.addSessionPlanCourse(
+        { previousPlanId: "plan-before", courseCode: "CS101" },
+        "key-add-2",
+      ),
+    ).rejects.toMatchObject({ kind: "invalid_response" });
+  });
+
   it("lists teacher options by snapshot and leaves courseCode out of the query when it is null", async () => {
     const fetcher = vi
       .fn()

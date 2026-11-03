@@ -2532,6 +2532,108 @@
         }
       }
     },
+    "/api/v1/session-plans/add-course": {
+      "post": {
+        "operationId": "addSessionPlanCourse",
+        "summary": "把一门课加入已保存方案并重新核验整份方案",
+        "description": "按当前会话归属读取 previousPlanId。课程须在方案的培养快照课程目录中，或在开课快照中有班次；已在方案中、已通过或正在修读的课程拒绝加入。给出 classId 时须属于该课程在方案开课快照下的班次，并据此取得教师。非空方案调用 Java validatePlan 核验整份新方案，判决原样返回（可能为 INVALID 或 UNKNOWN）。不会调用模型。相同幂等键和请求复用结果。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./schemas/domain.schema.json#/$defs/SessionPlanCourseAddRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "方案已加入课程并完成 Java 核验",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "./schemas/domain.schema.json#/$defs/SessionPlanEditResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "方案不属于当前会话、课程不在培养快照或开课快照中、或班次不在这门课的当前查询结果里",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等请求正在执行或同一键对应不同请求",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "课程已在方案中、已通过或正在修读、方案没有班次快照却指定了班次、方案已满 30 门，或核验编号被复用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Java 核验服务不可用，未保存新方案",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/session-plans/replace": {
       "post": {
         "operationId": "replaceSessionPlanItem",

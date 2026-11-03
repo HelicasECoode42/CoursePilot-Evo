@@ -20,6 +20,7 @@ import type {
   MustAvoidCheck,
   SessionOfferingList,
   SessionPlanReplaceInput,
+  SessionPlanCourseAddInput,
   SessionPlanEditInput,
   SessionPlanEditResult,
   SessionPlanReplacement,
@@ -910,16 +911,44 @@ export class HttpApiClient implements CoursePilotApiClient {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<SessionPlanEditResult> {
-    const { response, envelope } = await this.request(
+    return this.editSessionPlan(
       "/api/v1/session-plans/remove-course",
-      {
-        method: "POST",
-        sessionToken: this.requireSession(),
-        signal,
-        body,
-        idempotencyKey,
-      },
+      body,
+      idempotencyKey,
+      signal,
     );
+  }
+
+  /**
+   * 把一门课加入已保存方案。服务端对整份新方案重新核验，判决原样返回。
+   * 未指定班次时该课 classId 为 null，verification 仍是 Java 的判决，不能视为已选班次。
+   */
+  async addSessionPlanCourse(
+    body: SessionPlanCourseAddInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult> {
+    return this.editSessionPlan(
+      "/api/v1/session-plans/add-course",
+      body,
+      idempotencyKey,
+      signal,
+    );
+  }
+
+  private async editSessionPlan(
+    path: string,
+    body: SessionPlanEditInput | SessionPlanCourseAddInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult> {
+    const { response, envelope } = await this.request(path, {
+      method: "POST",
+      sessionToken: this.requireSession(),
+      signal,
+      body,
+      idempotencyKey,
+    });
     if (!isSuccessEnvelope(envelope))
       throw errorForResponse(response.status, envelope);
     const data = envelope.data;

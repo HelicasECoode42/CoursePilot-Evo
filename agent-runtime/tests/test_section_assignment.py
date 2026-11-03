@@ -224,3 +224,67 @@ def test_offering_lookup_respects_tool_policy_cap() -> None:
         assert "listOfferings" in str(exc)
     else:
         raise AssertionError("tool_policy cap of 1 should refuse the second lookup")
+
+
+def test_blocked_reason_names_the_avoided_slot() -> None:
+    from agent_runtime.application.section_assignment import describe_block
+
+    rows = [_offering("CS101", "class:cs101-a", meetings=[_meeting(1, 1, 2)])]
+    slot = hard_blocks(
+        [
+            Constraint(
+                kind="BLOCK_SLOT",
+                courseCode=None,
+                teacherKey=None,
+                dayOfWeek=1,
+                section=1,
+                value=None,
+                sourceText="周一第一节不上课",
+            )
+        ]
+    )
+    day = hard_blocks(
+        [
+            Constraint(
+                kind="BLOCK_DAY",
+                courseCode=None,
+                teacherKey=None,
+                dayOfWeek=1,
+                section=None,
+                value=None,
+                sourceText="周一不上课",
+            )
+        ]
+    )
+
+    slot_reason = course_options(_need(), rows, slot, (), {}).reason
+    day_reason = course_options(_need(), rows, day, (), {}).reason
+
+    assert slot_reason is not None and slot_reason.endswith("周一第1节")
+    assert day_reason is not None and day_reason.endswith("周一整天")
+    assert describe_block(_slot_block()) == "每周第2节"
+
+
+def _slot_block():
+    from agent_runtime.application.section_assignment import SlotBlock
+
+    return SlotBlock(None, 2)
+
+
+def test_conflict_names_the_placed_course_and_its_meeting() -> None:
+    from agent_runtime.application.section_assignment import conflict_names
+
+    placed_ai = _option("ai", _meeting(3, 7, 8), course="08306029")
+    wanted = _option("wanted", _meeting(3, 7, 8), course="08305014")
+    names = conflict_names([wanted], [(placed_ai, "人工智能（08306029）")])
+
+    assert names == ["与 人工智能（08306029）周三第7-8节冲突"]
+
+
+def test_conflict_names_is_empty_when_nothing_clashes() -> None:
+    from agent_runtime.application.section_assignment import conflict_names
+
+    placed = _option("ai", _meeting(3, 7, 8), course="08306029")
+    other = _option("other", _meeting(4, 1, 2), course="08305014")
+
+    assert conflict_names([other], [(placed, "人工智能（08306029）")]) == []

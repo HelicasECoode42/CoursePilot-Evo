@@ -92,7 +92,9 @@ PlanningAnswer decision=CLARIFY 必须有 Question 且无 recommendations；每�
 
 `POST /api/v1/planning` 带 `previousPlanId` 时，先确认该方案属于当前会话，不属于就返回 404，文案与其他「不在本会话」一致。确认之后按这次请求里的硬条件重新核验，不把旧 `verifierResultId` 当成新结果，也不因为重规划删掉请求里仍在的必须项。
 
-会话内换班使用 `GET /api/v1/session-offerings` 查询当前方案快照中的班次，`POST /api/v1/session-plans/replace` 替换单门课程并由 Java `validatePlan` 核验整份方案。`POST /api/v1/session-plans/remove-course` 从会话拥有的已保存方案确定性移除课程、该课程的 `PIN_COURSE` 与 `PIN_TEACHER_COURSE` 条件，其余课程、班次和硬条件保持原样；模型不参与删除。非空结果调用 Java 核验并保存新 planId。末课删除保存 `items=[]`、`empty=true`、`verification=null`，因为 Java 拒绝空核验输入；网页明确显示空方案且允许返回问卷重新生成。相同幂等键复用结果，旧 planId 保留供对照。当前学期真实班次快照未核验时，不得将编辑结果表述为真实课表已验证。
+会话内换班使用 `GET /api/v1/session-offerings` 查询当前方案快照中的班次，`POST /api/v1/session-plans/replace` 替换单门课程并由 Java `validatePlan` 核验整份方案。`POST /api/v1/session-plans/add-course` 把一门课加入会话拥有的已保存方案（请求 `previousPlanId`、`courseCode`，可选 `classId`）。先在 Python 内检查：课程不在方案中、未标为 PASSED 或 IN_PROGRESS、在培养快照课程目录或开课快照中存在；给出 `classId` 时须属于该课程在方案开课快照下的班次，并据此取得教师。通过后对整份新方案调用 Java `validatePlan`，判决原样返回；不调用模型。未指定班次时该课 `classId` 为 null，核验仍会给出未指定班次的未知项。
+
+`POST /api/v1/session-plans/remove-course` 从会话拥有的已保存方案确定性移除课程、该课程的 `PIN_COURSE` 与 `PIN_TEACHER_COURSE` 条件，其余课程、班次和硬条件保持原样；模型不参与删除。非空结果调用 Java 核验并保存新 planId。末课删除保存 `items=[]`、`empty=true`、`verification=null`，因为 Java 拒绝空核验输入；网页明确显示空方案且允许返回问卷重新生成。相同幂等键复用结果，旧 planId 保留供对照。当前学期真实班次快照未核验时，不得将编辑结果表述为真实课表已验证。
 
 ### 4. 正常与重规划时序
 

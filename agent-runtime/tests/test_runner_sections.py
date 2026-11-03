@@ -763,3 +763,21 @@ def test_school_gap_targets_leaf_sub_category_only(planning_request: PlanningReq
     assert "MATH101" not in model.facts["courseCodes"]
     course = next(c for c in model.facts["courses"] if c["courseCode"] == "MOR101")
     assert course["schoolGapRemainingCredits"] == "1"
+
+
+def test_unplaced_course_names_the_course_it_clashes_with(
+    planning_request: PlanningRequest,
+) -> None:
+    rows = [
+        _row("CS101", "class:cs101-a", meetings=[_meeting(1, 1, 2)]),
+        _row("MATH201", "class:math-a", meetings=[_meeting(1, 2, 3)]),
+    ]
+    tools = _OfferingTools(rows)
+    answer = _run(_request(planning_request), tools, _cs101_math201_items())
+
+    reasons = [u for u in answer.unknowns if u.code == "SECTION_NOT_ASSIGNED"]
+    assert len(reasons) == 1
+    assert reasons[0].field == "items[1].classId"
+    assert "MATH201" in reasons[0].message
+    assert "CS101" in reasons[0].message
+    assert "周一第1-2节" in reasons[0].message

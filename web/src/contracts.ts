@@ -288,6 +288,17 @@ export type PlanningDecision =
   | "CLARIFY"
   | "UNABLE_TO_VERIFY";
 
+/**
+ * 方案所指的学期与课表参考。targetTerm 恒为 NEXT_SEMESTER；课表参考为方案所用开课快照，
+ * 快照未知时三个参考字段均为 null，页面应明说学期未知，不能猜。
+ */
+export interface PlanningContext {
+  targetTerm: "NEXT_SEMESTER";
+  timetableReferenceSnapshotId: string | null;
+  timetableReferenceTermId: string | null;
+  timetableSourceValidation: "VERIFIED" | "UNVERIFIED" | "SYNTHETIC" | null;
+}
+
 export interface PlanningAnswer {
   taskId: string;
   traceId: string;
@@ -297,6 +308,7 @@ export interface PlanningAnswer {
   clarification: Question | null;
   unknowns: Issue[];
   usage: Usage;
+  planningContext?: PlanningContext | null;
 }
 
 /** `GET /api/v1/academic-records` 的 data：items 为空数组表示本会话尚无记录。 */
@@ -476,6 +488,13 @@ export interface SessionPlanReplacement {
 export interface SessionPlanEditInput {
   previousPlanId: string;
   courseCode: string;
+}
+
+/** `POST /api/v1/session-plans/add-course` 的请求体。classId 缺省时只加课，不选班次。 */
+export interface SessionPlanCourseAddInput {
+  previousPlanId: string;
+  courseCode: string;
+  classId?: string | null;
 }
 
 export interface SessionPlanEditResult {

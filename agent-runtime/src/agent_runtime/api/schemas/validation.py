@@ -97,6 +97,12 @@ class SessionPlanCourseRemovalRequest(DomainModel):
     courseCode: Id
 
 
+class SessionPlanCourseAddRequest(DomainModel):
+    previousPlanId: Id
+    courseCode: Id
+    classId: Id | None = None
+
+
 class SessionPlanEditResult(DomainModel):
     previousPlanId: Id
     planId: Id

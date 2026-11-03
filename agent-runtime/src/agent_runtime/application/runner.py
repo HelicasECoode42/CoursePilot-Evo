@@ -60,6 +60,7 @@ from agent_runtime.application.section_assignment import (
     CourseNeed,
     CourseOptions,
     choose_sections,
+    conflict_names,
     course_options,
     hard_blocks,
     soft_blocks,
@@ -954,11 +955,24 @@ class PlanningRunner:
                 reasons[index] = options.reason or REASON_CONFLICT
 
         picks = choose_sections([options.options for _, options in needs])
+        # Name the courses that block an unplaced one, by the names the facts carry.
+        names = {fact.course_code: fact.name for fact in facts.course_facts}
+        placed = [
+            (
+                pick,
+                f"{names[pick.course_code]}（{pick.course_code}）"
+                if pick.course_code in names
+                else pick.course_code,
+            )
+            for pick in picks
+            if pick is not None
+        ]
         new_items = list(items)
         assigned: list[tuple[str, str | None, str]] = []
-        for (index, _), pick in zip(needs, picks, strict=True):
+        for (index, options), pick in zip(needs, picks, strict=True):
             if pick is None:
-                reasons[index] = REASON_CONFLICT
+                named = conflict_names(options.options, placed)
+                reasons[index] = "；".join(named) if named else REASON_CONFLICT
                 continue
             item = items[index]
             teacher = item.teacherKey

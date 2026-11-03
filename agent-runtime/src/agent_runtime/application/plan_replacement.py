@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from agent_runtime.api.schemas import (
+    AcademicRecord,
     Constraint,
+    Course,
     CourseOffering,
     PlanItem,
     PlanValidation,
@@ -37,6 +39,29 @@ class OfferingSnapshotMissing(Exception):
 
 class ReusedVerification(Exception):
     """Java returned the previous verifier result id. That verdict is not new."""
+
+
+MAX_PLAN_ITEMS = 30  # planning.openapi.json: items maxItems 30
+
+
+class CourseNotFound(Exception):
+    """The course is in neither the plan's curriculum nor its offering snapshot."""
+
+
+class CourseAlreadyInPlan(Exception):
+    """The saved plan already holds this course."""
+
+
+class CourseAlreadyTaken(Exception):
+    """The academic record shows this course as PASSED or IN_PROGRESS."""
+
+
+class PlanFull(Exception):
+    """The plan already holds MAX_PLAN_ITEMS courses."""
+
+
+class ClassNeedsSnapshot(Exception):
+    """A class was named for a plan that has no offering snapshot to check it against."""
 
 
 class ToolCaller(Protocol):
@@ -193,6 +218,119 @@ class PlanReplacement:
             hard_constraints=constraints,
             verification=verification,
         )
+
+    def add_course(
+        self,
+        *,
+        session_id: str,
+        previous_plan_id: str,
+        course_code: str,
+        class_id: str | None,
+        context: ExecutionContext,
+    ) -> ReplacementResult:
+        """Add one course deterministically, then revalidate the whole new plan.
+
+        Checks run before any Java validatePlan call: course not already in the plan,
+        not PASSED or IN_PROGRESS on the record, present in the curriculum or the
+        offering snapshot, and a named class belongs to this course in that snapshot.
+        """
+        plan = self._require_plan(session_id, previous_plan_id)
+        if any(item.courseCode == course_code for item in plan.items):
+            raise CourseAlreadyInPlan
+        if len(plan.items) >= MAX_PLAN_ITEMS:
+            raise PlanFull
+        self._ensure_not_taken(plan, course_code, context)
+
+        offerings: list[CourseOffering] = []
+        if plan.offering_snapshot_id is not None:
+            offerings = self._load_offerings(plan, course_code, context)
+        elif class_id is not None:
+            raise ClassNeedsSnapshot
+        if not offerings and not self._in_curriculum(plan, course_code, context):
+            raise CourseNotFound
+
+        teacher_key: str | None = None
+        if class_id is not None:
+            selected = next((item for item in offerings if item.classId == class_id), None)
+            if selected is None:
+                raise UnknownClass
+            teacher_key = selected.teacherKey
+
+        items = [item.model_copy(deep=True) for item in plan.items]
+        items.append(PlanItem(courseCode=course_code, teacherKey=teacher_key, classId=class_id))
+        constraints = [item.model_copy(deep=True) for item in plan.hard_constraints]
+        verification = cast(
+            PlanValidation,
+            self._tools.call(
+                "validatePlan",
+                PlanValidationRequest(
+                    schemaVersion="1.0",
+                    curriculumSnapshotId=plan.curriculum_snapshot_id,
+                    offeringSnapshotId=plan.offering_snapshot_id,
+                    academicRecordId=plan.academic_record_id,
+                    mode=plan.mode,
+                    items=items,
+                    hardConstraints=constraints,
+                ),
+                context,
+            ),
+        )
+        if verification.verifierResultId == plan.verifier_result_id:
+            raise ReusedVerification
+        plan_id = new_id("plan")
+        self._plans.remember(
+            session_id=session_id,
+            plan_id=plan_id,
+            curriculum_snapshot_id=plan.curriculum_snapshot_id,
+            offering_snapshot_id=plan.offering_snapshot_id,
+            academic_record_id=plan.academic_record_id,
+            mode=plan.mode,
+            items=items,
+            hard_constraints=constraints,
+            verifier_result_id=verification.verifierResultId,
+        )
+        return ReplacementResult(
+            previous_plan_id=plan.plan_id,
+            plan_id=plan_id,
+            items=items,
+            hard_constraints=constraints,
+            verification=verification,
+        )
+
+    def _ensure_not_taken(
+        self, plan: SavedPlan, course_code: str, context: ExecutionContext
+    ) -> None:
+        record = cast(
+            AcademicRecord,
+            self._tools.call(
+                "getAcademicRecord",
+                None,
+                context,
+                params={"recordId": plan.academic_record_id},
+            ),
+        )
+        for completed in record.completedCourses:
+            if completed.courseCode == course_code and completed.outcome in (
+                "PASSED",
+                "IN_PROGRESS",
+            ):
+                raise CourseAlreadyTaken
+
+    def _in_curriculum(self, plan: SavedPlan, course_code: str, context: ExecutionContext) -> bool:
+        courses = cast(
+            list[Course],
+            self._tools.call(
+                "listCourses",
+                None,
+                context,
+                params={
+                    "curriculumSnapshotId": plan.curriculum_snapshot_id,
+                    "query": course_code,
+                    "limit": 200,
+                },
+            ),
+        )
+        return any(course.courseCode == course_code for course in courses)
 
     def remove(
         self,
