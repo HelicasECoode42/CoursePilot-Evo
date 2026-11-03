@@ -76,6 +76,18 @@ function cellEntries(day: number, section: number) {
   return view.value.cells.get(`${day}-${section}`) ?? [];
 }
 
+/** 格子里截断后，完整信息放在悬停提示里。 */
+function chipTitle(entry: {
+  courseCode: string;
+  classId: string;
+  teacherText: string;
+  weeks: number[];
+}): string {
+  const name = nameOf(entry.courseCode) ?? entry.courseCode;
+  const teacher = entry.teacherText.trim() || "教师未填写";
+  return `${name} · ${teacher} · ${compactWeeksText(entry.weeks)} · ${entry.classId}`;
+}
+
 function dayLabel(day: number): string {
   return WEEKDAY_NAMES[day - 1];
 }
@@ -83,7 +95,7 @@ function dayLabel(day: number): string {
 
 <template>
   <div class="plan-timetable">
-    <p v-if="!isReal" class="notice notice--warning" role="note">
+    <p v-if="!isReal" class="microcopy" role="note">
       此课表来自未经核验的班次资料，不代表真实课表，不构成无冲突证明。
     </p>
 
@@ -145,13 +157,16 @@ function dayLabel(day: number): string {
                     v-for="entry in cellEntries(day, section)"
                     :key="entry.courseCode + entry.classId"
                     class="timetable-chip"
+                    :title="chipTitle(entry)"
                   >
-                    <strong>{{
+                    <strong class="timetable-chip__name">{{
                       nameOf(entry.courseCode) ?? entry.courseCode
                     }}</strong>
-                    <span>{{ entry.teacherText.trim() || "教师未填写" }}</span>
-                    <span class="timetable-chip__meta"
-                      >{{ compactWeeksText(entry.weeks) }} · 班
+                    <span class="timetable-chip__line">{{
+                      entry.teacherText.trim() || "教师未填写"
+                    }}</span>
+                    <span class="timetable-chip__line timetable-chip__meta"
+                      >{{ compactWeeksText(entry.weeks) }} ·
                       {{ entry.classId }}</span
                     >
                   </li>
@@ -243,10 +258,17 @@ function dayLabel(day: number): string {
 
 .timetable {
   width: 100%;
-  min-width: 520px;
+  min-width: 0;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 12px;
+}
+
+/* 窄屏（手机）保留横向滚动，桌面让课表撑满左栏。 */
+@media (max-width: 760px) {
+  .timetable {
+    min-width: 560px;
+  }
 }
 
 .timetable th,
@@ -263,8 +285,13 @@ function dayLabel(day: number): string {
   background: #f4f7f5;
 }
 
+.timetable tbody td {
+  height: 52px;
+  padding: 3px;
+}
+
 .timetable-section {
-  width: 56px;
+  width: 44px;
   color: var(--soft);
   font-weight: 500;
   white-space: nowrap;
@@ -291,20 +318,38 @@ function dayLabel(day: number): string {
 
 .timetable-chip {
   display: grid;
-  gap: 1px;
+  gap: 0;
+  min-width: 0;
   padding: 3px 4px;
   border-radius: 6px;
   color: #164f55;
   background: #e8f1ef;
-  overflow-wrap: anywhere;
   text-align: left;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+/* 课程名最多两行，超出省略；教师与周次各占一行，超出省略。 */
+.timetable-chip__name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   font-size: 12px;
-  line-height: 1.35;
+  font-weight: 600;
+}
+
+.timetable-chip__line {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .timetable-chip__meta {
   color: var(--soft);
-  font-size: 11px;
+  font-size: 10.5px;
 }
 
 .timetable-weeks {

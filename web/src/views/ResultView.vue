@@ -80,6 +80,8 @@ import {
 import PlanTimetable from "../components/PlanTimetable.vue";
 import OfferingResults from "../components/OfferingResults.vue";
 import { resolveCourseQuery } from "../domain/course-query";
+import { addCourseMessage } from "../domain/add-course";
+import { planningContextLine } from "../domain/planning-context";
 import CourseReviewBasis from "../components/CourseReviewBasis.vue";
 import ReviewSummary from "../components/ReviewSummary.vue";
 import { usePlanningStore } from "../stores/planning";
@@ -761,12 +763,19 @@ const planGaps = ref<string[]>([]);
 const selectedClassId = ref<string | null>(null);
 const replaceStatus = ref<"idle" | "submitting" | "error">("idle");
 const replaceError = ref("");
+/** 加入方案（加课）的提交状态；与换班共用搜索面板，但各自有版本号与幂等键。 */
+const addStatus = ref<"idle" | "submitting" | "error">("idle");
+const addError = ref("");
 
 let searchController: AbortController | null = null;
 let replaceController: AbortController | null = null;
+let addController: AbortController | null = null;
 let searchVersion = 0;
 let replaceVersion = 0;
+let addVersion = 0;
 let replaceKey: string | null = null;
+let addKey: string | null = null;
+let addKeyFor: string | null = null;
 
 function newIdempotencyKey(): string {
   return `web-${crypto.randomUUID().replaceAll("-", "")}`;
@@ -791,6 +800,16 @@ function clearSelection() {
   replaceError.value = "";
 }
 
+function resetAdd() {
+  addVersion += 1;
+  addController?.abort();
+  addController = null;
+  addKey = null;
+  addKeyFor = null;
+  addStatus.value = "idle";
+  addError.value = "";
+}
+
 function resetSearch() {
   searchVersion += 1;
   searchController?.abort();
@@ -803,6 +822,7 @@ function resetSearch() {
   knownPlanMeetings.value = [];
   planGaps.value = [];
   clearSelection();
+  resetAdd();
 }
 
 function resetPlanEdits() {
@@ -910,6 +930,7 @@ watch(
 onBeforeUnmount(() => {
   searchController?.abort();
   replaceController?.abort();
+  addController?.abort();
   deleteController?.abort();
 });
 
@@ -1299,6 +1320,64 @@ async function recheck(entry: PlanEntry) {
   }
 }
 
+/**
+ * 加入方案：classId 为 null 时只加课、不选班次。服务端对整份新方案重新核验，判决原样显示。
+ * 同一门课、同一班次的重试复用幂等键；422 的错误码翻译成人话（见 domain/add-course.ts）。
+ */
+async function addCourse(entry: PlanEntry, classId: string | null) {
+  if (addStatus.value === "submitting") return;
+  const course = searchedCourse.value;
+  if (course === null) return;
+
+  const version = ++addVersion;
+  addController?.abort();
+  const controller = new AbortController();
+  addController = controller;
+  const requestKey = `${entry.plan.planId}|${course}|${classId ?? ""}`;
+  if (addKey === null || addKeyFor !== requestKey) {
+    addKey = newIdempotencyKey();
+    addKeyFor = requestKey;
+  }
+  const key = addKey;
+  addStatus.value = "submitting";
+  addError.value = "";
+  try {
+    const answer = await api.addSessionPlanCourse(
+      { previousPlanId: entry.plan.planId, courseCode: course, classId },
+      key,
+      controller.signal,
+    );
+    if (version !== addVersion) return;
+    store.applyPlanEdit(entry.recommendation.planId, answer);
+    panel.value = null;
+    resetSearch();
+    focusById(courseInputId(entry.index));
+  } catch (error) {
+    if (version !== addVersion || isAborted(error)) return;
+    addStatus.value = "error";
+    addError.value =
+      (error instanceof ApiFailure ? addCourseMessage(error.code) : null) ??
+      `${visibleError(error)} 加入${course}没有生效，方案保持不变，可以再试一次。`;
+  } finally {
+    if (version === addVersion && addController === controller)
+      addController = null;
+  }
+}
+
+/** 结果页顶部的学期说明（一行）。 */
+const planningContext = computed(() =>
+  planningContextLine(result.value?.planningContext),
+);
+
+/** 页面级的演示/模拟说明，与班次预览的提醒合并成一行，细节放在「说明」里。 */
+const demoNote = computed<string | null>(() => {
+  if (api.mode === "fixture")
+    return "演示模式 · 虚构内容，不代表任何真实课程或核验结果。";
+  if (planIsSimulated.value)
+    return "本地测试服务 · 模拟班次不代表下学期开课情况。";
+  return null;
+});
+
 async function goBackToQuestions() {
   await router.push("/plan/questions/ready");
 }
@@ -1308,13 +1387,6 @@ async function goBackToQuestions() {
   <section class="result-page" aria-labelledby="result-title">
     <p class="eyebrow">下学期选课规划</p>
     <h1 id="result-title" tabindex="-1">{{ headline }}</h1>
-
-    <p v-if="api.mode === 'fixture'" class="notice notice--demo" role="note">
-      演示模式 · 虚构内容，不代表任何真实课程或核验结果。
-    </p>
-    <p v-else-if="planIsSimulated" class="notice notice--demo" role="note">
-      本地测试服务 · 模拟班次不代表下学期开课情况，培养资料来源见所选方案。
-    </p>
 
     <p
       v-if="store.submitStatus === 'submitting'"
@@ -1443,6 +1515,25 @@ async function goBackToQuestions() {
       </div>
 
       <div v-else-if="planEntries.length" class="result-plans">
+        <div class="result-head">
+          <p class="result-context">{{ planningContext }}</p>
+          <div class="result-note" role="note">
+            <p class="result-note__line">
+              {{
+                demoNote ? demoNote + " " : ""
+              }}班次冲突只是预览，换班或加课后以整份方案重新核验为准。
+            </p>
+            <details class="note-details">
+              <summary>说明</summary>
+              <p>
+                班次搜索里的「冲突」「无法确认」只是预览，不是核验结论。只有换班或加课后，服务端对整份新方案的判决才是结论，页面原样显示，不会改写。
+              </p>
+              <p>
+                课表与开课资料均来自所选的开课快照；快照未核验时，课表只作参考。
+              </p>
+            </details>
+          </div>
+        </div>
         <section
           v-for="entry in planEntries"
           :key="entry.recommendation.planId"
@@ -1477,31 +1568,28 @@ async function goBackToQuestions() {
               </button>
             </div>
           </div>
-          <p class="result-note">
-            班次搜索里的「冲突」「无法确认」只是预览；换班或加课后，以整份方案的重新核验为准。
-          </p>
-
           <div
             v-if="isVerdictOpen(entry)"
             :id="verdictId(entry.index)"
             class="verdict-details"
           >
-            <ul
+            <p
               v-if="
                 entry.plan.verification && hasSections(entry.plan.verification)
               "
-              class="summary-list"
-              aria-label="两个分项的结论"
+              class="microcopy"
             >
-              <li
-                v-for="section in sectionsOf(entry.plan.verification)"
-                :key="section.scope"
-              >
-                {{ SECTION_TITLE[section.scope] }}：{{
-                  verdictBadge(section.verdict)
-                }}
-              </li>
-            </ul>
+              {{
+                sectionsOf(entry.plan.verification)
+                  .map(
+                    (section) =>
+                      SECTION_TITLE[section.scope] +
+                      "：" +
+                      verdictBadge(section.verdict),
+                  )
+                  .join(" · ")
+              }}
+            </p>
             <p v-if="entry.view" class="microcopy">
               {{
                 entry.plan.verification && hasSections(entry.plan.verification)
@@ -1666,6 +1754,9 @@ async function goBackToQuestions() {
                       :preview-text="''"
                       :replace-status="replaceStatus"
                       :replace-error="replaceError"
+                      :add-status="addStatus"
+                      :add-error="addError"
+                      @add="(classId) => addCourse(entry, classId)"
                     />
                   </template>
                   <button
@@ -2084,7 +2175,7 @@ async function goBackToQuestions() {
 }
 
 .verdict-badge {
-  padding: 6px 12px;
+  padding: 4px 10px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--surface);
@@ -2117,10 +2208,46 @@ async function goBackToQuestions() {
   font-size: 13px;
 }
 
+.result-head {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 18px;
+}
+
+.result-context {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+/* 页面说明：一行灰字，细节折叠在「说明」里。 */
 .result-note {
-  margin: 8px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
   color: var(--soft);
   font-size: 12px;
+}
+
+.result-note__line {
+  margin: 0;
+}
+
+/* 「说明」与提示同一行；展开后内容独占一行。 */
+.note-details summary {
+  cursor: pointer;
+  color: var(--soft);
+  text-decoration: underline;
+}
+
+.note-details[open] {
+  flex-basis: 100%;
+}
+
+.note-details p {
+  margin: 6px 0 0;
+  line-height: 1.6;
 }
 
 .verdict-details {

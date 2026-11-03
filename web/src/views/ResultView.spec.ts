@@ -1251,19 +1251,63 @@ describe("result page course search and replacement", () => {
     expect(wrapper.text()).not.toContain("暂时无法确认");
   });
 
-  it("explains that adding a course is not yet supported and never enables an add button", async () => {
+  it("adds a clear offering through add-course and shows the re-verified new version", async () => {
     stubOfferings();
+    const addSpy = vi.spyOn(api, "addSessionPlanCourse").mockResolvedValue({
+      previousPlanId: PLAN_ID,
+      planId: "plan-after-add",
+      items: [
+        ...INITIAL_ITEMS,
+        {
+          courseCode: "CS103",
+          teacherKey: "teacher-wang-03",
+          classId: "CS103-02",
+        },
+      ],
+      hardConstraints: [],
+      verification: validation({ verdict: "VALID", scope: "COURSE_ONLY" }),
+      empty: false,
+    });
     const wrapper = mountPage();
     await searchAdd(wrapper, "CS103");
 
-    expect(wrapper.text()).toContain("加课还不能加入方案");
-    const addButtons = wrapper
+    const addButton = wrapper
       .findAll("button")
-      .filter((button) => button.text().includes("加入方案"));
-    expect(addButtons.length).toBeGreaterThan(0);
-    for (const button of addButtons) {
-      expect(button.attributes("disabled")).toBeDefined();
-    }
+      .find((button) => button.text() === "加入方案");
+    expect(addButton).toBeDefined();
+    await addButton!.trigger("click");
+    await flushPromises();
+
+    expect(addSpy).toHaveBeenCalledTimes(1);
+    const [body, key] = addSpy.mock.calls[0];
+    expect(body).toEqual({
+      previousPlanId: PLAN_ID,
+      courseCode: "CS103",
+      classId: "CS103-02",
+    });
+    expect(key).toMatch(/^web-/);
+    expect(store.editedPlans[PLAN_ID]?.planId).toBe("plan-after-add");
+    expect(wrapper.text()).toContain("这是调整后重新核验的新版本");
+  });
+
+  it("maps add-course error codes to plain text and keeps the plan unchanged", async () => {
+    stubOfferings();
+    vi.spyOn(api, "addSessionPlanCourse").mockRejectedValue(
+      new ApiFailure("服务端原文", "http", 422, "COURSE_ALREADY_TAKEN"),
+    );
+    const wrapper = mountPage();
+    await searchAdd(wrapper, "CS103");
+    const addButton = wrapper
+      .findAll("button")
+      .find((button) => button.text() === "加入方案");
+    await addButton!.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      "你已修过或正在修这门课，不能再加入方案。",
+    );
+    expect(wrapper.text()).not.toContain("服务端原文");
+    expect(store.editedPlans[PLAN_ID]).toBeUndefined();
   });
 
   it("closes the swap panel with Escape and returns focus to its card button", async () => {

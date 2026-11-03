@@ -58,6 +58,14 @@ function fakeClient(
     currentSessionToken: vi.fn(() => null),
     fixtureAcademicRecordId: vi.fn(() => null),
     listSessionRecords: vi.fn(async () => ({ items: [] })),
+    addSessionPlanCourse: vi.fn(async (body) => ({
+      previousPlanId: body.previousPlanId,
+      planId: "plan-added",
+      items: [],
+      hardConstraints: [],
+      verification: null,
+      empty: true,
+    })),
     removeSessionPlanCourse: vi.fn(async (body) => ({
       previousPlanId: body.previousPlanId,
       planId: "plan-empty",

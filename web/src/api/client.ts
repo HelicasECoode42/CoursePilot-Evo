@@ -171,6 +171,15 @@ export interface CoursePilotApiClient {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<SessionPlanEditResult>;
+  /**
+   * 把一门课加入已保存方案，classId 缺省时只加课、不选班次。服务端对整份新方案重新核验，判决原样返回。
+   * 422 的错误码（COURSE_ALREADY_IN_PLAN 等）经 ApiFailure.code 交给页面翻译成人话。
+   */
+  addSessionPlanCourse(
+    body: SessionPlanCourseAddInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult>;
   saveSchoolProgress(
     body: SchoolProgressImportRequest,
     idempotencyKey: string,

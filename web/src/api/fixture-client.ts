@@ -17,6 +17,7 @@ import type {
   ReviewNote,
   RunReport,
   SessionPlanReplaceInput,
+  SessionPlanCourseAddInput,
   SessionPlanEditInput,
   SessionPlanEditResult,
   SessionPlanReplacement,
@@ -61,6 +62,13 @@ const DEMO_COURSES: Course[] = [
     credits: null,
     category: "演示课程",
     sourceRefIds: ["source:fixture-course-cs103"],
+  },
+  {
+    courseCode: "CS104",
+    name: "数据库原理（演示）",
+    credits: null,
+    category: "演示课程",
+    sourceRefIds: ["source:fixture-course-cs104"],
   },
 ];
 
@@ -241,6 +249,12 @@ const DEMO_ANSWER: PlanningAnswer = {
   traceId: "fixture-trace-e2",
   decision: "RECOMMENDATIONS",
   academicAudit: DEMO_AUDIT,
+  planningContext: {
+    targetTerm: "NEXT_SEMESTER",
+    timetableReferenceSnapshotId: FIXTURE_OFFERING_SNAPSHOT_ID,
+    timetableReferenceTermId: "2026-2027-1",
+    timetableSourceValidation: "UNVERIFIED",
+  },
   recommendations: [
     {
       planId: FIXTURE_PREVIOUS_PLAN_ID,
@@ -336,9 +350,42 @@ const CS102_OFFERINGS: CourseOffering[] = [
   },
 ];
 
+/** CS104 只用于演示「加课」：01 与方案里的 CS102-01 同一时段（演示冲突预览），02 不冲突。 */
+const CS104_OFFERINGS: CourseOffering[] = [
+  {
+    courseCode: "CS104",
+    classId: "CS104-01",
+    teacherKey: "teacher-min-04",
+    teacherText: "李敏（合成）",
+    credits: 3,
+    capacity: 60,
+    meetingTextRaw: "周一 1-2 节 1-16 周",
+    meetings: [
+      { dayOfWeek: 1, sectionStart: 1, sectionEnd: 2, weeks: WEEKS_1_TO_16 },
+    ],
+    parseStatus: "PARSED",
+    sourceRefId: "source:fixture-offering-cs104-01",
+  },
+  {
+    courseCode: "CS104",
+    classId: "CS104-02",
+    teacherKey: "teacher-min-04",
+    teacherText: "李敏（合成）",
+    credits: 3,
+    capacity: 60,
+    meetingTextRaw: "周三 3-4 节 1-16 周",
+    meetings: [
+      { dayOfWeek: 3, sectionStart: 3, sectionEnd: 4, weeks: WEEKS_1_TO_16 },
+    ],
+    parseStatus: "PARSED",
+    sourceRefId: "source:fixture-offering-cs104-02",
+  },
+];
+
 const FIXTURE_OFFERINGS = new Map<string, CourseOffering[]>([
   ["CS102", CS102_OFFERINGS],
   ["CS103", CS103_OFFERINGS],
+  ["CS104", CS104_OFFERINGS],
 ]);
 
 const FIXTURE_TEACHER_OPTIONS: TeacherCourseOption[] = [
@@ -491,6 +538,31 @@ function fixtureVerification(
       violations,
       unknownChecks,
     ),
+  };
+}
+
+/** 加课但未选班次：Java 的 SECTION_UNASSIGNED 文案，页面据此显示「未排进课表：还没有选定班次」。 */
+function fixtureUnassignedVerification(courseCode: string): PlanValidation {
+  const unknownChecks: PlanValidation["unknownChecks"] = [
+    {
+      code: "SECTION_UNASSIGNED",
+      message: `课程 ${courseCode} 未指定班次，无法核验上课时间（演示数据）。`,
+      field: null,
+      retryable: false,
+    },
+  ];
+  return {
+    verifierResultId: `fixture-verifier-add-${courseCode.toLowerCase()}`,
+    verdict: "UNKNOWN",
+    scope: "SIMULATION",
+    curriculumSnapshotId: DEMO_CURRICULUM_ID,
+    offeringSnapshotId: FIXTURE_OFFERING_SNAPSHOT_ID,
+    recordRevision: DEMO_RECORD.revision,
+    violations: [],
+    unknownChecks,
+    performedChecks: ["PLAN_TIME_OVERLAP"],
+    sourceRefIds: [`source:fixture-course-${courseCode.toLowerCase()}`],
+    sections: timetableAndCurriculumSections("UNKNOWN", [], unknownChecks),
   };
 }
 
@@ -733,6 +805,62 @@ export class FixtureApiClient implements CoursePilotApiClient {
       ),
       hardConstraints: structuredClone(FIXTURE_HARD_CONSTRAINTS),
       verification: fixtureVerification(offering, verdict),
+    };
+  }
+
+  async addSessionPlanCourse(
+    body: SessionPlanCourseAddInput,
+    _idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    if (
+      FIXTURE_PLAN_BASE_ITEMS.some(
+        (item) => item.courseCode === body.courseCode,
+      )
+    ) {
+      throw new ApiFailure(
+        "这门课已在方案里。",
+        "http",
+        422,
+        "COURSE_ALREADY_IN_PLAN",
+      );
+    }
+    const offering =
+      body.classId == null
+        ? null
+        : ((FIXTURE_OFFERINGS.get(body.courseCode) ?? []).find(
+            (item) => item.classId === body.classId,
+          ) ?? null);
+    // 指定了班次却不在搜索结果里：与换班一样拒绝，不能把不存在的班次写进方案。
+    if (body.classId != null && offering === null) {
+      throw new ApiFailure(
+        "所选班次不在当前搜索结果里，请重新搜索后再选。",
+        "http",
+        404,
+        "NOT_FOUND",
+      );
+    }
+    const items: PlanItem[] = [
+      ...FIXTURE_PLAN_BASE_ITEMS.map((item) => ({ ...item })),
+      {
+        courseCode: body.courseCode,
+        teacherKey: offering?.teacherKey ?? null,
+        classId: offering?.classId ?? null,
+      },
+    ];
+    return {
+      previousPlanId: body.previousPlanId,
+      planId: `${body.previousPlanId}-add-${body.courseCode}`,
+      items,
+      hardConstraints: structuredClone(FIXTURE_HARD_CONSTRAINTS),
+      verification:
+        offering === null
+          ? fixtureUnassignedVerification(body.courseCode)
+          : fixtureVerification(offering, "VALID"),
+      empty: false,
     };
   }
 
