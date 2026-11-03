@@ -168,5 +168,20 @@
     "file": "invalid-section-scope.json",
     "definition": "PlanValidation",
     "valid": false
+  },
+  {
+    "file": "teacher-course-option-offering.json",
+    "definition": "TeacherCourseOption",
+    "valid": true
+  },
+  {
+    "file": "invalid-teacher-course-option-offering-without-snapshot.json",
+    "definition": "TeacherCourseOption",
+    "valid": false
+  },
+  {
+    "file": "invalid-teacher-course-option-unknown-fact-source.json",
+    "definition": "TeacherCourseOption",
+    "valid": false
   }
 ]

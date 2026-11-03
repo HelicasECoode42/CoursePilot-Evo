@@ -377,6 +377,12 @@ export interface TeacherCourseOption {
   availability: "CURRENT_VERIFIED" | "HISTORICAL_ONLY" | "UNKNOWN";
   reviewNoteIds: string[];
   classIds: string[];
+  /** 可选新增：以下字段旧数据可能缺省。 */
+  courseName?: string | null;
+  sectionCount?: number | null;
+  offeringSnapshotId?: string | null;
+  offeringSourceValidation?: "VERIFIED" | "UNVERIFIED" | "SYNTHETIC" | null;
+  factSource?: "TEACHER_BINDING" | "OFFERING_SNAPSHOT" | null;
 }
 
 /**

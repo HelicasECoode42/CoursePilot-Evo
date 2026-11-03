@@ -27,14 +27,37 @@ public final class TeacherReviewDtos {
     /** contracts: ReviewNote.matchStatus。 */
     public enum MatchStatus { COURSE_TEACHER_MATCHED, COURSE_ONLY, UNVERIFIED }
 
-    /** contracts: TeacherCourseOption */
+    /** contracts: TeacherCourseOption.factSource。 */
+    public enum FactSource { TEACHER_BINDING, OFFERING_SNAPSHOT }
+
+    /** contracts: TeacherCourseOption.offeringSourceValidation（开课快照的 sourceValidation）。 */
+    public enum SourceValidation { VERIFIED, UNVERIFIED, SYNTHETIC }
+
+    /**
+     * contracts: TeacherCourseOption。后五个字段是可选的新增项（见 contracts/README.md 变更记录）：
+     * 键始终输出，无值时为 null；TEACHER_BINDING 行这四项为 null。
+     */
     public record TeacherCourseOption(
         String courseCode,
         String teacherKey,
         String teacherDisplayName,
         Availability availability,
         List<String> reviewNoteIds,
-        List<String> classIds) {}
+        List<String> classIds,
+        String courseName,
+        Integer sectionCount,
+        String offeringSnapshotId,
+        SourceValidation offeringSourceValidation,
+        FactSource factSource) {
+
+        /** 培养快照登记的教师绑定（种子路径）。 */
+        public static TeacherCourseOption binding(String courseCode, String teacherKey, String teacherDisplayName,
+                                                  Availability availability, List<String> reviewNoteIds,
+                                                  List<String> classIds, String courseName) {
+            return new TeacherCourseOption(courseCode, teacherKey, teacherDisplayName, availability,
+                reviewNoteIds, classIds, courseName, null, null, null, FactSource.TEACHER_BINDING);
+        }
+    }
 
     /** listTeacherCourseOptions 的 data。nextCursor 为 null 表示没有下一页，字段必须存在。 */
     public record TeacherCourseOptionList(List<TeacherCourseOption> items, String nextCursor) {}

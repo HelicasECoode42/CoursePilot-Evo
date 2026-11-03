@@ -38,6 +38,9 @@ class SnapshotSummary(DomainModel):
     displayName: Annotated[str, StringConstraints(max_length=200)] | None = None
 
 
+OfferingFactSource = Literal["TEACHER_BINDING", "OFFERING_SNAPSHOT"]
+
+
 class TeacherCourseOption(DomainModel):
     courseCode: Id
     teacherKey: Id
@@ -45,6 +48,12 @@ class TeacherCourseOption(DomainModel):
     availability: Availability
     reviewNoteIds: list[Id] = Field(max_length=200)
     classIds: list[Id] = Field(max_length=200)
+    # 以下五项为可选新增（contracts/README.md 变更记录）；旧数据缺省为 None。
+    courseName: Annotated[str, StringConstraints(min_length=1, max_length=200)] | None = None
+    sectionCount: Annotated[int, Field(ge=0)] | None = None
+    offeringSnapshotId: Id | None = None
+    offeringSourceValidation: SourceValidation | None = None
+    factSource: OfferingFactSource | None = None
 
 
 class CareerDirection(DomainModel):

@@ -1,0 +1,13 @@
+{
+  "courseCode": "CS101",
+  "teacherKey": "10012",
+  "teacherDisplayName": "王明",
+  "availability": "UNKNOWN",
+  "reviewNoteIds": [],
+  "classIds": ["O_CS101_10012_01", "O_CS101_10012_02"],
+  "courseName": "程序设计基础",
+  "sectionCount": 2,
+  "offeringSnapshotId": "OFS_example",
+  "offeringSourceValidation": "UNVERIFIED",
+  "factSource": "OFFERING_SNAPSHOT"
+}

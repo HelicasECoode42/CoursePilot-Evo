@@ -2648,6 +2648,33 @@
           },
           "minItems": 0,
           "maxItems": 200
+        },
+        "courseName": {
+          "description": "课程名称（培养方案快照中的课程名）；无法对应时为 null。",
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "sectionCount": {
+          "description": "本学期开课表中该课程 + 教师的班次数（OFFERING_SNAPSHOT 时必填）；classIds 可能被截断到 200，以本字段为准。",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "offeringSnapshotId": {
+          "description": "提供开课事实的开课快照编号（OFFERING_SNAPSHOT 时必填）。",
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "offeringSourceValidation": {
+          "description": "所引用开课快照的 sourceValidation。只有 VERIFIED 时 availability 才可能为 CURRENT_VERIFIED；OFFERING_SNAPSHOT 时必填。",
+          "type": ["string", "null"],
+          "enum": ["VERIFIED", "UNVERIFIED", "SYNTHETIC", null]
+        },
+        "factSource": {
+          "description": "这一对的事实来源：TEACHER_BINDING 为培养快照登记的教师绑定；OFFERING_SNAPSHOT 为开课快照中的本学期班次（未核验前 availability 为 UNKNOWN）。",
+          "type": ["string", "null"],
+          "enum": ["TEACHER_BINDING", "OFFERING_SNAPSHOT", null]
         }
       },
       "required": [
@@ -2657,7 +2684,21 @@
         "availability",
         "reviewNoteIds",
         "classIds"
-      ]
+      ],
+      "if": {
+        "properties": {
+          "factSource": { "const": "OFFERING_SNAPSHOT" }
+        },
+        "required": ["factSource"]
+      },
+      "then": {
+        "properties": {
+          "sectionCount": { "type": "integer", "minimum": 1 },
+          "offeringSnapshotId": { "type": "string" },
+          "offeringSourceValidation": { "type": "string", "enum": ["VERIFIED", "UNVERIFIED", "SYNTHETIC"] }
+        },
+        "required": ["sectionCount", "offeringSnapshotId", "offeringSourceValidation"]
+      }
     },
     "CareerDirection": {
       "type": "object",
