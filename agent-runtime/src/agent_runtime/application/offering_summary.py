@@ -21,7 +21,7 @@ from agent_runtime.adapters.tool_client import (
 from agent_runtime.api.schemas import CourseOffering
 from agent_runtime.application.budget import Budget, BudgetExceeded, BudgetTracker
 from agent_runtime.application.context import ExecutionContext
-from agent_runtime.application.offering_check import OFFERING_PAGE_LIMIT
+from agent_runtime.application.offering_check import COURSE_OFFERING_LIMIT, OFFERING_PAGE_LIMIT
 
 # One request covers at most this many courses: 1 scan + 10 lookups fits the default
 # Budget.max_offering_calls (16) with room to spare.
@@ -63,7 +63,7 @@ def summarize_offerings(
         params: dict[str, object] = {
             "curriculumSnapshotId": curriculum_snapshot_id,
             "offeringSnapshotId": offering_snapshot_id,
-            "limit": OFFERING_PAGE_LIMIT,
+            "limit": OFFERING_PAGE_LIMIT if course_code is None else COURSE_OFFERING_LIMIT,
         }
         if course_code is not None:
             params["courseCode"] = course_code
@@ -87,9 +87,14 @@ def summarize_offerings(
             summary.items.append(_summary(code, grouped.get(code, [])))
             continue
         try:
-            rows = [row for row in list_offerings(code) if row.courseCode == code]
+            fetched = list_offerings(code)
         except (BudgetExceeded, ToolUnavailable, ToolRejected, InvalidTool):
             summary.unknown_course_codes.append(code)
             continue
+        # A full course page may be cut short (Java has no cursor): report it as unknown.
+        if len(fetched) >= COURSE_OFFERING_LIMIT:
+            summary.unknown_course_codes.append(code)
+            continue
+        rows = [row for row in fetched if row.courseCode == code]
         summary.items.append(_summary(code, rows))
     return summary

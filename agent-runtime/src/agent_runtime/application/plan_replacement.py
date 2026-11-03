@@ -22,6 +22,7 @@ from agent_runtime.api.schemas import (
 )
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.ids import new_id
+from agent_runtime.application.offering_check import COURSE_OFFERING_LIMIT
 from agent_runtime.application.plan_store import PlanNotInSession, SavedPlan, SessionPlanStore
 
 
@@ -444,6 +445,7 @@ class PlanReplacement:
                     "curriculumSnapshotId": plan.curriculum_snapshot_id,
                     "offeringSnapshotId": plan.offering_snapshot_id,
                     "courseCode": course_code,
+                    "limit": COURSE_OFFERING_LIMIT,
                 },
             ),
         )

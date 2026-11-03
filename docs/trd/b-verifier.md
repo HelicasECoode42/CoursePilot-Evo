@@ -94,7 +94,7 @@ Repository 只保存/查询，Domain 不依赖 Controller/JPA；transaction 由 
 | courses | 发布快照 + query/limit/cursor | Course[]，SourceRef |
 | teacher-course-options | 培养快照 + courseCode/query（课程号、课程名、教师名子串） | 绑定登记（TEACHER_BINDING）与本学期开课表（OFFERING_SNAPSHOT，取 VERIFIED 优先、OFFICIAL_DOCUMENT 次之的非 SYNTHETIC 快照）合并；开课事实未核验前 availability 为 UNKNOWN，historical/current/unknown 不能用旧评价证明当期 |
 | reviews/search | courseCode、teacherKey?、term?、limit≤10 | 有维度与来源的 ReviewNote[] |
-| offerings | 双快照、courseCode | 原文/Meeting/parseStatus；不跨学期 |
+| offerings | 双快照、courseCode、limit（无游标；无 courseCode 时≤100、默认20；有 courseCode 时≤1000、默认返回该课全部班次，恰为1000条视为可能不完整） | 原文/Meeting/parseStatus；不跨学期 |
 | plans/validate | items≤30、硬条件、记录、mode/双快照 | verdict/scope/violations/unknownChecks |
 | preferences/score | verifierResultId + 偏好 | 可计算 metrics 和 unknownMetrics |
 

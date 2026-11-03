@@ -45,6 +45,7 @@ from agent_runtime.application.budget import Budget, BudgetExceeded, BudgetTrack
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.ids import digest, new_id
 from agent_runtime.application.offering_check import (
+    COURSE_OFFERING_LIMIT,
     OFFERING_PAGE_LIMIT,
     OfferingCheck,
     ScanResult,
@@ -1022,9 +1023,13 @@ class PlanningRunner:
         """One listOfferings call for one course in the plan's offering snapshot.
 
         Java's listOfferings takes a single courseCode and has no cursor, so this is
-        one call per course. The budget is checked by the caller.
+        one call per course. The budget is checked by the caller. A result of exactly
+        COURSE_OFFERING_LIMIT rows may be cut short, so it is raised as a failed lookup
+        (ToolUnavailable) instead of being used as if it were the whole course.
         """
         rows = self._list_offerings(request, context, trace, course_code=course_code)
+        if len(rows) >= COURSE_OFFERING_LIMIT:
+            raise ToolUnavailable("listOfferings")
         return [row for row in rows if row.courseCode == course_code]
 
     def _list_offerings(
@@ -1039,7 +1044,7 @@ class PlanningRunner:
         params: dict[str, object] = {
             "curriculumSnapshotId": request.curriculumSnapshotId,
             "offeringSnapshotId": request.offeringSnapshotId,
-            "limit": OFFERING_PAGE_LIMIT,
+            "limit": OFFERING_PAGE_LIMIT if course_code is None else COURSE_OFFERING_LIMIT,
         }
         if course_code is not None:
             params["courseCode"] = course_code

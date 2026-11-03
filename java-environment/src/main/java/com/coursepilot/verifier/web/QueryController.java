@@ -24,8 +24,13 @@ public class QueryController {
     private static final Pattern OFFSET_CURSOR = Pattern.compile("^[0-9]{1,9}$");
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 200;
-    /** 契约 listOfferings 的 limit 上限为 100。 */
+    /** 契约 listOfferings 未指定 courseCode 时的 limit 上限为 100。 */
     private static final int MAX_OFFERING_LIMIT = 100;
+    /**
+     * 指定单门 courseCode 时的上限：一门课的全部班次都要能取到（真实快照中单门课可达 186 个班次）。
+     * 没有游标，因此这个上限是硬顶；调用方若恰好拿满该数量，须视为可能不完整。
+     */
+    static final int MAX_COURSE_OFFERING_LIMIT = 1000;
 
     private final CurriculumSnapshotRepository snapshotRepo;
     private final CurriculumCourseRepository curriculumCourseRepo;
@@ -104,9 +109,11 @@ public class QueryController {
         requireId("curriculumSnapshotId", curriculumSnapshotId);
         requireId("offeringSnapshotId", offeringSnapshotId);
         if (courseCode != null) requireId("courseCode", courseCode);
-        int size = limit == null ? DEFAULT_LIMIT : limit;
-        if (size < 1 || size > MAX_OFFERING_LIMIT) {
-            throw new InvalidQuery("limit", "limit 须在 1 到 " + MAX_OFFERING_LIMIT + " 之间");
+        // 单门课：默认返回该课全部班次（上限 MAX_COURSE_OFFERING_LIMIT）；未指定课程：沿用默认 20、上限 100。
+        int maxLimit = courseCode == null ? MAX_OFFERING_LIMIT : MAX_COURSE_OFFERING_LIMIT;
+        int size = limit == null ? (courseCode == null ? DEFAULT_LIMIT : MAX_COURSE_OFFERING_LIMIT) : limit;
+        if (size < 1 || size > maxLimit) {
+            throw new InvalidQuery("limit", "limit 须在 1 到 " + maxLimit + " 之间");
         }
         requirePublished(curriculumSnapshotId, CurriculumSnapshot.Kind.CURRICULUM);
         requirePublished(offeringSnapshotId, CurriculumSnapshot.Kind.OFFERING);

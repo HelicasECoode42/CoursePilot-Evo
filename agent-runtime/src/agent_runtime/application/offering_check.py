@@ -23,8 +23,11 @@ from dataclasses import dataclass, field
 
 from agent_runtime.api.schemas import CourseOffering
 
-# Java's listOfferings upper bound for ``limit`` (contracts/java.openapi.json).
+# Java's listOfferings upper bound for ``limit`` without a courseCode (contracts/java.openapi.json).
 OFFERING_PAGE_LIMIT = 100
+# Upper bound for ``limit`` with one courseCode: every section of that course in one call.
+# Java has no cursor, so a result of exactly this many rows may be incomplete.
+COURSE_OFFERING_LIMIT = 1000
 
 
 @dataclass(frozen=True)

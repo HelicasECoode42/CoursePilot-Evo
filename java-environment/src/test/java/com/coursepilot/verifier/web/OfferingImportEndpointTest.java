@@ -85,6 +85,15 @@ class OfferingImportEndpointTest {
         return mvc.perform(req).andReturn();
     }
 
+    private MvcResult query(String offeringSnapshotId, String courseCode, String limit) throws Exception {
+        var req = get("/api/v1/offerings").param("curriculumSnapshotId", "PLAN_CS_2025")
+            .param("offeringSnapshotId", offeringSnapshotId)
+            .header(SERVICE, GOOD_SERVICE).header(SUBJECT, "S001");
+        if (courseCode != null) req.param("courseCode", courseCode);
+        if (limit != null) req.param("limit", limit);
+        return mvc.perform(req).andReturn();
+    }
+
     private static String item(String courseCode, String classId) {
         return "{\"courseCode\":\"%s\",\"teacherKey\":null,\"classId\":\"%s\"}".formatted(courseCode, classId);
     }
@@ -257,6 +266,45 @@ class OfferingImportEndpointTest {
     private static JsonNode find(JsonNode items, String classId) {
         for (JsonNode n : items) if (classId.equals(n.get("classId").asText())) return n;
         throw new AssertionError("missing " + classId);
+    }
+
+    @Test
+    void courseQueryReturnsEverySectionOfOneCourseBeyondOneHundred() throws Exception {
+        // 186 sections for one course (real snapshot has up to 186) and 106 for another.
+        StringBuilder rows = new StringBuilder();
+        for (int i = 0; i < 186; i++) {
+            if (i > 0) rows.append(',');
+            rows.append(offering("MANY_A_%03d".formatted(i), "BIGA01", "陈老师", "周一第1-2节{第1-16周}", "PARSED"));
+        }
+        for (int i = 0; i < 106; i++) {
+            rows.append(',').append(offering("MANY_B_%03d".formatted(i), "BIGB01", "刘老师", "周二第3-4节{第1-16周}", "PARSED"));
+        }
+        String body = """
+            {"schemaVersion":"1.0","termId":"2026-MANY","sourceKind":"BROWSER_SNAPSHOT","capturedAt":"2026-10-01T08:00:00Z",
+             "calendar":{"weeks":16,"sectionsPerDay":12},"offerings":[%s]}
+            """.formatted(rows);
+        MvcResult imported = importAs(body, GOOD_ADMIN);
+        assertEquals(200, imported.getResponse().getStatus());
+        String snapshotId = data(imported).get("snapshotId").asText();
+
+        MvcResult all = query(snapshotId, "BIGA01", "1000");
+        assertEquals(200, all.getResponse().getStatus());
+        JsonNode items = json.readTree(all.getResponse().getContentAsString()).get("data").get("items");
+        assertEquals(186, items.size());
+        var classIds = new java.util.HashSet<String>();
+        items.forEach(n -> classIds.add(n.get("classId").asText()));
+        assertEquals(186, classIds.size());
+
+        MvcResult courseDefault = query(snapshotId, "BIGB01", null);
+        assertEquals(106, json.readTree(courseDefault.getResponse().getContentAsString())
+            .get("data").get("items").size());
+
+        // Without a courseCode the cap stays at 100 and the default stays at 20.
+        MvcResult unfilteredDefault = query(snapshotId, null, null);
+        assertEquals(20, json.readTree(unfilteredDefault.getResponse().getContentAsString())
+            .get("data").get("items").size());
+        MvcResult unfilteredTooBig = query(snapshotId, null, "101");
+        assertEquals(400, unfilteredTooBig.getResponse().getStatus());
     }
 
     private static boolean hasIssue(JsonNode issues, String code) {

@@ -21,6 +21,7 @@ uv run python scripts/self_check.py
 
 ## 变更记录
 
+- `GET /api/v1/offerings` 的 `limit` 上限在指定 `courseCode` 时由 100 提高到 1000、默认返回该课全部班次（未指定课程时仍为默认 20、上限 100）。接口没有游标，返回条数恰为 1000 视为可能不完整。Python 的 `listOfferings` 调用（planner 班次核对、班次替换、学期班次汇总）按单课请求 1000 条，不再沿用 Java 默认的 20 条。响应形状未变。
 - 新增 `POST /api/v1/session-plans/add-course`（`addSessionPlanCourse`，请求 `SessionPlanCourseAddRequest`：`previousPlanId`、`courseCode`，可选 `classId`），响应复用 `SessionPlanEditResult`（非空，带 Java 对整份新方案的 `verification`）。拒绝：课程已在方案中、标为 PASSED/IN_PROGRESS（422 `COURSE_ALREADY_TAKEN`）、方案已满 30 门（422 `PLAN_FULL`）、课程不在培养快照或开课快照（404）、指定班次不属于该课程（404）、方案无班次快照却指定班次（422）。`PlanningAnswer` 增加可选 `planningContext`（`PlanningContext`）：`targetTerm` 恒为 `NEXT_SEMESTER`，`timetableReferenceSnapshotId` / `timetableReferenceTermId` / `timetableSourceValidation` 取自方案所用开课快照；快照未知时三者为 null。旧消费者无需改动。
 
 - `GET /api/v1/session-offerings` 的 `data` 增加必填 `mustAvoidChecks`：方案带硬时间约束时，每个候选班次各一条 `{classId, verdict}`，`verdict` 为 `CONFLICT`（Java 的 `CONSTRAINT_BLOCK_*` 违规，或来源未核验时的 `CONSTRAINT_HIT_UNVERIFIED_SOURCE`）、`CLEAR`、`CLEAR_UNVERIFIED`（来源未核验、按解析出的班次时间未命中，即 `CONSTRAINT_CLEAR_UNVERIFIED_SOURCE`）或 `UNKNOWN`（Java 的 `CONSTRAINT_UNVERIFIABLE`）；方案没有硬约束时为空数组，空数组不代表已核对。Python 对每个候选班次各调用一次 Java `validatePlan`（只带该班次与原硬约束），时间判断仍全部在 Java。`CourseOffering` 本身未改动。网页搜索预览据此标出「与必避时段冲突」，不再对此类班次显示「没有发现冲突」。

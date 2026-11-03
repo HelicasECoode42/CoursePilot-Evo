@@ -1588,9 +1588,10 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
+              "maximum": 1000,
               "default": 20
-            }
+            },
+            "description": "未指定 courseCode 时默认 20、上限 100。指定 courseCode 时默认返回该课全部班次、上限 1000，没有游标；返回条数恰为 1000 时可能不完整。"
           },
           {
             "name": "X-Request-Id",
