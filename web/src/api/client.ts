@@ -307,13 +307,14 @@ const validateRunReport = ajv.getSchema(
  * 按 issue code 给出照实的说明。
  *
  * 2026-10-29 实测：真实模型两次规划都失败，页面只说「服务没有完成请求，请稍后
- * 重试」。真实原因是输出被 2000 token 的输出预算截断（finish_reason=length），
- * 重试多少次都一样。这类失败必须说清楚，不能用「稍后重试」糊过去。
+ * 重试」。真实原因是回复超过输出上限（finish_reason=length），重试多少次都一样。
+ * 这类失败必须说清楚，不能用「稍后重试」糊过去；学生看到的是可操作的说明，
+ * 不出现预算、token 等程序术语。
  */
 const EXPLAINED_ISSUE_CODES: Record<string, string> = {
   MODEL_OUTPUT_TRUNCATED:
-    "模型的回复被输出预算截断了，没写完所以用不了。重试不会有帮助——" +
-    "需要调高输出预算，或者减少一次要规划的课程数量。",
+    "这次的方案内容太长，没有写完，所以没有生成。" +
+    "请减少一次要规划的课程，或缩短补充说明后再试；原样重试还会超长。",
   MODEL_INVALID_OUTPUT:
     "模型这次返回的内容不符合接口约定，已经被拦下，没有写入任何方案。",
   MODEL_RATE_LIMITED: "模型服务正在限流，请过一会儿再试。",

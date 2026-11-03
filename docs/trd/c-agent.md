@@ -139,7 +139,7 @@ sequenceDiagram
 
 ModelAdapter 只允许选定模型端点，不接受文件/评价里给的 URL。Runner 读取 `tool_policy.yaml` 的 per-tool `max_calls`，超出则抛 `BudgetExceeded`，整次运行以 503 `BUDGET_EXCEEDED` 结束——**不是只跳过这一次调用**，所以不会把「没查到」当成「没有」；上限只作用于规划运行，会话内换班次的搜索/替换不经过预算计数。`context_policy.yaml` 的 `max_course_facts`、`max_offerings`、`max_review_notes` 裁剪送进模型的事实（**当前裁剪是静默的**，模型看到的是子集但不知道被截断过），不把全库、历史全部聊天塞入模型。`harness/AGENTS.md` 与 `skills/` 作为策略文本放进系统提示，不执行。
 
-默认累计 input8000/output4000 tokens、6 tools、3 model calls、45 秒；各调用按剩余预算设置 timeout。provider 自动重试关闭。无效模型 JSON 最多在模型调用预算内修复一次；超过即 MODEL_INVALID_OUTPUT，不因语言顺畅放行。
+默认累计 input8000/output4000 tokens、6 tools、3 model calls、45 秒；各调用按剩余预算设置 timeout。provider 自动重试关闭。无效模型 JSON 最多在模型调用预算内修复一次；超过即 MODEL_INVALID_OUTPUT，不因语言顺畅放行。回复长度：单次输出上限 4000 不变，规划回复推荐课程最多 8 门（`context_policy.yaml` 的 `max_recommended_courses`），理由 120 字内；超出的模型候选由运行器裁掉并报告 `RECOMMENDATION_LIMIT_TRIMMED`。
 
 HarnessLoader 只加载已记录 hash 的白名单快照。文件内容是策略文本/受控配置，不能 import/exec 生成代码。运行 root AGENTS.md 与 repo 工程规范不被 Evolver 修改。
 

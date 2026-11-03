@@ -296,10 +296,14 @@ class HttpModelAdapter:
                     "role": "system",
                     "content": (
                         "只输出一个 JSON 对象，不要解释。"
-                        '格式为 {"items":[{"courseCode":"...","teacherKey":null,"classId":null}],'
+                        # 输出要短：单次输出上限 4000 token，超出就被截断成非法 JSON。
+                        # items 只写 courseCode（教师与班次由系统填写）；reason 限 120 字。
+                        '格式为 {"items":[{"courseCode":"..."}],'
                         '"courseRationales":[{"courseCode":"...","reason":"...","reviewNoteIds":[]}],'
-                        '"explorationDirections":[{"title":"...","description":"...",'
-                        '"steps":["..."]}]} '
+                        '"explorationDirections":[]} '
+                        "items 与 courseRationales 各条只写上述字段，reason 不超过 120 字；"
+                        "explorationDirections 只在学生没有明确兴趣时给出，最多 2 项，"
+                        "steps 最多 3 条。"
                         '或 {"clarify":{"questionId":"...","text":"...",'
                         '"choices":[{"value":"...","label":"..."}],'
                         '"allowFreeText":true,"requiredFor":[]}}。'
@@ -736,6 +740,18 @@ def _reply_from_content(content: str) -> ModelReply:
         raise ModelInvalidOutput("模型输出不是 JSON") from exc
     if not isinstance(data, dict):
         raise ModelInvalidOutput("模型输出不是 JSON 对象")
+    # Java/runner fills teacherKey and classId, and an uncited rationale has no review ids.
+    # Missing keys are read as null/empty; a present value is still validated below.
+    if isinstance(data.get("items"), list):
+        data["items"] = [
+            {"teacherKey": None, "classId": None, **item} if isinstance(item, dict) else item
+            for item in data["items"]
+        ]
+    if isinstance(data.get("courseRationales"), list):
+        data["courseRationales"] = [
+            {"reviewNoteIds": [], **item} if isinstance(item, dict) else item
+            for item in data["courseRationales"]
+        ]
     try:
         if data.get("clarify") is not None:
             return ModelReply(clarify=Question.model_validate(data["clarify"]))

@@ -448,19 +448,47 @@ def test_runner_passes_structured_intent_as_untrusted_model_data(
     assert intent["careerDirectionIds"] == ["career:systems"]
 
 
-def test_fake_model_cannot_drop_must_teacher_and_return_recommendations(
+def test_must_teacher_is_restored_when_model_omits_teacher(
     planning_request: PlanningRequest,
 ) -> None:
+    # The model is asked to write only courseCode, so a null teacherKey on a MUST pin is
+    # filled from the request, not treated as a dropped teacher.
     planning_request.intent.motives = ["SPECIFIC_TEACHER"]
     planning_request.intent.priorityOrder = ["SPECIFIC_TEACHER"]
     planning_request.intent.pinnedTeacherCoursePairs = [
         TeacherPreference(courseCode="CS101", teacherKey="teacher:demo", mode="MUST")
     ]
     answer = _runner().run(planning_request, _context(planning_request))
+    assert answer.decision == "RECOMMENDATIONS"
+    cs101 = [
+        item
+        for recommendation in answer.recommendations
+        for item in recommendation.items
+        if item.courseCode == "CS101"
+    ]
+    assert cs101 and all(item.teacherKey == "teacher:demo" for item in cs101)
+    assert all(issue.code != "MUST_TEACHER_NOT_PRESERVED" for issue in answer.unknowns)
+
+
+def test_model_naming_another_teacher_for_must_pin_is_still_rejected(
+    planning_request: PlanningRequest,
+) -> None:
+    class OtherTeacherModel:
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            return ModelReply(
+                items=[PlanItem(courseCode="CS101", teacherKey="teacher:other", classId=None)]
+            )
+
+    planning_request.intent.motives = ["SPECIFIC_TEACHER"]
+    planning_request.intent.priorityOrder = ["SPECIFIC_TEACHER"]
+    planning_request.intent.pinnedTeacherCoursePairs = [
+        TeacherPreference(courseCode="CS101", teacherKey="teacher:demo", mode="MUST")
+    ]
+    answer = _runner(OtherTeacherModel()).run(planning_request, _context(planning_request))
     assert answer.decision == "UNABLE_TO_VERIFY"
     assert answer.recommendations == []
     assert any(issue.code == "MUST_TEACHER_NOT_PRESERVED" for issue in answer.unknowns)
-    assert any(issue.code == "FAKE_MODEL" for issue in answer.unknowns)
 
 
 def test_run_rejects_invented_course_ids(planning_request: PlanningRequest) -> None:
@@ -641,11 +669,10 @@ def test_tradeoff_answer_resolves_gate_without_relaxing_constraints(
     assert answer.decision != "CLARIFY"
     assert planning_request.intent.pinnedTeacherCoursePairs[0].mode == "MUST"
     assert planning_request.intent.hardConstraints[0].kind == "BLOCK_SLOT"
-    assert answer.recommendations == [] or all(
-        item.courseCode == "CS101"
-        for recommendation in answer.recommendations
-        for item in recommendation.items
-    )
+    for recommendation in answer.recommendations:
+        for item in recommendation.items:
+            if item.courseCode == "CS101":
+                assert item.teacherKey == "teacher:demo"
 
 
 def test_empty_candidate_list_is_unable_to_verify(planning_request: PlanningRequest) -> None:
