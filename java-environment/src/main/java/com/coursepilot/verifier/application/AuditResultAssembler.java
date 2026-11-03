@@ -97,7 +97,9 @@ public class AuditResultAssembler {
                     cc -> cc.getCourse().getCourseCode(),
                     cc -> new Course(cc.getCourse().getCourseCode(), cc.getName(), cc.getCredits(), cc.getCategory())));
         AcademicLedger ledger = AcademicLedger.of(transcript, transcriptComplete,
-            code -> java.util.Optional.ofNullable(snapshotCatalog.get(code)), school);
+            code -> java.util.Optional.ofNullable(snapshotCatalog.get(code)), school,
+            requirements.stream().map(Requirement::getCategory)
+                .collect(java.util.stream.Collectors.toSet()));
         unknowns.addAll(ledger.issues());
         // 未建模规则不参与核验，但显式带出，让人看见哪些规则没有被算进去。
         var unmodeled = unmodeledRules.findBySnapshot_SnapshotIdAndDispositionOrderBySourceRowAsc(

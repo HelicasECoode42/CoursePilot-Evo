@@ -45,7 +45,8 @@ public class AuditEvaluator {
         Transcript transcript = transcriptRepo.findByStudentId(studentId).orElse(null);
         SchoolReport school = schoolReports.latest(studentId);
         AcademicLedger ledger = AcademicLedger.of(transcript, school.completes(transcript),
-            courseRepo::findById, school);
+            courseRepo::findById, school, requirements.stream()
+                .map(Requirement::getCategory).collect(java.util.stream.Collectors.toSet()));
 
         List<String> failReasons = new ArrayList<>();
         boolean anyUnknown = false;

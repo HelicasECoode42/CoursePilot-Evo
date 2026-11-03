@@ -27,6 +27,7 @@ import java.util.function.Function;
  *   - 重修去重：同一课程取第一次 PASSED 的那次，之后的修读不再计。
  *   - 只有 PASSED 计入已修学分；FAILED 不计，也不算未知（确定没通过，是事实）。
  *   - 类别归属：课程库里的类别优先；课程不在库中或类别为空时，用学校报告里该课程挂的类别名。
+ *     学校侧按课程挂的节点沿祖先链向上，取最近的培养类别名（如 通选课 -> 通识课）。
  *     两边都没有则无法归类，相应判断按未知处理。
  *   - 在读（IN_PROGRESS）：不计已修学分，也不让类别判 UNKNOWN；缺口仍是 要求 − 已通过学分，
  *     在读学分单独报告为 inProgressCredits。
@@ -53,11 +54,15 @@ final class AcademicLedger {
     /** 有效的完整性（已合并学校导入读全）。 */
     private final boolean transcriptComplete;
     private final SchoolReport school;
+    /** 培养方案里的类别名（课程归类时用来识别学校节点链上哪一层是培养类别）。 */
+    private final Set<String> curriculumCategories;
 
-    private AcademicLedger(boolean noRecord, boolean transcriptComplete, SchoolReport school) {
+    private AcademicLedger(boolean noRecord, boolean transcriptComplete, SchoolReport school,
+                           Set<String> curriculumCategories) {
         this.noRecord = noRecord;
         this.transcriptComplete = transcriptComplete;
         this.school = school;
+        this.curriculumCategories = curriculumCategories;
     }
 
     /**
@@ -66,11 +71,13 @@ final class AcademicLedger {
      * transcriptComplete 由调用方给出有效值（见 SchoolReport.completes）。
      */
     static AcademicLedger of(Transcript transcript, boolean transcriptComplete,
-                             Function<String, Optional<Course>> catalog, SchoolReport school) {
+                             Function<String, Optional<Course>> catalog, SchoolReport school,
+                             Set<String> curriculumCategories) {
         if (transcript == null) {
-            return new AcademicLedger(true, false, school);
+            return new AcademicLedger(true, false, school, curriculumCategories);
         }
-        AcademicLedger ledger = new AcademicLedger(false, transcriptComplete, school);
+        AcademicLedger ledger = new AcademicLedger(false, transcriptComplete, school,
+            curriculumCategories);
         Map<String, List<TranscriptCourse>> byCode = new LinkedHashMap<>();
         for (TranscriptCourse c : transcript.getCompletedCourses()) {
             byCode.computeIfAbsent(c.getCourseCode(), k -> new ArrayList<>()).add(c);
@@ -96,7 +103,7 @@ final class AcademicLedger {
     /** 课程库类别优先，其次学校报告的链接类别；都没有则 null。 */
     private String categoryOf(String code, Optional<Course> course) {
         String fromCatalog = course.map(Course::getCategory).filter(c -> !c.isBlank()).orElse(null);
-        return fromCatalog != null ? fromCatalog : school.categoryOfCourse(code);
+        return fromCatalog != null ? fromCatalog : school.categoryOfCourse(code, curriculumCategories);
     }
 
     private void addPassed(TranscriptCourse row, Function<String, Optional<Course>> catalog) {
