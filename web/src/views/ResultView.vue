@@ -344,7 +344,7 @@ function courseCodesOf(entry: PlanEntry): string {
 
 /* ---------- 布局、问题归组与顶部徽标 ---------- */
 
-/** 宽屏（≥1024px）两栏：左课表（粘性）、右课程；窄屏上下排列。断点与 domain/result-issues.ts 一致。 */
+/** 宽屏（≥1024px）两栏：左课表、右课程；窄屏上下排列。断点与 domain/result-issues.ts 一致。 */
 const wideLayout = ref(readWideLayout());
 function readWideLayout(): boolean {
   return (
@@ -1364,6 +1364,16 @@ async function addCourse(entry: PlanEntry, classId: string | null) {
   }
 }
 
+/** 方案被调整过、且有课程沿用了原推荐理由：列表顶部只说明一次。 */
+function reusedRationaleNoticeOf(entry: PlanEntry): boolean {
+  return cardsOf(entry).some((card) => card.rationaleWasReused);
+}
+
+/** 「加课」：展开并聚焦右栏的加课搜索框。 */
+function focusAddCourse(entry: PlanEntry) {
+  focusById(courseInputId(entry.index));
+}
+
 /** 结果页顶部的学期说明（一行）。 */
 const planningContext = computed(() =>
   planningContextLine(result.value?.planningContext),
@@ -1668,6 +1678,15 @@ async function goBackToQuestions() {
             </aside>
 
             <div class="plan-grid__courses">
+              <div class="plan-actions" role="toolbar" aria-label="方案操作">
+                <button
+                  class="button button--primary"
+                  type="button"
+                  @click="focusAddCourse(entry)"
+                >
+                  加课
+                </button>
+              </div>
               <section
                 class="add-course"
                 :aria-labelledby="addTitleId(entry.index)"
@@ -1769,6 +1788,13 @@ async function goBackToQuestions() {
                 </template>
               </section>
 
+              <p
+                v-if="reusedRationaleNoticeOf(entry)"
+                class="microcopy course-list__note"
+                role="note"
+              >
+                以下理由来自原推荐：方案调整后未重新生成。
+              </p>
               <ul class="course-cards" aria-label="方案中的课程">
                 <li
                   v-for="(card, cardIndex) in cardsOf(entry)"
@@ -1824,9 +1850,6 @@ async function goBackToQuestions() {
                     </li>
                   </ul>
 
-                  <p v-if="card.rationaleWasReused" class="microcopy">
-                    以下理由来自原推荐；方案调整后未重新生成。
-                  </p>
                   <details class="card-basis">
                     <summary>推荐依据与课程来源</summary>
                     <CourseReviewBasis
@@ -2047,12 +2070,11 @@ async function goBackToQuestions() {
           <p v-if="!entry.plan.replacedFrom" class="microcopy">
             {{ entry.recommendation.explanation }}
           </p>
-          <section
+          <details
             v-if="entry.recommendation.explorationDirections?.length"
-            aria-label="发展方向探索"
+            class="career-details"
           >
-            <h3>职业与科研方向探索</h3>
-            <p class="microcopy">以下是 AI 生成的探索建议。</p>
+            <summary>职业与科研方向探索（AI 生成，仅供参考）</summary>
             <article
               v-for="direction in entry.recommendation.explorationDirections"
               :key="direction.title"
@@ -2063,7 +2085,7 @@ async function goBackToQuestions() {
                 <li v-for="step in direction.steps" :key="step">{{ step }}</li>
               </ol>
             </article>
-          </section>
+          </details>
           <details class="debug-id">
             <summary>排查编号与详情</summary>
             <p>
@@ -2114,24 +2136,32 @@ async function goBackToQuestions() {
       >
         回去修改条件
       </button>
-      <button
+      <div
         v-if="
           (result && result.decision !== 'CLARIFY') ||
           store.submitStatus === 'error'
         "
-        class="button button--primary"
-        type="button"
-        :disabled="store.submitStatus === 'submitting'"
-        @click="store.submitPlan()"
+        class="regenerate"
       >
-        重新提交
-      </button>
+        <button
+          class="button button--primary"
+          type="button"
+          :disabled="store.submitStatus === 'submitting'"
+          aria-describedby="regenerate-hint"
+          @click="store.submitPlan()"
+        >
+          让 AI 重新生成方案
+        </button>
+        <p id="regenerate-hint" class="microcopy regenerate__hint">
+          会按当前条件重新推荐，已做的换班/加课会被替换
+        </p>
+      </div>
     </nav>
   </section>
 </template>
 
 <style scoped>
-/* 结果页：宽屏两栏（左课表粘性，右课程），窄屏上下排列。颜色与卡片沿用全局变量。 */
+/* 结果页：宽屏两栏（左课表，右课程），窄屏上下排列。颜色与卡片沿用全局变量。 */
 .result-page {
   min-width: 0;
 }
@@ -2277,17 +2307,51 @@ async function goBackToQuestions() {
   background: var(--surface);
 }
 
-/* 宽屏：左课表粘在视口里，右边课程卡片可以独立滚动。 */
+/* 宽屏：左课表与右课程并排，各自随页面滚动（不做粘性定位，课表高于视口时也能看全）。 */
 .plan-grid--split {
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
   gap: 24px;
 }
 
-.plan-grid--split .plan-grid__timetable {
-  position: sticky;
-  top: 16px;
-  max-height: calc(100vh - 32px);
-  overflow: auto;
+.plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.course-list__note {
+  margin: 12px 0 0;
+}
+
+.career-details {
+  margin-top: 24px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.career-details summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.career-details article {
+  margin-top: 12px;
+}
+
+.regenerate {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.regenerate__hint {
+  margin: 0;
+  text-align: right;
 }
 
 .add-course {

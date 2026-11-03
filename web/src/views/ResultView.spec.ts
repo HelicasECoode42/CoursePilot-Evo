@@ -1184,7 +1184,7 @@ describe("result page course search and replacement", () => {
     );
   });
 
-  it("uses two columns with a sticky timetable at 1440px and stacks below 1024px", async () => {
+  it("uses two columns at 1440px and stacks below 1024px", async () => {
     const original = globalThis.innerWidth;
     try {
       Object.defineProperty(globalThis, "innerWidth", {
@@ -1308,6 +1308,81 @@ describe("result page course search and replacement", () => {
     );
     expect(wrapper.text()).not.toContain("服务端原文");
     expect(store.editedPlans[PLAN_ID]).toBeUndefined();
+  });
+
+  it("shows the reused-reason notice once above the course list after an edit", async () => {
+    const result = answer();
+    result.recommendations[0].courseRationales = [
+      { courseCode: "CS102", reason: "适合作为基础课", reviewNoteIds: [] },
+    ];
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+    // 未调整前不出现该说明。
+    expect(wrapper.text()).not.toContain("以下理由来自原推荐");
+
+    store.applyPlanEdit(PLAN_ID, {
+      previousPlanId: PLAN_ID,
+      planId: "plan-after-edit",
+      items: structuredClone(INITIAL_ITEMS),
+      hardConstraints: [],
+      verification: validation({ verdict: "VALID", scope: "COURSE_ONLY" }),
+      empty: false,
+    });
+    await flushPromises();
+
+    const notes = wrapper.findAll(".course-list__note");
+    expect(notes).toHaveLength(1);
+    expect(notes[0].text()).toBe("以下理由来自原推荐：方案调整后未重新生成。");
+    expect(
+      wrapper
+        .findAll(".course-card")
+        .some((card) => card.text().includes("以下理由来自原推荐")),
+    ).toBe(false);
+  });
+
+  it("collapses the career section by default and renames the regenerate button", async () => {
+    const result = answer();
+    result.recommendations[0].explorationDirections = [
+      {
+        title: "研究方向探索",
+        description: "了解研究问题",
+        steps: ["阅读入门资料"],
+      },
+    ];
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const career = wrapper.get("details.career-details");
+    expect(career.attributes("open")).toBeUndefined();
+    expect(career.get("summary").text()).toBe(
+      "职业与科研方向探索（AI 生成，仅供参考）",
+    );
+    const regenerate = wrapper
+      .findAll("button")
+      .find((button) => button.text() === "让 AI 重新生成方案");
+    expect(regenerate).toBeDefined();
+    expect(wrapper.text()).toContain(
+      "会按当前条件重新推荐，已做的换班/加课会被替换",
+    );
+    expect(wrapper.findAll("button").some((b) => b.text() === "重新提交")).toBe(
+      false,
+    );
+  });
+
+  it("puts the add-course action in the right column toolbar", async () => {
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+    const addButton = wrapper
+      .get(".plan-actions")
+      .findAll("button")
+      .find((button) => button.text() === "加课");
+    expect(addButton).toBeDefined();
+    expect(wrapper.find(".plan-grid__courses .add-course").exists()).toBe(true);
   });
 
   it("closes the swap panel with Escape and returns focus to its card button", async () => {

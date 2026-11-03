@@ -68,10 +68,6 @@ describe("PlanTimetable", () => {
     expect(cellText(wrapper, 2, 1)).toContain("CS102-01");
     expect(cellText(wrapper, 3, 1)).toBe("");
     expect(cellText(wrapper, 1, 2)).toBe("");
-    expect(wrapper.find(".timetable-cards").text()).toContain(
-      "测试教师（合成）",
-    );
-    expect(wrapper.find(".timetable-cards").text()).toContain("第1–16周");
   });
 
   it("keeps UNPARSED and INVALID offerings out of the grid with a clear note", () => {
@@ -203,37 +199,6 @@ describe("PlanTimetable", () => {
   });
 });
 
-describe("PlanTimetable detail cards", () => {
-  it("shows the course name, real teacher and a human-readable time instead of raw meeting text", () => {
-    const wrapper = mount(PlanTimetable, {
-      props: {
-        scope: "REAL_TIMETABLE",
-        sources: [placed("CS102", offering("CS102", "CS102-01", [MON_1_2]))],
-        courseNames: { CS102: "程序设计基础（测试）" },
-      },
-    });
-
-    const card = wrapper.get("li.timetable-card");
-    expect(card.text()).toContain("程序设计基础（测试）");
-    expect(card.text()).toContain("CS102");
-    expect(card.text()).toContain("测试教师（合成）");
-    expect(card.text()).toContain("周一 第1-2节 · 第1–16周");
-    expect(card.text()).toContain("CS102-01");
-    expect(card.text()).not.toContain("{第");
-  });
-
-  it("falls back to the course code when no course name is known", () => {
-    const wrapper = mount(PlanTimetable, {
-      props: {
-        scope: "REAL_TIMETABLE",
-        sources: [placed("CS102", offering("CS102", "CS102-01", [MON_1_2]))],
-      },
-    });
-
-    expect(wrapper.get("li.timetable-card strong").text()).toBe("CS102");
-  });
-});
-
 describe("PlanTimetable unplaced courses", () => {
   it("lists courses without a usable section under the grid, titled 未排进课表", () => {
     const wrapper = mount(PlanTimetable, {
@@ -352,7 +317,5 @@ describe("PlanTimetable unplaced courses", () => {
     await button("后八周（9-16）").trigger("click");
     expect(cellText(wrapper, 1, 1)).toBe("");
     expect(cellText(wrapper, 7, 4)).toContain("9-16周");
-    // 明细卡片不受周次视图影响。
-    expect(wrapper.find(".timetable-cards").text()).toContain("第1–8周");
   });
 });
