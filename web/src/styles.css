@@ -174,6 +174,12 @@ select:focus-visible {
   width: min(1040px, calc(100% - 64px));
   margin-top: 52px;
 }
+/* 结果页：比其他宽页更宽（最多 1200px），给课表与课程两栏留位置。 */
+.page-shell--result {
+  width: min(1200px, calc(100% - 64px));
+  margin-top: 40px;
+}
+
 .page-shell:focus {
   outline: none;
 }
@@ -756,6 +762,11 @@ fieldset {
   .page-shell--wide {
     width: calc(100% - 40px);
     margin-top: 28px;
+  }
+
+  .page-shell--result {
+    width: calc(100% - 40px);
+    margin-top: 22px;
   }
 
   .brand {

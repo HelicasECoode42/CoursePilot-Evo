@@ -113,13 +113,7 @@ function dayLabel(day: number): string {
       所选周次范围内没有这些课的上课时段，可切换到全学期查看。
     </p>
 
-    <div
-      class="timetable-layout"
-      :class="{
-        'timetable-layout--split':
-          view.placed.length > 0 && view.gaps.length > 0,
-      }"
-    >
+    <div class="timetable-layout">
       <div v-if="view.placed.length" class="timetable-scroll">
         <table class="timetable">
           <caption class="sr-only">
@@ -170,7 +164,7 @@ function dayLabel(day: number): string {
 
       <aside
         v-if="view.gaps.length"
-        class="notice notice--warning timetable-gaps"
+        class="timetable-gaps"
         aria-labelledby="timetable-unplaced-title"
       >
         <h4 id="timetable-unplaced-title" class="timetable-gaps__title">
@@ -221,22 +215,23 @@ function dayLabel(day: number): string {
 </template>
 
 <style scoped>
-/* 课表与「未排进课表」并排（宽屏）或上下排列（窄屏）。 */
+/* 「未排进课表」列在课表格子下面（不并排），课程卡片上也有同一原因，这里只做清单。 */
 .timetable-layout {
   display: grid;
   gap: 12px;
-  align-items: start;
 }
 
-@media (min-width: 900px) {
-  .timetable-layout--split {
-    grid-template-columns: minmax(0, 1fr) 260px;
-  }
+.timetable-gaps {
+  padding: 12px 14px;
+  border-radius: 9px;
+  color: #875817;
+  background: #fff8ed;
+  font-size: 13px;
 }
 
 .timetable-gaps__title {
   margin: 0 0 4px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -275,8 +270,15 @@ function dayLabel(day: number): string {
   white-space: nowrap;
 }
 
+/* 同一格有两门以上课，即时间重叠：整格标红，并给出文字标记（不只靠颜色）。 */
 .timetable-cell--multi {
-  background: #fff8ed;
+  background: #fff4f2;
+  box-shadow: inset 0 0 0 1px #efc4bd;
+}
+
+.timetable-cell--multi .timetable-chip {
+  color: #8b3c31;
+  background: #fbe3df;
 }
 
 .timetable-stack {

@@ -14,6 +14,8 @@ const store = usePlanningStore();
 const widePage = computed(() =>
   ["/", "/me", "/plan/credits"].includes(route.path),
 );
+// 结果页要宽屏两栏（左课表、右课程），比其他宽页更宽，单独给一个类。
+const resultPage = computed(() => route.path === "/plan/result");
 const recordsTarget = computed(() =>
   store.sessionStatus === "ready" ? "/records" : "/setup",
 );
@@ -88,7 +90,10 @@ const modeLabel = computed(() =>
     <main
       id="main-content"
       class="page-shell"
-      :class="{ 'page-shell--wide': widePage }"
+      :class="{
+        'page-shell--wide': widePage,
+        'page-shell--result': resultPage,
+      }"
       tabindex="-1"
     >
       <RouterView />

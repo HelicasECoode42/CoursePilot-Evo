@@ -11,8 +11,16 @@
 
 import type { Issue, PlanValidation } from "../contracts";
 
-const GENERIC =
-  "这一项暂时无法确认。可以展开排查详情查看原因，或调整条件后重新核验。";
+/**
+ * 没有对应文案的代码：显示代码与服务端原文，绝不再用「这一项暂时无法确认」这类笼统话。
+ * 服务端原文是 Java/Python 给出的事实描述，只原样呈现。
+ */
+export function unmappedUnknownText(
+  issue: Pick<Issue, "code" | "message">,
+): string {
+  const message = issue.message.trim();
+  return message === "" ? issue.code : `${issue.code}：${message}`;
+}
 
 export const UNKNOWN_EXPLANATIONS: Record<string, string> = {
   FAKE_MODEL:
@@ -55,6 +63,12 @@ export const UNKNOWN_EXPLANATIONS: Record<string, string> = {
     "这门课没有选定班次。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。",
   SECTION_UNASSIGNED:
     "这门课没有选定班次。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。",
+  OFFERING_NOT_CHECKED:
+    "服务端没有给出这个班次与你设定的硬时间条件的核对结果，不能判为没有冲突。可以换一个班次，或在目标里放宽时间条件后重新核验。",
+  CLASS_NOT_SELECTED:
+    "这门课还没有选定班次，上课时间无法确认。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。",
+  FIXTURE_DATA:
+    "这是演示数据，不代表真实课程与班次。可以把结果当作流程演示来看，不要据此安排真实选课。",
   PENDING_COURSE_UNCATEGORIZED:
     "有一门课程尚未出结果，而且系统无法确定它属于哪个类别，所以所有要求的缺口都暂不能确定。可以在学业资料里确认它的结果，并检查课程是否在培养方案中。",
 };
@@ -103,7 +117,7 @@ export function isVerificationLevelUnknown(code: string): boolean {
 }
 
 /** Java 的 PENDING_COURSE message 形如「课程 CODE 在修或结果未知，CATEGORY 类别的缺口不能确定」。 */
-const PENDING_COURSE_PATTERN =
+export const PENDING_COURSE_PATTERN =
   /课程 (\S+) 在修或结果未知(?:，(.+?) 类别的缺口不能确定)?/;
 
 function pendingCourseText(
@@ -111,7 +125,7 @@ function pendingCourseText(
   courseNames: Readonly<Record<string, string>>,
 ): string {
   const match = PENDING_COURSE_PATTERN.exec(issue.message);
-  if (!match) return GENERIC;
+  if (!match) return unmappedUnknownText(issue);
   const code = match[1];
   const category = match[2];
   const name = courseNames[code];
@@ -129,7 +143,7 @@ function pendingCourseText(
  */
 const SECTION_NOT_ASSIGNED_PATTERN = /^课程 (\S+)：(.+)$/;
 const SECTION_UNASSIGNED_PATTERN = /^课程 (\S+) 未指定班次/;
-const JAVA_UNASSIGNED_REASON =
+export const JAVA_UNASSIGNED_REASON =
   "方案里还没有为这门课选定班次，所以上课时间无法核验";
 
 /**
@@ -158,7 +172,8 @@ function sectionNotAssignedText(
   courseNames: Readonly<Record<string, string>>,
 ): string {
   const parsed = sectionNotAssignedReason(issue);
-  if (!parsed) return UNKNOWN_EXPLANATIONS[issue.code] ?? GENERIC;
+  if (!parsed)
+    return UNKNOWN_EXPLANATIONS[issue.code] ?? unmappedUnknownText(issue);
   const name = courseNames[parsed.courseCode];
   const label =
     name && name !== parsed.courseCode
@@ -222,5 +237,5 @@ export function explainUnknownIssue(
     ? OFFICIAL_UNVERIFIED_EXPLANATIONS.get(issue.code)
     : undefined;
   if (official !== undefined) return official;
-  return UNKNOWN_EXPLANATIONS[issue.code] ?? GENERIC;
+  return UNKNOWN_EXPLANATIONS[issue.code] ?? unmappedUnknownText(issue);
 }

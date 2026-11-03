@@ -53,9 +53,9 @@ describe("未知项文案", () => {
     expect(text.startsWith("99999999 在修")).toBe(true);
   });
 
-  it("PENDING_COURSE 的 message 不符合格式时退回通用说明，而不是报错", () => {
+  it("PENDING_COURSE 的 message 不符合格式时显示代码与服务端原文，而不是报错或笼统话", () => {
     const text = explainUnknownIssue(issue("PENDING_COURSE", "奇怪的格式"));
-    expect(text).toContain("排查详情");
+    expect(text).toBe("PENDING_COURSE：奇怪的格式");
   });
 
   it("每个已知代码都有可执行的建议（含“可以”或“请”）", () => {
@@ -64,8 +64,11 @@ describe("未知项文案", () => {
     }
   });
 
-  it("未知代码给出通用文案", () => {
-    expect(explainUnknownIssue(issue("SOMETHING_NEW"))).toContain("排查详情");
+  it("未知代码显示代码与服务端原文，不再给笼统文案", () => {
+    expect(explainUnknownIssue(issue("SOMETHING_NEW", "服务端原文"))).toBe(
+      "SOMETHING_NEW：服务端原文",
+    );
+    expect(explainUnknownIssue(issue("SOMETHING_NEW"))).toBe("SOMETHING_NEW");
   });
 
   it("换班后只有核验级的未知项被标记为过时，答复级项保留", () => {

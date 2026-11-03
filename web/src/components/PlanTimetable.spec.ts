@@ -235,7 +235,7 @@ describe("PlanTimetable detail cards", () => {
 });
 
 describe("PlanTimetable unplaced courses", () => {
-  it("lists courses without a usable section in a side list titled 未排进课表", () => {
+  it("lists courses without a usable section under the grid, titled 未排进课表", () => {
     const wrapper = mount(PlanTimetable, {
       props: {
         scope: "REAL_TIMETABLE",
@@ -250,12 +250,19 @@ describe("PlanTimetable unplaced courses", () => {
         ],
       },
     });
-    const side = wrapper.find(".timetable-gaps");
-    expect(side.find("h4").text()).toBe("未排进课表");
-    expect(side.text()).toContain(
+    const list = wrapper.find(".timetable-gaps");
+    expect(list.find("h4").text()).toBe("未排进课表");
+    expect(list.text()).toContain(
       "CS102：还没有选定班次，时间未知，未纳入课表。",
     );
-    expect(wrapper.find(".timetable-layout--split").exists()).toBe(true);
+    // 未排进课表列在格子之后，不再与课表并排。
+    expect(wrapper.find(".timetable-layout--split").exists()).toBe(false);
+    expect(wrapper.find(".timetable-scroll").exists()).toBe(true);
+    const grid = wrapper.find(".timetable-scroll").element;
+    expect(
+      grid.compareDocumentPosition(list.element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("does not split the layout when nothing is placed", () => {

@@ -350,16 +350,19 @@ describe("result page course search and replacement", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    const notice = wrapper.get('[aria-label="无法确认的项目"]');
+    // 方案级问题收在顶部徽标的展开明细里，不在页面上堆一块大提示。
+    await wrapper.get(".verdict-badge").trigger("click");
+    const notice = wrapper.get('[aria-label="方案级问题"]');
     expect(notice.text()).toContain("当前建议由演示模型生成。");
-    expect(notice.text()).toContain(
-      "部分班次的上课时间无法识别，无法确认是否冲突。",
-    );
     expect(notice.text()).not.toContain("FAKE_MODEL");
     expect(notice.text()).not.toContain("W2");
-    const cardNotice = wrapper.get('.option-section .notice[role="status"]');
-    expect(cardNotice.text()).not.toContain("TIME_UNPARSEABLE");
-    expect(cardNotice.text()).not.toContain("offeringSnapshot");
+    // 时间无法识别的问题归到 CS103 卡片上，只写一次，不带原始字段。
+    const cardIssues = wrapper.get('[aria-label="这门课的问题"]');
+    expect(cardIssues.text()).toContain(
+      "部分班次的上课时间无法识别，无法确认是否冲突。",
+    );
+    expect(cardIssues.text()).not.toContain("TIME_UNPARSEABLE");
+    expect(cardIssues.text()).not.toContain("offeringSnapshot");
     const details = wrapper.get("details.debug-id");
     expect((details.element as HTMLDetailsElement).open).toBe(false);
     expect(details.text()).toContain("FAKE_MODEL");
@@ -371,11 +374,20 @@ describe("result page course search and replacement", () => {
   const buttonByText = (wrapper: ReturnType<typeof mountPage>, text: string) =>
     wrapper.findAll("button").find((item) => item.text() === text);
 
+  /** 换班：点这门课卡片上的「选班次 / 换班」按钮，列出它的班次。 */
   const openAndSearch = async (
     wrapper: ReturnType<typeof mountPage>,
     course: string,
   ) => {
-    await wrapper.get("#result-search-entry-0").trigger("click");
+    await wrapper.get(`#result-swap-0-${course}`).trigger("click");
+    await flushPromises();
+  };
+
+  /** 加课：在右栏顶部的加课框里输入课程名或课程号并搜索。 */
+  const searchAdd = async (
+    wrapper: ReturnType<typeof mountPage>,
+    course: string,
+  ) => {
     await wrapper.get("#result-search-course-0").setValue(course);
     await wrapper.get("form.search-form").trigger("submit");
     await flushPromises();
@@ -506,12 +518,12 @@ describe("result page course search and replacement", () => {
     stubOfferings();
     const wrapper = mountPage();
     expect(
-      wrapper.get("#result-search-entry-0").attributes("aria-expanded"),
+      wrapper.get("#result-swap-0-CS103").attributes("aria-expanded"),
     ).toBe("false");
 
     await openAndSearch(wrapper, "CS103");
     expect(
-      wrapper.get("#result-search-entry-0").attributes("aria-expanded"),
+      wrapper.get("#result-swap-0-CS103").attributes("aria-expanded"),
     ).toBe("true");
 
     const conflict = rowOf(wrapper, "CS103-01");
@@ -591,9 +603,9 @@ describe("result page course search and replacement", () => {
   it("says a course has no offerings in the current snapshot instead of reporting an error", async () => {
     stubOfferings();
     const wrapper = mountPage();
-    await openAndSearch(wrapper, "CS999");
+    await searchAdd(wrapper, "CS999");
 
-    expect(wrapper.text()).toContain("这门课在当前快照下没有班次");
+    expect(wrapper.text()).toContain("CS999 在当前快照下没有开课班次");
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
   });
 
@@ -608,10 +620,10 @@ describe("result page course search and replacement", () => {
       }),
     );
     const wrapper = mountPage();
-    await openAndSearch(wrapper, "CS999");
+    await searchAdd(wrapper, "CS999");
 
     expect(wrapper.text()).toContain("班次无法确认");
-    expect(wrapper.text()).not.toContain("这门课在当前快照下没有班次");
+    expect(wrapper.text()).not.toContain("在当前快照下没有开课班次");
     expect(wrapper.find("li.offering-row").exists()).toBe(false);
   });
 
@@ -697,7 +709,7 @@ describe("result page course search and replacement", () => {
     expect(wrapper.text()).toContain(
       "CS103-02 与 CS102-01 在周四第 7-8 节时间重叠",
     );
-    expect(wrapper.find(".notice--success").exists()).toBe(false);
+    expect(wrapper.find(".verdict-badge--pass").exists()).toBe(false);
   });
 
   it("states that the result is unknown rather than fine when re-verification is UNKNOWN", async () => {
@@ -724,7 +736,7 @@ describe("result page course search and replacement", () => {
 
     expect(wrapper.text()).toContain("部分条件无法确认");
     expect(wrapper.text()).toContain("CS103-02 的周次无法确认");
-    expect(wrapper.find(".notice--success").exists()).toBe(false);
+    expect(wrapper.find(".verdict-badge--pass").exists()).toBe(false);
   });
 
   it("does not show a green pass for VALID with SIMULATION scope", async () => {
@@ -738,7 +750,7 @@ describe("result page course search and replacement", () => {
     await recheck(wrapper);
 
     expect(wrapper.text()).toContain("模拟核验通过");
-    expect(wrapper.find(".notice--success").exists()).toBe(false);
+    expect(wrapper.find(".verdict-badge--pass").exists()).toBe(false);
   });
 
   it("shows a green pass only for VALID with REAL_TIMETABLE scope", async () => {
@@ -751,7 +763,7 @@ describe("result page course search and replacement", () => {
     await selectClass(wrapper, "CS103-02");
     await recheck(wrapper);
 
-    expect(wrapper.get(".notice--success").text()).toContain(
+    expect(wrapper.get(".verdict-badge--pass").text()).toContain(
       "本次快照下核验通过",
     );
   });
@@ -781,9 +793,10 @@ describe("result page course search and replacement", () => {
     await recheck(wrapper);
 
     expect(wrapper.text()).toContain("这是调整后重新核验的新版本");
+    await wrapper.get(".verdict-badge").trigger("click");
     expect(wrapper.text()).toContain("新方案仍有冲突");
     expect(wrapper.text()).not.toContain("课程层通过，时间待确认");
-    expect(wrapper.get("h2.sub-label").text()).toBe("方案 1");
+    expect(wrapper.get("h2.plan-bar__title").text()).toBe("方案 1");
   });
 
   it("ignores repeated clicks on re-verify while the request is in flight", async () => {
@@ -920,7 +933,7 @@ describe("result page course search and replacement", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    const heading = wrapper.get("h2.sub-label");
+    const heading = wrapper.get("h2.plan-bar__title");
     expect(heading.text()).toBe("方案 1");
     expect(heading.attributes("title")).toBe(PLAN_ID);
     expect(wrapper.get(".debug-id summary").text()).toBe("排查编号与详情");
@@ -947,7 +960,7 @@ describe("result page course search and replacement", () => {
     expect(request).toEqual({ previousPlanId: PLAN_ID, courseCode: "CS102" });
     expect(key).toMatch(/^web-/);
     expect(wrapper.text()).toContain("这是调整后重新核验的新版本");
-    expect(wrapper.get(".notice--success").text()).toContain(
+    expect(wrapper.get(".verdict-badge--pass").text()).toContain(
       "本次快照下核验通过",
     );
     expect(courseCard(wrapper, "程序设计基础（测试）")).toBeUndefined();
@@ -1041,7 +1054,7 @@ describe("result page course search and replacement", () => {
       .trigger("click");
     await flushPromises();
 
-    expect(wrapper.find(".notice--success").exists()).toBe(false);
+    expect(wrapper.find(".verdict-badge--pass").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("核验通过");
     expect(wrapper.text()).toContain("剩余课程的时间无法确认（测试）");
   });
@@ -1103,15 +1116,19 @@ describe("result page course search and replacement", () => {
     stubOfferings();
     const wrapper = mountPage();
     await flushPromises();
-    const blocks = wrapper.findAll(".plan-sections > section");
-    expect(blocks).toHaveLength(2);
-    expect(blocks[0].text()).toContain("本学期课表核验：通过");
-    expect(blocks[0].classes()).toContain("notice--success");
-    expect(blocks[1].text()).toContain("毕业要求核对：无法确认");
-    expect(blocks[1].classes()).toContain("notice--warning");
-    expect(blocks[1].text()).toContain("有 1 条培养方案说明需人工确认");
-    expect(blocks[1].text()).not.toContain("测试表!A7");
-    expect(wrapper.find(".plan-sections").text()).toContain(
+    const badges = wrapper.findAll(".verdict-badge");
+    expect(badges).toHaveLength(2);
+    expect(badges[0].text()).toBe("课表：通过");
+    expect(badges[0].classes()).toContain("verdict-badge--pass");
+    expect(badges[1].text()).toBe("毕业要求：需人工确认 1 条");
+    expect(badges[1].classes()).toContain("verdict-badge--pending");
+    await badges[1].trigger("click");
+    const details = wrapper.get(".verdict-details");
+    expect(details.text()).toContain("本学期课表核验：通过");
+    expect(details.text()).toContain("毕业要求核对：无法确认");
+    expect(details.text()).toContain("有 1 条培养方案说明需人工确认");
+    expect(details.text()).not.toContain("测试表!A7");
+    expect(details.text()).toContain(
       "总体：部分条件无法确认（取两项中较差的结果）",
     );
   });
@@ -1155,13 +1172,111 @@ describe("result page course search and replacement", () => {
     stubOfferings();
     const wrapper = mountPage();
     await flushPromises();
-    const blocks = wrapper.findAll(".plan-sections > section");
-    expect(blocks[0].text()).toContain("本学期课表核验：不通过");
-    expect(blocks[0].text()).toContain("周一 1-2 节两门课冲突");
-    expect(blocks[0].classes()).toContain("notice--error");
-    expect(blocks[1].text()).toContain("毕业要求核对：通过");
-    expect(blocks[1].text()).toContain("已核对，未发现冲突或不满足项。");
+    const badges = wrapper.findAll(".verdict-badge");
+    expect(badges[0].text()).toBe("课表：不通过");
+    expect(badges[0].classes()).toContain("verdict-badge--fail");
+    expect(badges[1].text()).toBe("毕业要求：通过");
     // 毕业要求分项不依赖班次，真实的 VALID 仍可是通过；课表冲突不会把它拉成不通过。
-    expect(blocks[1].classes()).toContain("notice--success");
+    expect(badges[1].classes()).toContain("verdict-badge--pass");
+    await badges[0].trigger("click");
+    expect(wrapper.get(".verdict-details").text()).toContain(
+      "周一 1-2 节两门课冲突",
+    );
+  });
+
+  it("uses two columns with a sticky timetable at 1440px and stacks below 1024px", async () => {
+    const original = globalThis.innerWidth;
+    try {
+      Object.defineProperty(globalThis, "innerWidth", {
+        configurable: true,
+        value: 1440,
+      });
+      stubOfferings();
+      const wide = mountPage();
+      await flushPromises();
+      expect(wide.find(".plan-grid--split").exists()).toBe(true);
+      expect(wide.find(".plan-grid__timetable").exists()).toBe(true);
+      expect(wide.find(".plan-grid__courses").exists()).toBe(true);
+      wide.unmount();
+
+      Object.defineProperty(globalThis, "innerWidth", {
+        configurable: true,
+        value: 390,
+      });
+      const narrow = mountPage();
+      await flushPromises();
+      expect(narrow.find(".plan-grid--split").exists()).toBe(false);
+      expect(narrow.find(".plan-grid").exists()).toBe(true);
+      narrow.unmount();
+    } finally {
+      Object.defineProperty(globalThis, "innerWidth", {
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+
+  it("shows one unplaced line per course, with the specific reason, on that course's card", async () => {
+    const result = answer();
+    result.unknowns = [
+      {
+        code: "SECTION_NOT_ASSIGNED",
+        message: "课程 CS103：与其他推荐课程的时间冲突",
+        field: null,
+        retryable: false,
+      },
+    ];
+    result.recommendations[0].verification = validation({
+      verdict: "UNKNOWN",
+      scope: "COURSE_ONLY",
+      unknownChecks: [
+        {
+          code: "SECTION_UNASSIGNED",
+          message: "课程 CS103 未指定班次，无法核验其时间与班次归属",
+          field: null,
+          retryable: false,
+        },
+      ],
+    });
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const card = courseCard(wrapper, "数据结构（测试）")!;
+    const lines = card.findAll(".course-card__issues li");
+    expect(lines).toHaveLength(1);
+    expect(lines[0].text()).toBe("未排进课表：与其他推荐课程的时间冲突");
+    expect(wrapper.text().match(/没有选定班次/g) ?? []).toHaveLength(0);
+    expect(wrapper.text()).not.toContain("暂时无法确认");
+  });
+
+  it("explains that adding a course is not yet supported and never enables an add button", async () => {
+    stubOfferings();
+    const wrapper = mountPage();
+    await searchAdd(wrapper, "CS103");
+
+    expect(wrapper.text()).toContain("加课还不能加入方案");
+    const addButtons = wrapper
+      .findAll("button")
+      .filter((button) => button.text().includes("加入方案"));
+    expect(addButtons.length).toBeGreaterThan(0);
+    for (const button of addButtons) {
+      expect(button.attributes("disabled")).toBeDefined();
+    }
+  });
+
+  it("closes the swap panel with Escape and returns focus to its card button", async () => {
+    stubOfferings();
+    const wrapper = mountPage();
+    await openAndSearch(wrapper, "CS103");
+    expect(wrapper.find(".swap-panel").exists()).toBe(true);
+
+    await wrapper.get(".swap-panel").trigger("keydown", { key: "Escape" });
+    await flushPromises();
+    expect(wrapper.find(".swap-panel").exists()).toBe(false);
+    expect(
+      wrapper.get("#result-swap-0-CS103").attributes("aria-expanded"),
+    ).toBe("false");
   });
 });

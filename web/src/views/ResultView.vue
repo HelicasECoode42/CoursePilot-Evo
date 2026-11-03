@@ -3,11 +3,19 @@
  * 规划结果页（E-F4）。
  *
  * 前半：把 store 里的 PlanningAnswer 显示出来，颜色与文案交给 domain/answer-display.ts。
- * 后半：在结果页搜索某门课的开课班次，并替换方案里的一门课。
+ * 后半：换班（替换方案里的一门课）、删除、加课搜索。
  *   - 搜索时的「有冲突 / 可选 / 无法确认」只是预览，不是核验结论；
- *   - 只有替换接口返回的 verification（对整份新方案的判决）才是结论，原样展示。
+ *   - 只有替换接口返回的 verification（对整份新方案的判决）才是结论，原样展示；
+ *   - 问题按课程归组，显示在课程卡片上；方案级问题收在顶部徽标的展开明细里（见 domain/result-issues.ts）。
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api";
 import { ApiFailure } from "../api/client";
@@ -33,10 +41,11 @@ import {
 import {
   SECTION_TITLE,
   hasSections,
-  sectionLines,
   sectionTone,
+  UNMODELED_RULES_CODE,
+  unmodeledRuleLine,
   verdictBadge,
-  type SectionLine,
+  type SectionTone,
 } from "../domain/plan-sections";
 import {
   teacherReviewNotes,
@@ -49,6 +58,16 @@ import {
   type UnknownContext,
 } from "../domain/unknown-explain";
 import {
+  groupIssues,
+  isWideLayout,
+  overallBadge,
+  requirementTag,
+  sectionBadges,
+  type CourseIssueLine,
+  type GroupedIssues,
+  type SectionBadge,
+} from "../domain/result-issues";
+import {
   isOfficialUnverified,
   planUsesSimulation,
 } from "../domain/offering-selection";
@@ -59,6 +78,7 @@ import {
   type TimetableSource,
 } from "../domain/timetable";
 import PlanTimetable from "../components/PlanTimetable.vue";
+import OfferingResults from "../components/OfferingResults.vue";
 import { resolveCourseQuery } from "../domain/course-query";
 import CourseReviewBasis from "../components/CourseReviewBasis.vue";
 import ReviewSummary from "../components/ReviewSummary.vue";
@@ -226,6 +246,7 @@ const unknownContext = computed<UnknownContext>(() => ({
 
 /** 显示不确定事实的用户文案；原始服务诊断只放在折叠的排查详情中。文案表见 domain/unknown-explain.ts。 */
 function explainUnknown(issue: Issue): string {
+  if (issue.code === UNMODELED_RULES_CODE) return unmodeledRuleLine(issue);
   return explainUnknownIssue(issue, courseNames.value, unknownContext.value);
 }
 
@@ -252,10 +273,6 @@ const planIsSimulated = computed(() =>
     recommendations.value.map((item) => item.verification.scope),
   ),
 );
-
-const studentUnknowns = computed(() => [
-  ...new Set(unknowns.value.map(explainUnknown)),
-]);
 
 /** 展示门禁：统一交给 describeVerification，带受控缺口标记时降级。 */
 function verificationView(validation: PlanValidation): VerificationView {
@@ -285,24 +302,10 @@ const planEntries = computed<PlanEntry[]>(() =>
   }),
 );
 
-function verdictClass(view: VerificationView): string {
-  if (view.allowGreenPass) return "notice--success";
-  if (view.tone === "conflict") return "notice--error";
-  return "notice--warning";
-}
-
-function issuesOf(validation: PlanValidation): Issue[] {
-  return [...validation.violations, ...validation.unknownChecks];
-}
-
 /** 两个分项（课表 / 毕业要求）。旧后端不返回 sections 时为空，页面退回合并展示。 */
 function sectionsOf(validation: PlanValidation | null): PlanSection[] {
   if (validation === null || !hasSections(validation)) return [];
   return validation.sections ?? [];
-}
-
-function sectionLinesOf(section: PlanSection): SectionLine[] {
-  return sectionLines(section, explainUnknown);
 }
 
 /**
@@ -311,33 +314,19 @@ function sectionLinesOf(section: PlanSection): SectionLine[] {
  *   - 毕业要求分项不依赖班次，只排除模拟方案；
  *   - 两者都不能带受控缺口标记（假模型/假工具）。
  */
-function sectionClassOf(
+/** 分项的颜色档位（绿色只在真实依据下出现，见 sectionTone）。 */
+function sectionToneOf(
   section: PlanSection,
   validation: PlanValidation | null,
   view: VerificationView,
-): string {
+): SectionTone {
   const scope = validation?.scope ?? null;
   const realCheck =
     view.tone !== "simulated" &&
     (section.scope === "TIMETABLE"
       ? scope === "REAL_TIMETABLE"
       : scope !== null && scope !== "SIMULATION");
-  const tone = sectionTone(section.verdict, realCheck);
-  if (tone === "pass") return "notice--success";
-  if (tone === "fail") return "notice--error";
-  return "notice--warning";
-}
-
-function planIssueText(
-  validation: PlanValidation | null,
-  issue: Issue,
-): string {
-  if (validation === null) return explainUnknown(issue);
-  const isUnknown = validation.unknownChecks.some(
-    (candidate) =>
-      candidate.code === issue.code && candidate.message === issue.message,
-  );
-  return isUnknown ? explainUnknown(issue) : issue.message;
+  return sectionTone(section.verdict, realCheck);
 }
 
 function diagnosticsOf(entry: PlanEntry): Issue[] {
@@ -351,11 +340,99 @@ function courseCodesOf(entry: PlanEntry): string {
   return entry.plan.items.map((item) => item.courseCode).join("、") || "无";
 }
 
+/* ---------- 布局、问题归组与顶部徽标 ---------- */
+
+/** 宽屏（≥1024px）两栏：左课表（粘性）、右课程；窄屏上下排列。断点与 domain/result-issues.ts 一致。 */
+const wideLayout = ref(readWideLayout());
+function readWideLayout(): boolean {
+  return (
+    typeof globalThis.innerWidth === "number" &&
+    isWideLayout(globalThis.innerWidth)
+  );
+}
+function onWindowResize() {
+  wideLayout.value = readWideLayout();
+}
+onMounted(() => globalThis.addEventListener("resize", onWindowResize));
+onBeforeUnmount(() => globalThis.removeEventListener("resize", onWindowResize));
+
+/** 顶部徽标展开的方案级明细，按方案的 planId 记录。 */
+const verdictOpenFor = ref<string | null>(null);
+function isVerdictOpen(entry: PlanEntry): boolean {
+  return verdictOpenFor.value === entry.plan.planId;
+}
+function toggleVerdict(entry: PlanEntry) {
+  verdictOpenFor.value = isVerdictOpen(entry) ? null : entry.plan.planId;
+}
+
+/**
+ * 一份方案的问题归组：违规与未知项（替换后只用新判决，答复级的核验项已过时，同 unknowns）。
+ * 结果按课程归到卡片上，其余是方案级，供展开明细使用。
+ */
+function groupsOf(entry: PlanEntry): GroupedIssues {
+  const validation = entry.plan.verification;
+  const answerLevel =
+    entry.plan.replacedFrom !== null
+      ? (result.value?.unknowns ?? []).filter(
+          (issue) => !isVerificationLevelUnknown(issue.code),
+        )
+      : (result.value?.unknowns ?? []);
+  const unknownList = collectUnknowns(
+    answerLevel,
+    validation === null ? [] : [validation],
+  );
+  return groupIssues(
+    validation?.violations ?? [],
+    unknownList,
+    entry.plan.items.map((item) => item.courseCode),
+    explainUnknown,
+  );
+}
+
+function issuesOfCourse(
+  entry: PlanEntry,
+  courseCode: string,
+): CourseIssueLine[] {
+  return groupsOf(entry).byCourse[courseCode] ?? [];
+}
+
+function sectionToneBadge(
+  section: PlanSection,
+  validation: PlanValidation,
+  view: VerificationView,
+): SectionTone {
+  return sectionToneOf(section, validation, view);
+}
+
+/** 顶部两个徽标：课表 / 毕业要求。没有分项的旧数据只给一个总判决。 */
+function badgesOf(entry: PlanEntry): SectionBadge[] {
+  const validation = entry.plan.verification;
+  const view = entry.view;
+  if (validation === null || view === null) return [];
+  const officialUnverified = unknownContext.value.officialUnverified === true;
+  if (!hasSections(validation)) {
+    const tone: SectionTone =
+      view.tone === "real-pass"
+        ? "pass"
+        : view.tone === "conflict"
+          ? "fail"
+          : "pending";
+    return [overallBadge(view.label, tone)];
+  }
+  return sectionBadges(
+    sectionsOf(validation),
+    (section) => sectionToneBadge(section, validation, view),
+    officialUnverified,
+  );
+}
+
 /* ---------- 课程名与删除课程 ---------- */
 
 /** 课程号 → 课程名，来自培养方案的课程目录。读不到时页面只显示课程号，并说明。 */
 const courseNames = ref<Record<string, string>>({});
 const courseCredits = ref<Record<string, number | null>>({});
+/** 课程号 → 培养方案里的类别（用于「必修 / 选修」标签）。 */
+const courseCategories = ref<Record<string, string>>({});
 const courseReviews = ref<
   Record<
     string,
@@ -377,6 +454,7 @@ async function loadCourseNames(curriculumSnapshotId: string) {
   courseNamesStatus.value = "loading";
   const names: Record<string, string> = {};
   const credits: Record<string, number | null> = {};
+  const categories: Record<string, string> = {};
   try {
     let cursor: string | null = null;
     for (let page = 0; page < MAX_COURSE_PAGES; page += 1) {
@@ -385,17 +463,20 @@ async function loadCourseNames(curriculumSnapshotId: string) {
       for (const course of list.items) {
         names[course.courseCode] = course.name;
         credits[course.courseCode] = course.credits;
+        categories[course.courseCode] = course.category;
       }
       if (list.nextCursor === null) break;
       cursor = list.nextCursor;
     }
     courseNames.value = names;
     courseCredits.value = credits;
+    courseCategories.value = categories;
     courseNamesStatus.value = "ready";
   } catch {
     if (version !== courseNamesVersion) return;
     courseNames.value = {};
     courseCredits.value = {};
+    courseCategories.value = {};
     courseNamesStatus.value = "error";
   }
 }
@@ -517,6 +598,9 @@ let deleteKeyFor: string | null = null;
 interface PlanCourseCard {
   courseCode: string;
   name: string | null;
+  credits: number | null;
+  /** 培养方案类别映射出的「必修 / 选修」标签；取不到类别时为 null。 */
+  tag: "必修" | "选修" | null;
   classId: string | null;
   teacher: string;
   /** 班次资料里的教师键（与评价的 teacherKey 对应）；没有班次资料时为 null。 */
@@ -567,6 +651,8 @@ function cardsOf(entry: PlanEntry): PlanCourseCard[] {
     return {
       courseCode: item.courseCode,
       name: courseNames.value[item.courseCode] ?? null,
+      credits: courseCredits.value[item.courseCode] ?? null,
+      tag: requirementTag(courseCategories.value[item.courseCode]),
       classId: item.classId,
       teacher,
       teacherKey: offering?.teacherKey ?? null,
@@ -620,7 +706,7 @@ async function deleteCourse(entry: PlanEntry, courseCode: string) {
         [recommendationId]:
           "课程已移除。当前方案为空，尚无核验结果；你可以返回问卷重新生成方案。",
       };
-    openKey.value = null;
+    panel.value = null;
     resetSearch();
   } catch (error) {
     if (version !== deleteVersion || isAborted(error)) return;
@@ -652,7 +738,13 @@ interface OfferingRow {
   teacherText: string;
 }
 
-const openKey = ref<string | null>(null);
+/** 当前展开的面板：某门课的换班，或加课搜索。同一时间只开一个。 */
+interface OpenPanel {
+  planId: string;
+  mode: "swap" | "add";
+  courseCode: string | null;
+}
+const panel = ref<OpenPanel | null>(null);
 const courseInput = ref("");
 const searchStatus = ref<"idle" | "loading" | "ready" | "error">("idle");
 const searchError = ref("");
@@ -714,7 +806,7 @@ function resetSearch() {
 }
 
 function resetPlanEdits() {
-  openKey.value = null;
+  panel.value = null;
   resetSearch();
 }
 
@@ -821,14 +913,23 @@ onBeforeUnmount(() => {
   deleteController?.abort();
 });
 
-function entryButtonId(index: number): string {
-  return `result-search-entry-${index}`;
-}
 function panelId(index: number): string {
-  return `result-search-panel-${index}`;
+  return `result-panel-${index}`;
 }
 function courseInputId(index: number): string {
   return `result-search-course-${index}`;
+}
+function swapButtonId(index: number, courseCode: string): string {
+  return `result-swap-${index}-${courseCode}`;
+}
+function planTitleId(index: number): string {
+  return `result-plan-title-${index}`;
+}
+function addTitleId(index: number): string {
+  return `result-add-title-${index}`;
+}
+function verdictId(index: number): string {
+  return `result-verdict-${index}`;
 }
 const focusTargets = new Map<string, HTMLElement>();
 
@@ -842,25 +943,58 @@ function focusById(id: string) {
   void nextTick(() => focusTargets.get(id)?.focus());
 }
 
-function isOpen(entry: PlanEntry): boolean {
-  return openKey.value === entry.recommendation.planId;
+function isSwapOpen(entry: PlanEntry, courseCode: string): boolean {
+  return (
+    panel.value?.planId === entry.recommendation.planId &&
+    panel.value.mode === "swap" &&
+    panel.value.courseCode === courseCode
+  );
 }
 
-function togglePanel(entry: PlanEntry) {
-  if (isOpen(entry)) {
+function isAddOpen(entry: PlanEntry): boolean {
+  return (
+    panel.value?.planId === entry.recommendation.planId &&
+    panel.value.mode === "add"
+  );
+}
+
+/** 收起面板，并把焦点还给触发它的按钮。 */
+function closePanel(entry: PlanEntry) {
+  const previous = panel.value;
+  panel.value = null;
+  resetSearch();
+  if (previous?.mode === "swap" && previous.courseCode !== null) {
+    focusById(swapButtonId(entry.index, previous.courseCode));
+  } else {
+    focusById(courseInputId(entry.index));
+  }
+}
+
+/** 开始一次搜索：作废上一次未完成的搜索与替换。 */
+function beginSearch(): { version: number; controller: AbortController } {
+  const version = ++searchVersion;
+  searchController?.abort();
+  const controller = new AbortController();
+  searchController = controller;
+  clearSelection();
+  searchStatus.value = "loading";
+  searchError.value = "";
+  return { version, controller };
+}
+
+/** 换班：在卡片下方列出这门课的全部班次（与方案其他课程比较冲突）。再点一次收起。 */
+function toggleSwap(entry: PlanEntry, courseCode: string) {
+  if (isSwapOpen(entry, courseCode)) {
     closePanel(entry);
     return;
   }
-  resetSearch();
-  courseInput.value = "";
-  openKey.value = entry.recommendation.planId;
-  focusById(courseInputId(entry.index));
-}
-
-function closePanel(entry: PlanEntry) {
-  openKey.value = null;
-  resetSearch();
-  focusById(entryButtonId(entry.index));
+  const { version, controller } = beginSearch();
+  panel.value = {
+    planId: entry.recommendation.planId,
+    mode: "swap",
+    courseCode,
+  };
+  void loadOfferings(entry, courseCode, version, controller);
 }
 
 /** 两段时段冲突 = 同一星期、节次区间相交、且周次有交集。周次不相交的单双周课不冲突。 */
@@ -873,21 +1007,20 @@ function meetingsOverlap(a: Meeting, b: Meeting): boolean {
   );
 }
 
+/** 加课搜索：按课程名或课程号解析出一门课，再列出它的班次。 */
 async function runSearch(entry: PlanEntry) {
   const typed = courseInput.value.trim();
+  panel.value = {
+    planId: entry.recommendation.planId,
+    mode: "add",
+    courseCode: null,
+  };
   if (typed === "") {
     searchStatus.value = "error";
-    searchError.value = "请先输入课程号。";
+    searchError.value = "请先输入课程名或课程号。";
     return;
   }
-  const plan = entry.plan;
-  const version = ++searchVersion;
-  searchController?.abort();
-  const controller = new AbortController();
-  searchController = controller;
-  clearSelection();
-  searchStatus.value = "loading";
-  searchError.value = "";
+  const { version, controller } = beginSearch();
 
   let course: string;
   try {
@@ -915,7 +1048,20 @@ async function runSearch(entry: PlanEntry) {
     searchError.value = visibleError(error);
     return;
   }
+  await loadOfferings(entry, course, version, controller);
+}
 
+/**
+ * 读取一门课的班次，并与方案中其他已选班次比较时间（只是预览）。
+ * 换班与加课共用这一段；version 过期时结果被丢弃。
+ */
+async function loadOfferings(
+  entry: PlanEntry,
+  course: string,
+  version: number,
+  controller: AbortController,
+) {
+  const plan = entry.plan;
   // 方案里其他已选班次的课程：去查它们的时间，用来做搜索时的预览比较。
   const selected = plan.items.filter(
     (item) => item.classId !== null && item.courseCode !== course,
@@ -1143,9 +1289,9 @@ async function recheck(entry: PlanEntry) {
       ...replaced,
       empty: false,
     });
-    openKey.value = null;
+    panel.value = null;
     resetSearch();
-    focusById(entryButtonId(entry.index));
+    focusById(swapButtonId(entry.index, course));
   } catch (error) {
     if (version !== replaceVersion || isAborted(error)) return;
     replaceStatus.value = "error";
@@ -1159,7 +1305,7 @@ async function goBackToQuestions() {
 </script>
 
 <template>
-  <section class="question-card" aria-labelledby="result-title">
+  <section class="result-page" aria-labelledby="result-title">
     <p class="eyebrow">下学期选课规划</p>
     <h1 id="result-title" tabindex="-1">{{ headline }}</h1>
 
@@ -1296,17 +1442,85 @@ async function goBackToQuestions() {
         </p>
       </div>
 
-      <div v-else-if="planEntries.length" class="option-section">
-        <article
+      <div v-else-if="planEntries.length" class="result-plans">
+        <section
           v-for="entry in planEntries"
           :key="entry.recommendation.planId"
+          class="plan-block"
+          :aria-labelledby="planTitleId(entry.index)"
         >
-          <h2 class="sub-label" :title="entry.plan.planId">
-            方案 {{ entry.index + 1 }}
-          </h2>
-          <p v-if="entry.plan.replacedFrom" class="microcopy">
-            这是调整后重新核验的新版本。下面的核验结论只针对这一版。
+          <div class="plan-bar">
+            <h2
+              :id="planTitleId(entry.index)"
+              class="plan-bar__title"
+              :title="entry.plan.planId"
+            >
+              方案 {{ entry.index + 1 }}
+            </h2>
+            <div
+              v-if="badgesOf(entry).length"
+              class="verdict-badges"
+              role="group"
+              aria-label="核验结论"
+            >
+              <button
+                v-for="badge in badgesOf(entry)"
+                :key="badge.scope"
+                class="verdict-badge"
+                :class="`verdict-badge--${badge.tone}`"
+                type="button"
+                :aria-expanded="isVerdictOpen(entry) ? 'true' : 'false'"
+                :aria-controls="verdictId(entry.index)"
+                @click="toggleVerdict(entry)"
+              >
+                {{ badge.label }}
+              </button>
+            </div>
+          </div>
+          <p class="result-note">
+            班次搜索里的「冲突」「无法确认」只是预览；换班或加课后，以整份方案的重新核验为准。
           </p>
+
+          <div
+            v-if="isVerdictOpen(entry)"
+            :id="verdictId(entry.index)"
+            class="verdict-details"
+          >
+            <ul
+              v-if="
+                entry.plan.verification && hasSections(entry.plan.verification)
+              "
+              class="summary-list"
+              aria-label="两个分项的结论"
+            >
+              <li
+                v-for="section in sectionsOf(entry.plan.verification)"
+                :key="section.scope"
+              >
+                {{ SECTION_TITLE[section.scope] }}：{{
+                  verdictBadge(section.verdict)
+                }}
+              </li>
+            </ul>
+            <p v-if="entry.view" class="microcopy">
+              {{
+                entry.plan.verification && hasSections(entry.plan.verification)
+                  ? `总体：${entry.view.label}（取两项中较差的结果）`
+                  : `${entry.view.label}：${entry.view.detail}`
+              }}
+            </p>
+            <ul
+              v-if="groupsOf(entry).planLevel.length"
+              class="summary-list"
+              aria-label="方案级问题"
+            >
+              <li v-for="line in groupsOf(entry).planLevel" :key="line.key">
+                {{ line.text }}
+              </li>
+            </ul>
+            <p v-else class="microcopy">没有需要单独说明的方案级问题。</p>
+          </div>
+
           <div
             v-if="entry.plan.empty"
             class="notice notice--warning"
@@ -1317,223 +1531,11 @@ async function goBackToQuestions() {
               课程已从方案中移除。返回问卷后可以重新生成方案。
             </p>
           </div>
-          <div
-            v-else-if="entry.view && sectionsOf(entry.plan.verification).length"
-            class="plan-sections"
-            aria-label="方案核验分项"
-          >
-            <p class="microcopy">
-              总体：{{ entry.view.label }}（取两项中较差的结果）
-            </p>
-            <section
-              v-for="section in sectionsOf(entry.plan.verification)"
-              :key="section.scope"
-              class="notice"
-              :class="
-                sectionClassOf(section, entry.plan.verification, entry.view)
-              "
-              role="status"
-              :aria-label="SECTION_TITLE[section.scope]"
-            >
-              <strong
-                >{{ SECTION_TITLE[section.scope] }}：{{
-                  verdictBadge(section.verdict)
-                }}</strong
-              >
-              <ul v-if="sectionLinesOf(section).length" class="summary-list">
-                <li v-for="line in sectionLinesOf(section)" :key="line.key">
-                  {{ line.text }}
-                </li>
-              </ul>
-              <p v-else-if="section.verdict === 'VALID'" class="microcopy">
-                已核对，未发现冲突或不满足项。
-              </p>
-            </section>
-          </div>
-          <div
-            v-else-if="entry.view"
-            class="notice"
-            :class="verdictClass(entry.view)"
-            role="status"
-          >
-            <strong>{{ entry.view.label }}</strong>
-            <ul
-              v-if="
-                entry.plan.verification &&
-                issuesOf(entry.plan.verification).length
-              "
-              class="summary-list"
-            >
-              <li
-                v-for="issue in entry.plan.verification
-                  ? issuesOf(entry.plan.verification)
-                  : []"
-                :key="issue.code + issue.message"
-              >
-                {{ planIssueText(entry.plan.verification, issue) }}
-              </li>
-            </ul>
-            <p v-else class="microcopy">{{ entry.view.detail }}</p>
-          </div>
-          <ul class="course-cards" aria-label="方案中的课程">
-            <li
-              v-for="(card, cardIndex) in cardsOf(entry)"
-              :key="`${card.courseCode}-${cardIndex}`"
-              class="course-card"
-            >
-              <div class="course-card__head">
-                <div class="course-card__title">
-                  <strong>{{ card.name ?? card.courseCode }}</strong>
-                  <span v-if="card.name !== null" class="course-card__code">{{
-                    card.courseCode
-                  }}</span>
-                </div>
-                <button
-                  v-if="entry.plan.items.length > 0"
-                  class="button button--quiet course-card__delete"
-                  type="button"
-                  :disabled="deleting !== null"
-                  @click="deleteCourse(entry, card.courseCode)"
-                >
-                  删除这门课
-                  <span class="visually-hidden">
-                    （{{ card.name ?? card.courseCode }}）
-                  </span>
-                </button>
-              </div>
-              <dl class="course-card__facts">
-                <div>
-                  <dt>学分</dt>
-                  <dd>
-                    {{
-                      courseCredits[card.courseCode] == null
-                        ? "待确认"
-                        : courseCredits[card.courseCode]
-                    }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>教师</dt>
-                  <dd>{{ card.teacher }}</dd>
-                </div>
-                <div>
-                  <dt>上课时间</dt>
-                  <dd>{{ card.time }}</dd>
-                </div>
-                <div v-if="card.classId !== null">
-                  <dt>班次</dt>
-                  <dd class="course-card__small">{{ card.classId }}</dd>
-                </div>
-              </dl>
-              <p v-if="card.rationaleWasReused" class="microcopy">
-                以下理由来自原推荐；方案调整后未重新生成。
-              </p>
-              <CourseReviewBasis
-                :course-code="card.courseCode"
-                :review-status="courseReviews[card.courseCode]?.status ?? null"
-                :review-error="courseReviews[card.courseCode]?.error ?? ''"
-                :reason="
-                  card.rationale?.reason ??
-                  (card.rationaleWasChanged
-                    ? '班次已调整，此版本未生成新的推荐理由。'
-                    : '暂无具体理由。')
-                "
-                :course-source-ref-ids="
-                  card.rationale?.courseSourceRefIds ?? []
-                "
-                :review-basis-status="card.rationale?.reviewBasisStatus ?? null"
-                :rationale-source="card.rationale?.rationaleSource ?? null"
-                :review-note-ids="card.rationale?.reviewNoteIds ?? []"
-                :review-evidence-refs="card.rationale?.reviewEvidenceRefs ?? []"
-                :review-notes="courseReviews[card.courseCode]?.notes ?? []"
-                @load="onReviewBasisLoad(card.courseCode)"
-              />
-              <details @toggle="onEvidenceToggle(card, $event)">
-                <summary>查看评价维度汇总与资料</summary>
-                <p
-                  v-if="
-                    !courseReviews[card.courseCode] ||
-                    courseReviews[card.courseCode].status === 'loading'
-                  "
-                >
-                  正在读取评价…
-                </p>
-                <p
-                  v-else-if="courseReviews[card.courseCode].status === 'error'"
-                >
-                  评价读取失败，请重新展开重试。
-                </p>
-                <ReviewSummary
-                  v-if="
-                    courseReviews[card.courseCode]?.status === 'ready' &&
-                    unboundNotesOf(card.courseCode).length > 0
-                  "
-                  title="课程整体评价（未绑定老师）"
-                  :course-code="card.courseCode"
-                  :notes="unboundNotesOf(card.courseCode)"
-                  :unconfirmed="courseReviews[card.courseCode].unknown"
-                />
-                <p
-                  v-if="
-                    card.teacherKey !== null &&
-                    teacherReviews[
-                      teacherReviewKey(card.courseCode, card.teacherKey)
-                    ]?.status === 'loading'
-                  "
-                  class="microcopy"
-                >
-                  正在读取本班教师的评价…
-                </p>
-                <template
-                  v-if="
-                    card.teacherKey !== null &&
-                    teacherReviews[
-                      teacherReviewKey(card.courseCode, card.teacherKey)
-                    ]?.status === 'ready'
-                  "
-                >
-                  <ReviewSummary
-                    v-if="
-                      teacherReviews[
-                        teacherReviewKey(card.courseCode, card.teacherKey)
-                      ].notes.length > 0
-                    "
-                    :title="`本班教师评价（${card.teacher}）`"
-                    :course-code="card.courseCode"
-                    :notes="
-                      teacherReviews[
-                        teacherReviewKey(card.courseCode, card.teacherKey)
-                      ].notes
-                    "
-                    :unconfirmed="
-                      teacherReviews[
-                        teacherReviewKey(card.courseCode, card.teacherKey)
-                      ].unknown
-                    "
-                  />
-                  <p v-else class="microcopy">
-                    这位老师暂无绑定到本人的评价记录。
-                  </p>
-                </template>
-                <p v-if="boundElsewhereCount(card) > 0" class="microcopy">
-                  另有
-                  {{ boundElsewhereCount(card) }}
-                  条评价绑定到其他老师，未计入本班教师。
-                </p>
-                <p
-                  v-else-if="
-                    courseReviews[card.courseCode]?.status === 'ready' &&
-                    !courseReviews[card.courseCode].unknown
-                  "
-                  class="microcopy"
-                >
-                  暂无评价记录。
-                </p>
-              </details>
-            </li>
-          </ul>
+          <p v-if="entry.plan.replacedFrom" class="microcopy">
+            这是调整后重新核验的新版本。下面的核验结论只针对这一版。
+          </p>
           <p v-if="courseNamesStatus === 'error'" class="microcopy" role="note">
-            课程名称暂时读不到，上面显示的是课程号。
+            课程名称暂时读不到，下面显示的是课程号。
           </p>
           <p
             v-if="isDeletingPlan(entry)"
@@ -1558,19 +1560,399 @@ async function goBackToQuestions() {
             {{ deleteNotes[entry.recommendation.planId] }}
           </p>
 
-          <div v-if="entry.plan.items.length > 0" class="timetable-block">
-            <h3 class="sub-label">一周课表</h3>
-            <PlanTimetable
-              v-if="entry.plan.verification && sourcesOf(entry.plan.planId)"
-              :scope="entry.plan.verification.scope"
-              :sources="sourcesOf(entry.plan.planId) ?? []"
-              :course-names="courseNames"
-              :unplaced-reasons="unplacedReasons"
-            />
-            <p v-else class="microcopy" role="status" aria-live="polite">
-              正在读取班次时间，请稍候。
-            </p>
+          <div
+            v-if="entry.plan.items.length > 0"
+            class="plan-grid"
+            :class="{ 'plan-grid--split': wideLayout }"
+          >
+            <aside class="plan-grid__timetable" aria-label="一周课表">
+              <h3 class="sub-label">一周课表</h3>
+              <PlanTimetable
+                v-if="entry.plan.verification && sourcesOf(entry.plan.planId)"
+                :scope="entry.plan.verification.scope"
+                :sources="sourcesOf(entry.plan.planId) ?? []"
+                :course-names="courseNames"
+                :unplaced-reasons="unplacedReasons"
+              />
+              <p v-else class="microcopy" role="status" aria-live="polite">
+                正在读取班次时间，请稍候。
+              </p>
+            </aside>
+
+            <div class="plan-grid__courses">
+              <section
+                class="add-course"
+                :aria-labelledby="addTitleId(entry.index)"
+              >
+                <h3 :id="addTitleId(entry.index)" class="sub-label">加课</h3>
+                <form
+                  class="search-form"
+                  role="search"
+                  @submit.prevent="runSearch(entry)"
+                >
+                  <label class="field-label" :for="courseInputId(entry.index)">
+                    课程名或课程号（本学期开课）
+                  </label>
+                  <div class="search-row">
+                    <input
+                      :id="courseInputId(entry.index)"
+                      :ref="
+                        (el) => registerFocus(courseInputId(entry.index), el)
+                      "
+                      v-model="courseInput"
+                      class="text-control"
+                      type="search"
+                      maxlength="32"
+                      autocomplete="off"
+                      placeholder="例如 数据库 或 CS103"
+                    />
+                    <button
+                      class="button button--primary"
+                      type="submit"
+                      :disabled="searchStatus === 'loading'"
+                    >
+                      搜索
+                    </button>
+                  </div>
+                </form>
+
+                <template v-if="isAddOpen(entry)">
+                  <p
+                    v-if="searchStatus === 'loading'"
+                    class="notice"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    正在查找班次，请稍候。
+                  </p>
+                  <p
+                    v-else-if="searchStatus === 'error'"
+                    class="notice notice--error"
+                    role="alert"
+                  >
+                    {{ searchError
+                    }}<template v-if="!courseChoices.length">
+                      可以稍后再试一次。</template
+                    >
+                  </p>
+                  <ul
+                    v-if="searchStatus === 'error' && courseChoices.length"
+                    class="course-choices"
+                    aria-label="匹配的课程"
+                  >
+                    <li
+                      v-for="choice in courseChoices"
+                      :key="choice.courseCode"
+                    >
+                      <button
+                        class="button button--secondary"
+                        type="button"
+                        @click="chooseCourse(entry, choice.courseCode)"
+                      >
+                        {{ choice.courseCode }} · {{ choice.name }}
+                      </button>
+                    </li>
+                  </ul>
+                  <template v-if="searchStatus === 'ready' && searchedCourse">
+                    <h4 class="sub-label">{{ searchedCourse }} 的开课班次</h4>
+                    <OfferingResults
+                      mode="add"
+                      :course-code="searchedCourse"
+                      :rows="offeringRows"
+                      :unconfirmed="offeringsUnconfirmed"
+                      :gap-codes="planGaps"
+                      :current-class-id="null"
+                      :selected-class-id="null"
+                      :preview-text="''"
+                      :replace-status="replaceStatus"
+                      :replace-error="replaceError"
+                    />
+                  </template>
+                  <button
+                    class="button button--quiet"
+                    type="button"
+                    @click="closePanel(entry)"
+                  >
+                    收起加课搜索
+                  </button>
+                </template>
+              </section>
+
+              <ul class="course-cards" aria-label="方案中的课程">
+                <li
+                  v-for="(card, cardIndex) in cardsOf(entry)"
+                  :key="`${card.courseCode}-${cardIndex}`"
+                  class="course-card"
+                >
+                  <div class="course-card__head">
+                    <div class="course-card__title">
+                      <strong>{{ card.name ?? card.courseCode }}</strong>
+                      <span class="course-card__code">
+                        {{ card.courseCode }}
+                        <template v-if="card.credits !== null">
+                          · {{ card.credits }} 学分
+                        </template>
+                      </span>
+                    </div>
+                    <span
+                      v-if="card.tag"
+                      class="tag"
+                      :class="
+                        card.tag === '必修' ? 'tag--required' : 'tag--elective'
+                      "
+                    >
+                      {{ card.tag }}
+                    </span>
+                  </div>
+                  <dl class="course-card__facts">
+                    <div>
+                      <dt>教师</dt>
+                      <dd>{{ card.teacher }}</dd>
+                    </div>
+                    <div>
+                      <dt>时间</dt>
+                      <dd>{{ card.time }}</dd>
+                    </div>
+                    <div v-if="card.classId !== null">
+                      <dt>班次</dt>
+                      <dd class="course-card__small">{{ card.classId }}</dd>
+                    </div>
+                  </dl>
+
+                  <ul
+                    v-if="issuesOfCourse(entry, card.courseCode).length"
+                    class="course-card__issues"
+                    aria-label="这门课的问题"
+                  >
+                    <li
+                      v-for="line in issuesOfCourse(entry, card.courseCode)"
+                      :key="line.key"
+                      :class="`issue--${line.kind}`"
+                    >
+                      {{ line.text }}
+                    </li>
+                  </ul>
+
+                  <p v-if="card.rationaleWasReused" class="microcopy">
+                    以下理由来自原推荐；方案调整后未重新生成。
+                  </p>
+                  <details class="card-basis">
+                    <summary>推荐依据与课程来源</summary>
+                    <CourseReviewBasis
+                      :course-code="card.courseCode"
+                      :review-status="
+                        courseReviews[card.courseCode]?.status ?? null
+                      "
+                      :review-error="
+                        courseReviews[card.courseCode]?.error ?? ''
+                      "
+                      :reason="
+                        card.rationale?.reason ??
+                        (card.rationaleWasChanged
+                          ? '班次已调整，此版本未生成新的推荐理由。'
+                          : '暂无具体理由。')
+                      "
+                      :course-source-ref-ids="
+                        card.rationale?.courseSourceRefIds ?? []
+                      "
+                      :review-basis-status="
+                        card.rationale?.reviewBasisStatus ?? null
+                      "
+                      :rationale-source="
+                        card.rationale?.rationaleSource ?? null
+                      "
+                      :review-note-ids="card.rationale?.reviewNoteIds ?? []"
+                      :review-evidence-refs="
+                        card.rationale?.reviewEvidenceRefs ?? []
+                      "
+                      :review-notes="
+                        courseReviews[card.courseCode]?.notes ?? []
+                      "
+                      @load="onReviewBasisLoad(card.courseCode)"
+                    />
+                  </details>
+                  <details @toggle="onEvidenceToggle(card, $event)">
+                    <summary>查看评价维度汇总与资料</summary>
+                    <p
+                      v-if="
+                        !courseReviews[card.courseCode] ||
+                        courseReviews[card.courseCode].status === 'loading'
+                      "
+                    >
+                      正在读取评价…
+                    </p>
+                    <p
+                      v-else-if="
+                        courseReviews[card.courseCode].status === 'error'
+                      "
+                    >
+                      评价读取失败，请重新展开重试。
+                    </p>
+                    <ReviewSummary
+                      v-if="
+                        courseReviews[card.courseCode]?.status === 'ready' &&
+                        unboundNotesOf(card.courseCode).length > 0
+                      "
+                      title="课程整体评价（未绑定老师）"
+                      :course-code="card.courseCode"
+                      :notes="unboundNotesOf(card.courseCode)"
+                      :unconfirmed="courseReviews[card.courseCode].unknown"
+                    />
+                    <p
+                      v-if="
+                        card.teacherKey !== null &&
+                        teacherReviews[
+                          teacherReviewKey(card.courseCode, card.teacherKey)
+                        ]?.status === 'loading'
+                      "
+                      class="microcopy"
+                    >
+                      正在读取本班教师的评价…
+                    </p>
+                    <template
+                      v-if="
+                        card.teacherKey !== null &&
+                        teacherReviews[
+                          teacherReviewKey(card.courseCode, card.teacherKey)
+                        ]?.status === 'ready'
+                      "
+                    >
+                      <ReviewSummary
+                        v-if="
+                          teacherReviews[
+                            teacherReviewKey(card.courseCode, card.teacherKey)
+                          ].notes.length > 0
+                        "
+                        :title="`本班教师评价（${card.teacher}）`"
+                        :course-code="card.courseCode"
+                        :notes="
+                          teacherReviews[
+                            teacherReviewKey(card.courseCode, card.teacherKey)
+                          ].notes
+                        "
+                        :unconfirmed="
+                          teacherReviews[
+                            teacherReviewKey(card.courseCode, card.teacherKey)
+                          ].unknown
+                        "
+                      />
+                      <p v-else class="microcopy">
+                        这位老师暂无绑定到本人的评价记录。
+                      </p>
+                    </template>
+                    <p v-if="boundElsewhereCount(card) > 0" class="microcopy">
+                      另有
+                      {{ boundElsewhereCount(card) }}
+                      条评价绑定到其他老师，未计入本班教师。
+                    </p>
+                    <p
+                      v-else-if="
+                        courseReviews[card.courseCode]?.status === 'ready' &&
+                        !courseReviews[card.courseCode].unknown
+                      "
+                      class="microcopy"
+                    >
+                      暂无评价记录。
+                    </p>
+                  </details>
+                  <div class="course-card__actions">
+                    <button
+                      :id="swapButtonId(entry.index, card.courseCode)"
+                      :ref="
+                        (el) =>
+                          registerFocus(
+                            swapButtonId(entry.index, card.courseCode),
+                            el,
+                          )
+                      "
+                      class="button button--secondary"
+                      type="button"
+                      :aria-expanded="
+                        isSwapOpen(entry, card.courseCode) ? 'true' : 'false'
+                      "
+                      :aria-controls="
+                        isSwapOpen(entry, card.courseCode)
+                          ? panelId(entry.index)
+                          : undefined
+                      "
+                      @click="toggleSwap(entry, card.courseCode)"
+                    >
+                      {{ card.classId === null ? "选班次" : "换班" }}
+                      <span class="visually-hidden">
+                        （{{ card.name ?? card.courseCode }}）
+                      </span>
+                    </button>
+                    <button
+                      class="button button--quiet course-card__delete"
+                      type="button"
+                      :disabled="deleting !== null"
+                      @click="deleteCourse(entry, card.courseCode)"
+                    >
+                      删除这门课
+                      <span class="visually-hidden">
+                        （{{ card.name ?? card.courseCode }}）
+                      </span>
+                    </button>
+                  </div>
+
+                  <section
+                    v-if="isSwapOpen(entry, card.courseCode)"
+                    :id="panelId(entry.index)"
+                    class="swap-panel"
+                    :aria-label="`${card.name ?? card.courseCode} 的换班选项`"
+                    @keydown.esc="closePanel(entry)"
+                  >
+                    <p
+                      v-if="searchStatus === 'loading'"
+                      class="notice"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      正在查找班次，请稍候。
+                    </p>
+                    <p
+                      v-else-if="searchStatus === 'error'"
+                      class="notice notice--error"
+                      role="alert"
+                    >
+                      {{ searchError }} 可以稍后再试一次。
+                    </p>
+                    <OfferingResults
+                      v-else-if="
+                        searchStatus === 'ready' &&
+                        searchedCourse === card.courseCode
+                      "
+                      mode="swap"
+                      :course-code="card.courseCode"
+                      :rows="offeringRows"
+                      :unconfirmed="offeringsUnconfirmed"
+                      :gap-codes="planGaps"
+                      :current-class-id="card.classId"
+                      :selected-class-id="selectedClassId"
+                      :preview-text="
+                        selectedOffering
+                          ? replacePreview(entry, selectedOffering.classId)
+                          : ''
+                      "
+                      :replace-status="replaceStatus"
+                      :replace-error="replaceError"
+                      @select="selectOffering"
+                      @recheck="recheck(entry)"
+                    />
+                    <button
+                      class="button button--quiet"
+                      type="button"
+                      @click="closePanel(entry)"
+                    >
+                      收起
+                    </button>
+                  </section>
+                </li>
+              </ul>
+            </div>
           </div>
+          <p v-else class="microcopy">这份方案里还没有课程。</p>
+
           <p v-if="!entry.plan.replacedFrom" class="microcopy">
             {{ entry.recommendation.explanation }}
           </p>
@@ -1591,19 +1973,6 @@ async function goBackToQuestions() {
               </ol>
             </article>
           </section>
-
-          <button
-            :id="entryButtonId(entry.index)"
-            :ref="(el) => registerFocus(entryButtonId(entry.index), el)"
-            class="button button--secondary"
-            type="button"
-            :aria-expanded="isOpen(entry) ? 'true' : 'false'"
-            :aria-controls="panelId(entry.index)"
-            @click="togglePanel(entry)"
-          >
-            搜课程，调整这份方案
-          </button>
-
           <details class="debug-id">
             <summary>排查编号与详情</summary>
             <p>
@@ -1642,202 +2011,7 @@ async function goBackToQuestions() {
               </li>
             </ul>
           </details>
-
-          <section
-            v-if="isOpen(entry)"
-            :id="panelId(entry.index)"
-            class="search-panel"
-            aria-label="搜课程，调整这份方案"
-          >
-            <p class="microcopy">
-              搜索结果里的「有冲突」「无法确认」只是预览，不是核验结论。选中班次后，必须重新核验整份方案，以核验结果为准。
-            </p>
-            <form
-              class="search-form"
-              role="search"
-              @submit.prevent="runSearch(entry)"
-            >
-              <label class="field-label" :for="courseInputId(entry.index)">
-                课程号
-              </label>
-              <div class="search-row">
-                <input
-                  :id="courseInputId(entry.index)"
-                  :ref="(el) => registerFocus(courseInputId(entry.index), el)"
-                  v-model="courseInput"
-                  class="text-control"
-                  type="search"
-                  maxlength="32"
-                  autocomplete="off"
-                  placeholder="课程号，例如 CS103"
-                />
-                <button
-                  class="button button--primary"
-                  type="submit"
-                  :disabled="searchStatus === 'loading'"
-                >
-                  搜索
-                </button>
-              </div>
-            </form>
-
-            <p
-              v-if="searchStatus === 'loading'"
-              class="notice"
-              role="status"
-              aria-live="polite"
-            >
-              正在查找班次，请稍候。
-            </p>
-            <p
-              v-else-if="searchStatus === 'error'"
-              class="notice notice--error"
-              role="alert"
-            >
-              {{ searchError
-              }}<template v-if="!courseChoices.length">
-                可以稍后再试一次。</template
-              >
-            </p>
-            <ul
-              v-if="searchStatus === 'error' && courseChoices.length"
-              class="course-choices"
-              aria-label="匹配的课程"
-            >
-              <li v-for="choice in courseChoices" :key="choice.courseCode">
-                <button
-                  class="button button--secondary"
-                  type="button"
-                  @click="chooseCourse(entry, choice.courseCode)"
-                >
-                  {{ choice.courseCode }} · {{ choice.name }}
-                </button>
-              </li>
-            </ul>
-            <template v-else-if="searchStatus === 'ready' && searchedCourse">
-              <h3 class="sub-label">{{ searchedCourse }} 的开课班次</h3>
-              <p
-                v-if="offeringsUnconfirmed"
-                class="notice notice--warning"
-                role="note"
-              >
-                这门课的班次无法确认：当前快照缺失或不是当前版本，不能据此说没有班次，下面的班次也都不能直接选择。
-              </p>
-              <p
-                v-else-if="offeringRows.length === 0"
-                class="notice notice--warning"
-                role="note"
-              >
-                这门课在当前快照下没有班次。
-              </p>
-              <template v-if="offeringRows.length > 0">
-                <ul
-                  class="offering-list"
-                  :aria-label="`${searchedCourse} 的开课班次`"
-                >
-                  <li
-                    v-for="row in offeringRows"
-                    :key="row.classId"
-                    class="offering-row"
-                  >
-                    <div>
-                      <strong>班次 {{ row.classId }}</strong>
-                      <p>
-                        {{ row.timeText }}
-                        <template v-if="row.teacherText">
-                          · {{ row.teacherText }}
-                        </template>
-                      </p>
-                      <p :id="row.noteId">{{ row.note }}</p>
-                    </div>
-                    <button
-                      v-if="row.kind === 'clear'"
-                      class="button button--secondary"
-                      type="button"
-                      :aria-describedby="row.noteId"
-                      @click="selectOffering(row.classId)"
-                    >
-                      {{ row.label }}
-                    </button>
-                    <button
-                      v-else
-                      class="offering-tag"
-                      :class="`offering-tag--${row.kind}`"
-                      type="button"
-                      disabled
-                      :aria-describedby="row.noteId"
-                    >
-                      {{ row.label }}
-                    </button>
-                  </li>
-                </ul>
-                <p v-if="planGaps.length" class="microcopy">
-                  方案中
-                  {{ planGaps.join("、") }}
-                  的时间没能从当前快照读到，上面的冲突判断只比较已知时间。
-                </p>
-              </template>
-
-              <div
-                v-if="selectedOffering"
-                class="notice notice--warning"
-                role="group"
-                aria-label="替换预览"
-              >
-                <strong>{{
-                  replacePreview(entry, selectedOffering.classId)
-                }}</strong>
-                <p class="microcopy">
-                  提交前必须重新核验整份方案。上面的预览不能代替核验结果。
-                </p>
-                <p
-                  v-if="replaceStatus === 'submitting'"
-                  role="status"
-                  aria-live="polite"
-                >
-                  正在重新核验整份方案，请稍候。这一步不会重复提交。
-                </p>
-                <p
-                  v-else-if="replaceStatus === 'error'"
-                  class="notice notice--error"
-                  role="alert"
-                >
-                  {{ replaceError }} 可以再点一次重新核验。
-                </p>
-                <button
-                  class="button button--primary"
-                  type="button"
-                  :disabled="replaceStatus === 'submitting'"
-                  @click="recheck(entry)"
-                >
-                  重新核验这份方案
-                </button>
-              </div>
-            </template>
-
-            <button
-              class="button button--quiet"
-              type="button"
-              @click="closePanel(entry)"
-            >
-              收起搜索
-            </button>
-          </section>
-        </article>
-      </div>
-
-      <div
-        v-if="studentUnknowns.length"
-        class="notice notice--warning"
-        role="note"
-        aria-label="无法确认的项目"
-      >
-        <p>以下内容目前无法确认，不能算通过：</p>
-        <ul class="summary-list">
-          <li v-for="message in studentUnknowns" :key="message">
-            {{ message }}
-          </li>
-        </ul>
+        </section>
       </div>
     </template>
 
@@ -1866,19 +2040,138 @@ async function goBackToQuestions() {
 </template>
 
 <style scoped>
-.course-choices {
-  list-style: none;
+/* 结果页：宽屏两栏（左课表粘性，右课程），窄屏上下排列。颜色与卡片沿用全局变量。 */
+.result-page {
+  min-width: 0;
+}
+
+.result-plans {
+  margin-top: 8px;
+}
+
+.plan-block {
+  margin-top: 30px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.plan-block:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.plan-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0.5rem 0;
-  padding: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
 }
-.search-panel {
-  margin: 14px 0 0;
+
+.plan-bar__title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+
+.verdict-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.verdict-badge {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.4;
+}
+
+.verdict-badge--pass {
+  color: var(--green);
+  background: #e7f4ec;
+  border-color: #bfe0cc;
+}
+
+.verdict-badge--fail {
+  color: #8b3c31;
+  background: #fff4f2;
+  border-color: #efc4bd;
+}
+
+.verdict-badge--pending {
+  color: #875817;
+  background: #fff8ed;
+  border-color: #ecd6b0;
+}
+
+.verdict-details .summary-list {
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+
+.result-note {
+  margin: 8px 0 0;
+  color: var(--soft);
+  font-size: 12px;
+}
+
+.verdict-details {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.plan-grid {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+  align-items: start;
+}
+
+.plan-grid__timetable,
+.plan-grid__courses {
+  min-width: 0;
+}
+
+.plan-grid__timetable {
   padding: 14px 16px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+/* 宽屏：左课表粘在视口里，右边课程卡片可以独立滚动。 */
+.plan-grid--split {
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 24px;
+}
+
+.plan-grid--split .plan-grid__timetable {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+
+.add-course {
+  padding: 14px 16px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: var(--canvas);
+}
+
+.search-form {
+  margin: 0;
 }
 
 .search-row {
@@ -1891,78 +2184,30 @@ async function goBackToQuestions() {
   flex: 1;
   min-width: 0;
   width: auto;
+  /* 全局 .text-control 为多行文本框设置了 85px 高度，单行搜索框要压回按钮高度。 */
+  min-height: 0;
+  height: 43px;
+  padding: 10px 12px;
 }
 
-.timetable-block {
-  margin: 14px 0 0;
-}
-
-.offering-list {
-  margin: 12px 0 0;
-  padding: 0;
+.course-choices {
   list-style: none;
-  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  padding: 0;
 }
 
-.offering-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.offering-row strong {
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 550;
-}
-
-.offering-row p {
-  margin: 3px 0 0;
-  color: var(--soft);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.offering-tag {
-  font: inherit;
-  font-size: 12px;
-  font-weight: 550;
-  white-space: nowrap;
-  padding: 9px 12px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-}
-
-.offering-tag:disabled {
-  opacity: 1;
-  cursor: not-allowed;
-}
-
-.offering-tag--conflict {
-  color: #8b3c31;
-  background: #fff4f2;
-  border-color: #efc4bd;
-}
-
-.offering-tag--unknown {
-  color: #875817;
-  background: #fff8ed;
-  border-color: #ecd6b0;
-}
-
-/* 课程卡片：浅绿色圆角，沿用全局 --wash / --line；手机一列，宽屏自动多列。 */
 .course-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
-  gap: 10px;
+  gap: 12px;
   margin: 14px 0 0;
   padding: 0;
   list-style: none;
 }
 
+/* 课程卡片：浅绿色圆角，沿用全局 --wash / --line。 */
 .course-card {
   min-width: 0;
   padding: 14px 16px;
@@ -1976,7 +2221,6 @@ async function goBackToQuestions() {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
 .course-card__title {
@@ -1997,15 +2241,23 @@ async function goBackToQuestions() {
   font-size: 12px;
 }
 
-.course-card__delete {
-  min-height: 36px;
-  padding: 6px 10px;
-  color: #8b3c31;
-  font-size: 13px;
+.tag {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
-.course-card__delete:hover:not(:disabled) {
-  color: #6e2e25;
+.tag--required {
+  color: var(--green);
+  background: #e7f4ec;
+}
+
+.tag--elective {
+  color: #3b5f8a;
+  background: #eaf1f9;
 }
 
 .course-card__facts {
@@ -2016,7 +2268,7 @@ async function goBackToQuestions() {
 
 .course-card__facts div {
   display: grid;
-  grid-template-columns: 4.5em minmax(0, 1fr);
+  grid-template-columns: 3.5em minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -2037,8 +2289,73 @@ async function goBackToQuestions() {
   font-size: 12px;
 }
 
-.debug-id {
+/* 课程级问题只出现在本卡片上：未排进课表用橙色，违规用红色，无法确认用橙色浅底。 */
+.course-card__issues {
   margin: 10px 0 0;
+  padding: 8px 10px;
+  list-style: none;
+  border-radius: 8px;
+  color: #875817;
+  background: #fff8ed;
+  font-size: 12px;
+}
+
+.course-card__issues li + li {
+  margin-top: 4px;
+}
+
+.course-card__issues .issue--violation {
+  color: #8b3c31;
+}
+
+.card-basis {
+  margin-top: 10px;
+  color: var(--soft);
+  font-size: 12px;
+}
+
+.card-basis summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+/* 课程卡片里的「查看评价」展开项：与推荐依据同样的小字，不抢课程名的视觉层级。 */
+.course-card details > summary {
+  width: fit-content;
+  margin-top: 8px;
+  color: var(--soft);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.course-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.course-card__delete {
+  min-height: 36px;
+  padding: 6px 10px;
+  color: #8b3c31;
+  font-size: 13px;
+}
+
+.course-card__delete:hover:not(:disabled) {
+  color: #6e2e25;
+}
+
+.swap-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.debug-id {
+  margin: 12px 0 0;
   color: var(--soft);
   font-size: 12px;
 }
@@ -2057,10 +2374,6 @@ async function goBackToQuestions() {
 @media (max-width: 540px) {
   .search-row {
     flex-direction: column;
-  }
-
-  .offering-row {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>
