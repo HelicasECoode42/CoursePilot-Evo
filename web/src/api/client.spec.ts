@@ -998,41 +998,94 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     expect(options.method).toBe("GET");
   });
 
-  it("lists offerings of the selected offering snapshot for one course", async () => {
+  it("summarizes section counts for a batch of courses with one POST", async () => {
+    const data = {
+      curriculumSnapshotId: "curriculum-2026",
+      offeringSnapshotId: "offering-2026",
+      items: [
+        { courseCode: "CS103", sectionCount: 2, teacherTexts: ["张伟"] },
+        { courseCode: "MA201", sectionCount: 0, teacherTexts: [] },
+      ],
+      unknownCourseCodes: [],
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(200, envelope("OK", data)));
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.summarizeOfferings("curriculum-2026", "offering-2026", [
+        "CS103",
+        "MA201",
+      ]),
+    ).resolves.toEqual({
+      items: data.items,
+      unknownCourseCodes: [],
+      status: "OK",
+    });
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/offering-summary");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body as string)).toEqual({
+      curriculumSnapshotId: "curriculum-2026",
+      offeringSnapshotId: "offering-2026",
+      courseCodes: ["CS103", "MA201"],
+    });
+  });
+
+  it("keeps unknown courses as unknown and does not turn them into zero sections", async () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(sessionResponse())
       .mockResolvedValueOnce(
-        response(200, envelope("OK", { items: [offering] })),
+        response(
+          200,
+          envelope("UNKNOWN", {
+            curriculumSnapshotId: "curriculum-2026",
+            offeringSnapshotId: "offering-2026",
+            items: [{ courseCode: "CS103", sectionCount: 1, teacherTexts: [] }],
+            unknownCourseCodes: ["MA201"],
+          }),
+        ),
+      );
+    const client = await authedClient(fetcher);
+
+    const result = await client.summarizeOfferings(
+      "curriculum-2026",
+      "offering-2026",
+      ["CS103", "MA201"],
+    );
+    expect(result.status).toBe("UNKNOWN");
+    expect(result.unknownCourseCodes).toEqual(["MA201"]);
+    expect(result.items.map((item) => item.courseCode)).toEqual(["CS103"]);
+  });
+
+  it("rejects a summary whose item shape breaks the contract", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          200,
+          envelope("OK", {
+            curriculumSnapshotId: "curriculum-2026",
+            offeringSnapshotId: "offering-2026",
+            items: [
+              { courseCode: "CS103", sectionCount: -1, teacherTexts: [] },
+            ],
+            unknownCourseCodes: [],
+          }),
+        ),
       );
     const client = await authedClient(fetcher);
 
     await expect(
-      client.listOfferings("curriculum-2026", "offering-2026", "CS103"),
-    ).resolves.toEqual({ items: [offering], status: "OK" });
-    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
-    expect(url).toBe(
-      "http://127.0.0.1:8000/api/v1/offerings?curriculumSnapshotId=curriculum-2026&offeringSnapshotId=offering-2026&courseCode=CS103&limit=100",
-    );
-    expect(options.method).toBe("GET");
+      client.summarizeOfferings("curriculum-2026", "offering-2026", ["CS103"]),
+    ).rejects.toBeInstanceOf(ApiFailure);
   });
 
-  it("keeps an UNKNOWN offering list as UNKNOWN rather than an empty confirmed list", async () => {
-    const fetcher = vi
-      .fn()
-      .mockResolvedValueOnce(sessionResponse())
-      .mockResolvedValueOnce(response(200, envelope("UNKNOWN", { items: [] })));
-    const client = await authedClient(fetcher);
-
-    const result = await client.listOfferings(
-      "curriculum-2026",
-      "offering-2026",
-      "CS103",
-    );
-    expect(result).toEqual({ items: [], status: "UNKNOWN" });
-  });
-
-  it("reports a missing gateway route as an error instead of an empty list", async () => {
+  it("reports a missing gateway route as an error instead of an empty summary", async () => {
     const fetcher = vi
       .fn()
       .mockResolvedValueOnce(sessionResponse())
@@ -1040,7 +1093,7 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     const client = await authedClient(fetcher);
 
     await expect(
-      client.listOfferings("curriculum-2026", "offering-2026", "CS103"),
+      client.summarizeOfferings("curriculum-2026", "offering-2026", ["CS103"]),
     ).rejects.toBeInstanceOf(ApiFailure);
   });
 

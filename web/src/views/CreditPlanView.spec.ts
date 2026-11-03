@@ -14,7 +14,7 @@ vi.mock("../api", () => ({
     listCourses: vi.fn(),
     listSessionRecords: vi.fn(),
     getSchoolProgress: vi.fn(),
-    listOfferings: vi.fn(),
+    summarizeOfferings: vi.fn(),
   },
 }));
 
@@ -221,7 +221,7 @@ describe("凑学分选课页", () => {
       items: catalog,
       nextCursor: null,
     });
-    vi.mocked(api.listOfferings).mockReset();
+    vi.mocked(api.summarizeOfferings).mockReset();
   });
 
   it("shows the unmodeled cross-category rule notice verbatim", async () => {
@@ -662,23 +662,23 @@ describe("凑学分选课页", () => {
 
   it("marks candidates by whether the selected offering snapshot has sections, offered first", async () => {
     const { wrapper } = await mountView({ interestTags: [] });
-    vi.mocked(api.listOfferings).mockImplementation(async (_c, _s, code) => {
-      if (code === "E2")
+    vi.mocked(api.summarizeOfferings).mockImplementation(
+      async (_c, _s, codes) => {
+        const counts: Record<string, number> = { E2: 1, E3: 2 };
+        const failed = codes.includes("E6");
         return {
-          status: "OK",
-          items: [{ courseCode: "E2", classId: "E2-01" } as never],
+          status: failed ? "UNKNOWN" : "OK",
+          items: codes
+            .filter((code) => code !== "E6")
+            .map((code) => ({
+              courseCode: code,
+              sectionCount: counts[code] ?? 0,
+              teacherTexts: [],
+            })),
+          unknownCourseCodes: failed ? ["E6"] : [],
         };
-      if (code === "E3")
-        return {
-          status: "OK",
-          items: [
-            { courseCode: "E3", classId: "E3-01" } as never,
-            { courseCode: "E3", classId: "E3-02" } as never,
-          ],
-        };
-      if (code === "E6") throw new Error("boom");
-      return { status: "OK", items: [] };
-    });
+      },
+    );
     attachOfferingSnapshot();
     await flushPromises();
     const rows = wrapper
@@ -701,7 +701,7 @@ describe("凑学分选课页", () => {
 
   it("says offering is unknown rather than not offered when the query fails", async () => {
     const { wrapper } = await mountView({ interestTags: [] });
-    vi.mocked(api.listOfferings).mockRejectedValue(new Error("network"));
+    vi.mocked(api.summarizeOfferings).mockRejectedValue(new Error("network"));
     attachOfferingSnapshot();
     await flushPromises();
     const rows = wrapper

@@ -33,7 +33,7 @@ import {
   type CurriculumResult,
   type OfferingSnapshotResult,
   type CourseSearch,
-  type OfferingListSearch,
+  type OfferingSummarySearch,
   type ReviewNoteSearch,
   type SessionOfferingSearch,
   type SessionView,
@@ -805,18 +805,30 @@ export class FixtureApiClient implements CoursePilotApiClient {
     return null;
   }
 
-  async listOfferings(
+  async summarizeOfferings(
     _curriculumSnapshotId: string,
     _offeringSnapshotId: string,
-    courseCode: string,
+    courseCodes: string[],
     signal?: AbortSignal,
-  ): Promise<OfferingListSearch> {
+  ): Promise<OfferingSummarySearch> {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (!this.sessionToken)
       throw new Error("Fixture session has not been created");
-    // 演示数据是确定的：没有班次就是确定的「未开」，status 显式给 OK。
+    // 演示数据是确定的：没有班次就是确定的「未开」，所以每门课都给出计数，不列入未知。
     return {
-      items: structuredClone(FIXTURE_OFFERINGS.get(courseCode) ?? []),
+      items: courseCodes.map((courseCode) => {
+        const sections = FIXTURE_OFFERINGS.get(courseCode) ?? [];
+        const teacherTexts = [
+          ...new Set(sections.map((section) => section.teacherText ?? "")),
+        ].filter(Boolean);
+        return {
+          courseCode,
+          sectionCount: new Set(sections.map((section) => section.classId))
+            .size,
+          teacherTexts,
+        };
+      }),
+      unknownCourseCodes: [],
       status: "OK",
     };
   }

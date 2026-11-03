@@ -30,6 +30,14 @@ export function availabilityFromOfferings(
   return { state: "OFFERED", sections: classIds.size };
 }
 
+/** 由批量班次数得到开课情况：0 班次是确认未开，不是无法确认。 */
+export function availabilityFromSectionCount(
+  sectionCount: number,
+): OfferingAvailability {
+  if (sectionCount <= 0) return { state: "NOT_OFFERED" };
+  return { state: "OFFERED", sections: sectionCount };
+}
+
 /** 排序键：已开课在前，无法确认（含尚未查询）居中，未开在后。 */
 export function availabilityRank(
   availability: OfferingAvailability | undefined,

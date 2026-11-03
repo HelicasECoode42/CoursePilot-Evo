@@ -27,7 +27,7 @@ import {
 } from "../domain/credit-plan";
 import { buildCourseNameIndex } from "../domain/course-names";
 import {
-  availabilityFromOfferings,
+  availabilityFromSectionCount,
   availabilityLabel,
   sortByAvailability,
   type OfferingAvailability,
@@ -42,6 +42,8 @@ const MAX_CATALOG_PAGES = 20;
 const COURSE_PAGE_SIZE = 8;
 /** 同时查询开课班次的门数上限，避免一次打出几十个并发请求。 */
 const OFFERING_QUERY_CONCURRENCY = 4;
+/** 与 POST /api/v1/offering-summary 的单次上限一致（最多 10 门课）。 */
+const OFFERING_SUMMARY_BATCH = 10;
 
 const store = usePlanningStore();
 const router = useRouter();
@@ -449,33 +451,52 @@ async function loadAvailability(plan: CategoryCreditPlan | undefined) {
   if (codes.length === 0) return;
   const version = availabilityVersion;
   availabilityLoading.value = true;
-  const queue = [...codes];
+  const batches: string[][] = [];
+  for (let index = 0; index < codes.length; index += OFFERING_SUMMARY_BATCH) {
+    batches.push(codes.slice(index, index + OFFERING_SUMMARY_BATCH));
+  }
+  const queue = [...batches];
   const worker = async () => {
     while (queue.length > 0) {
-      const code = queue.shift()!;
-      let result: OfferingAvailability;
+      const batch = queue.shift()!;
+      const results: Record<string, OfferingAvailability> = {};
       try {
-        const list = await api.listOfferings(curriculumId, snapshotId, code);
-        result =
-          list.status === "OK"
-            ? availabilityFromOfferings(list.items, code)
-            : { state: "UNKNOWN", reason: "所选开课快照的班次资料暂不可用。" };
+        const summary = await api.summarizeOfferings(
+          curriculumId,
+          snapshotId,
+          batch,
+        );
+        const unknown = new Set(summary.unknownCourseCodes);
+        const counts = new Map(
+          summary.items.map((item) => [item.courseCode, item.sectionCount]),
+        );
+        for (const code of batch) {
+          const count = counts.get(code);
+          // Per course: one failed course makes the batch UNKNOWN, not its neighbours.
+          results[code] =
+            count !== undefined && !unknown.has(code)
+              ? availabilityFromSectionCount(count)
+              : {
+                  state: "UNKNOWN",
+                  reason: "所选开课快照的班次资料暂不可用。",
+                };
+        }
       } catch (error) {
-        result = {
-          state: "UNKNOWN",
-          reason:
-            error instanceof ApiFailure
-              ? error.message
-              : "班次资料读取失败，请稍后重试。",
-        };
+        const reason =
+          error instanceof ApiFailure
+            ? error.message
+            : "班次资料读取失败，请稍后重试。";
+        for (const code of batch) {
+          results[code] = { state: "UNKNOWN", reason };
+        }
       }
       if (version !== availabilityVersion) return;
-      availability.value = { ...availability.value, [code]: result };
+      availability.value = { ...availability.value, ...results };
     }
   };
   await Promise.all(
     Array.from(
-      { length: Math.min(OFFERING_QUERY_CONCURRENCY, codes.length) },
+      { length: Math.min(OFFERING_QUERY_CONCURRENCY, batches.length) },
       () => worker(),
     ),
   );
