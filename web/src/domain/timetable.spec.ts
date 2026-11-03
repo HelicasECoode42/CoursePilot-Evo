@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Meeting } from "../contracts";
-import { buildTimetable, compactWeeksText, meetingsText } from "./timetable";
+import {
+  buildTimetable,
+  compactWeeksText,
+  meetingsText,
+  shortMeetingsText,
+} from "./timetable";
 
 const WEEKS = Array.from({ length: 16 }, (_, index) => index + 1);
 
@@ -127,5 +132,41 @@ describe("buildTimetable 未排进课表的原因", () => {
       expect(back.cells.has("1-1")).toBe(false);
       expect(back.cells.get("2-3")?.[0].weeks).toEqual(last.weeks);
     });
+  });
+});
+
+describe("shortMeetingsText", () => {
+  it("writes a course row time compactly and writes the shared week range once", () => {
+    const meetings: Meeting[] = [
+      { dayOfWeek: 2, sectionStart: 7, sectionEnd: 8, weeks: WEEKS.slice(8) },
+      { dayOfWeek: 3, sectionStart: 5, sectionEnd: 6, weeks: WEEKS.slice(8) },
+    ];
+    expect(shortMeetingsText(meetings)).toBe("周二7-8 周三5-6 · 9-16周");
+  });
+
+  it("labels each segment when the weeks differ", () => {
+    const meetings: Meeting[] = [
+      {
+        dayOfWeek: 1,
+        sectionStart: 1,
+        sectionEnd: 1,
+        weeks: [1, 2, 3, 4, 5, 6, 7, 8],
+      },
+      { dayOfWeek: 4, sectionStart: 3, sectionEnd: 4, weeks: [9, 10] },
+    ];
+    expect(shortMeetingsText(meetings)).toBe(
+      "周一1（1-8周） 周四3-4（9-10周）",
+    );
+  });
+
+  it("never draws an unreadable segment as if it were clear", () => {
+    const meetings: Meeting[] = [
+      { dayOfWeek: 1, sectionStart: 1, sectionEnd: 2, weeks: WEEKS },
+      { dayOfWeek: 9, sectionStart: 1, sectionEnd: 2, weeks: WEEKS },
+    ];
+    expect(shortMeetingsText(meetings)).toBe(
+      "周一1-2 · 1-16周；另有时段无法确认",
+    );
+    expect(shortMeetingsText([meetings[1]])).toBe("时间未能确认");
   });
 });

@@ -19,6 +19,7 @@ import type {
   SessionPlanReplacement,
 } from "../contracts";
 import { usePlanningStore } from "../stores/planning";
+import { SAVED_PLANS_KEY } from "../domain/saved-plans";
 import ResultView from "./ResultView.vue";
 
 const PLAN_ID = "plan-test-1";
@@ -291,6 +292,10 @@ describe("result page course search and replacement", () => {
     const wrapper = mountPage();
     await flushPromises();
     expect(wrapper.text()).toContain("下学期选课规划");
+    // 推荐依据收在展开的课程行里，先打开 CS102 那一行。
+    await courseCard(wrapper, "程序设计基础（测试）")!
+      .get(".course-row__toggle")
+      .trigger("click");
     expect(wrapper.text()).toContain("适合作为基础课");
     expect(wrapper.text()).toContain("研究方向探索");
     expect(wrapper.text()).toContain("阅读入门资料");
@@ -313,6 +318,9 @@ describe("result page course search and replacement", () => {
     stubOfferings();
     const wrapper = mountPage();
     await flushPromises();
+    await courseCard(wrapper, "程序设计基础（测试）")!
+      .get(".course-row__toggle")
+      .trigger("click");
     expect(wrapper.text()).toContain("课程目录事实：课程内容覆盖基础编程");
     expect(wrapper.text()).toContain("培养方案资料");
     expect(wrapper.text()).toContain("curriculum:cs102");
@@ -921,11 +929,18 @@ describe("result page course search and replacement", () => {
 
     const card = courseCard(wrapper, "程序设计基础（测试）");
     expect(card).toBeDefined();
-    expect(card!.text()).toContain("CS102");
+    // 默认是紧凑行：课程名、学分、老师与短时间。
     expect(card!.text()).toContain("测试教师（合成）");
-    expect(card!.text()).toContain("周一 第1-2节 · 第1–16周");
+    expect(card!.text()).toContain("周一1-2 · 1-16周");
     expect(card!.text()).not.toContain("teacher-li-01");
     expect(card!.text()).not.toContain("{第");
+    // 课程号与完整时间收在展开的详情里。
+    expect(card!.find(".course-row__detail").exists()).toBe(false);
+    await card!.get(".course-row__toggle").trigger("click");
+    expect(card!.get(".course-row__detail").text()).toContain("CS102");
+    expect(card!.get(".course-row__detail").text()).toContain(
+      "周一 第1-2节 · 第1–16周",
+    );
   });
 
   it("shows a plan number instead of the raw plan id, which stays in a collapsed debug section", async () => {
@@ -1397,5 +1412,74 @@ describe("result page course search and replacement", () => {
     expect(
       wrapper.get("#result-swap-0-CS103").attributes("aria-expanded"),
     ).toBe("false");
+  });
+
+  it("keeps each course row collapsed until it is opened, with 换班 and 删除 beside it", async () => {
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const card = courseCard(wrapper, "程序设计基础（测试）")!;
+    const toggle = card.get(".course-row__toggle");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(card.get(".course-row__tools").text()).toContain("换班");
+    expect(card.get(".course-row__tools").text()).toContain("删除");
+    await toggle.trigger("click");
+    expect(card.get(".course-row__toggle").attributes("aria-expanded")).toBe(
+      "true",
+    );
+    await card.get(".course-row__toggle").trigger("click");
+    expect(card.find(".course-row__detail").exists()).toBe(false);
+  });
+
+  it("saves a plan copy to this browser without grades and reopens it read-only", async () => {
+    localStorage.clear();
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await buttonByText(wrapper, "保存方案")!.trigger("click");
+    const menuItem = wrapper
+      .findAll('[role="menuitem"]')
+      .find((item) => item.text().startsWith("保存到本机浏览器"));
+    await menuItem!.trigger("click");
+    await flushPromises();
+
+    const raw = localStorage.getItem(SAVED_PLANS_KEY);
+    expect(raw).not.toBeNull();
+    const saved = JSON.parse(raw!);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].planId).toBe(PLAN_ID);
+    expect(
+      saved[0].courses.map((c: { courseCode: string }) => c.courseCode),
+    ).toEqual(["CS102", "CS103"]);
+    expect(raw).not.toMatch(/grade|transcript|token|password/i);
+    expect(wrapper.text()).toContain("非最新核验结果");
+
+    const list = wrapper.get('[aria-label="本机保存的方案"]');
+    expect(list.text()).toContain("方案 1");
+    await list.get("button").trigger("click");
+    const view = wrapper.get('[aria-label="保存的方案副本（只读）"]');
+    expect(view.text()).toContain("程序设计基础（测试）");
+    expect(view.find("button").text()).toContain("删除这份副本");
+    localStorage.clear();
+  });
+
+  it("opens the browser print dialog from the save menu and marks .ics as unavailable", async () => {
+    stubOfferings();
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await buttonByText(wrapper, "保存方案")!.trigger("click");
+    expect(wrapper.text()).toContain("缺少开学日期和节次的上课钟点");
+    const menuItem = wrapper
+      .findAll('[role="menuitem"]')
+      .find((item) => item.text().startsWith("打印"));
+    await menuItem!.trigger("click");
+
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false);
+    print.mockRestore();
   });
 });

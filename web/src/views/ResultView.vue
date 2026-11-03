@@ -74,9 +74,19 @@ import {
 import {
   meetingsText,
   resolveTimetableSources,
+  shortMeetingsText,
   type OfferingListRead,
   type TimetableSource,
 } from "../domain/timetable";
+import {
+  SAVED_PLANS_LIMIT,
+  buildSavedPlan,
+  defaultSavedPlanStorage,
+  newSavedPlanId,
+  saveNewPlan,
+  type SavedPlanInput,
+} from "../domain/saved-plans";
+import SavedPlansPanel from "../components/SavedPlansPanel.vue";
 import PlanTimetable from "../components/PlanTimetable.vue";
 import OfferingResults from "../components/OfferingResults.vue";
 import { resolveCourseQuery } from "../domain/course-query";
@@ -607,7 +617,11 @@ interface PlanCourseCard {
   teacher: string;
   /** 班次资料里的教师键（与评价的 teacherKey 对应）；没有班次资料时为 null。 */
   teacherKey: string | null;
+  /** 完整时间（展开后显示）。 */
   time: string;
+  /** 课程行里的短时间（周二7-8 周三5-6 · 9-16周）。 */
+  timeShort: string;
+  meetings: Meeting[];
   rationale: NonNullable<Recommendation["courseRationales"]>[number] | null;
   rationaleWasReused: boolean;
   rationaleWasChanged: boolean;
@@ -634,21 +648,29 @@ function cardsOf(entry: PlanEntry): PlanCourseCard[] {
         ) ?? null);
     let teacher: string;
     let time: string;
+    let timeShort: string;
     if (item.classId === null) {
       teacher = "尚未选定班次";
       time = "尚未选定班次，时间未定";
+      timeShort = "时间未定";
     } else if (sources === null) {
       teacher = "正在读取…";
       time = "正在读取上课时间…";
+      timeShort = "读取中";
     } else if (offering === null) {
       teacher = "班次资料没读到，无法显示";
       time = "班次资料没读到，时间未知";
+      timeShort = "时间未知";
     } else {
       teacher = offering.teacherText.trim() || "教师未填写";
       time =
         offering.parseStatus === "PARSED"
           ? meetingsText(offering.meetings)
           : "上课时间未能解析，无法确认";
+      timeShort =
+        offering.parseStatus === "PARSED"
+          ? shortMeetingsText(offering.meetings)
+          : "时间未能解析";
     }
     return {
       courseCode: item.courseCode,
@@ -659,6 +681,8 @@ function cardsOf(entry: PlanEntry): PlanCourseCard[] {
       teacher,
       teacherKey: offering?.teacherKey ?? null,
       time,
+      timeShort,
+      meetings: offering?.meetings ?? [],
       rationale,
       rationaleWasReused:
         entry.plan.replacedFrom !== null && rationale !== null,
@@ -719,6 +743,97 @@ async function deleteCourse(entry: PlanEntry, courseCode: string) {
   } finally {
     if (version === deleteVersion) deleting.value = null;
   }
+}
+
+/* ---------- 课程行：默认一行两行，点开看详情 ---------- */
+
+/** 展开的课程行，键为「方案 planId | 课程号」。默认全部收起。 */
+const openCards = ref<Record<string, boolean>>({});
+
+function cardKey(entry: PlanEntry, courseCode: string): string {
+  return `${entry.plan.planId}|${courseCode}`;
+}
+function isCardOpen(entry: PlanEntry, courseCode: string): boolean {
+  return openCards.value[cardKey(entry, courseCode)] === true;
+}
+function toggleCard(entry: PlanEntry, courseCode: string) {
+  const key = cardKey(entry, courseCode);
+  openCards.value = { ...openCards.value, [key]: !openCards.value[key] };
+}
+function cardDetailId(index: number, courseCode: string): string {
+  return `result-course-detail-${index}-${courseCode}`;
+}
+function cardToggleId(index: number, courseCode: string): string {
+  return `result-course-toggle-${index}-${courseCode}`;
+}
+
+/* ---------- 保存方案：日历文件暂缺；打印；保存到本机浏览器 ---------- */
+
+/**
+ * 日历文件（.ics）暂不提供：契约只有周次数与每天节数（calendar.weeks / sectionsPerDay），
+ * 没有学期开始日期，仓库里也没有节次对应的上课钟点。硬编码钟点会把估算当事实，所以不生成。
+ */
+const ICS_UNAVAILABLE_REASON =
+  "缺少开学日期和节次的上课钟点，暂不能生成日历文件。";
+
+/** 当前打开的「保存方案」菜单，按 planId 记录。 */
+const saveMenuFor = ref<string | null>(null);
+function isSaveMenuOpen(entry: PlanEntry): boolean {
+  return saveMenuFor.value === entry.plan.planId;
+}
+function toggleSaveMenu(entry: PlanEntry) {
+  saveMenuFor.value = isSaveMenuOpen(entry) ? null : entry.plan.planId;
+}
+
+/** 保存结果提示，显示在方案操作栏下方。 */
+const saveNotice = ref("");
+/** 本机副本列表的刷新信号：每保存一份加一。 */
+const savedRevision = ref(0);
+
+function snapshotOf(entry: PlanEntry): SavedPlanInput {
+  const verification = entry.plan.verification;
+  return {
+    planId: entry.plan.planId,
+    planNumber: entry.index + 1,
+    edited: entry.plan.replacedFrom !== null,
+    courses: cardsOf(entry).map((card) => ({
+      courseCode: card.courseCode,
+      name: card.name,
+      credits: card.credits,
+      tag: card.tag,
+      classId: card.classId,
+      teacherText: card.teacher,
+      timeText: card.time,
+      meetings: card.meetings,
+    })),
+    verdict: {
+      scope: verification?.scope ?? null,
+      verdict: verification?.verdict ?? null,
+      label: entry.view?.label ?? "尚无核验结果",
+    },
+    planningContext: result.value?.planningContext ?? null,
+  };
+}
+
+function saveToBrowser(entry: PlanEntry) {
+  saveMenuFor.value = null;
+  const plan = buildSavedPlan(snapshotOf(entry), newSavedPlanId(), new Date());
+  const outcome = saveNewPlan(plan, defaultSavedPlanStorage());
+  if (outcome.ok) {
+    savedRevision.value += 1;
+    saveNotice.value = `已把方案 ${entry.index + 1} 保存到本机浏览器（本机保存的副本，非最新核验结果）。可在页面下方「我保存的方案」中回看。`;
+  } else if (outcome.reason === "LIMIT") {
+    saveNotice.value = `本机最多保存 ${SAVED_PLANS_LIMIT} 份方案。请先在「我保存的方案」里删除几份。`;
+  } else {
+    saveNotice.value =
+      "这个浏览器没有允许保存（可能是隐私模式或存储已满），本次没有保存。方案本身不受影响。";
+  }
+}
+
+/** 打印 / 存为 PDF：交给浏览器的打印对话框，页面用 @media print 收起按钮与操作区。 */
+function printPlan() {
+  saveMenuFor.value = null;
+  globalThis.print();
 }
 
 /* ---------- 搜索班次与替换 ---------- */
@@ -1686,7 +1801,77 @@ async function goBackToQuestions() {
                 >
                   加课
                 </button>
+                <div class="save-menu">
+                  <button
+                    class="button button--secondary"
+                    type="button"
+                    :aria-expanded="isSaveMenuOpen(entry) ? 'true' : 'false'"
+                    aria-haspopup="menu"
+                    @click="toggleSaveMenu(entry)"
+                    @keydown.esc="saveMenuFor = null"
+                  >
+                    保存方案
+                  </button>
+                  <ul
+                    v-if="isSaveMenuOpen(entry)"
+                    class="save-menu__list"
+                    role="menu"
+                    aria-label="保存方案"
+                  >
+                    <li role="none">
+                      <button
+                        class="save-menu__item"
+                        type="button"
+                        role="menuitem"
+                        @click="printPlan()"
+                      >
+                        打印 / 存为 PDF
+                        <span class="microcopy"
+                          >打开浏览器打印对话框，可选「存储为 PDF」</span
+                        >
+                      </button>
+                    </li>
+                    <li role="none">
+                      <button
+                        class="save-menu__item"
+                        type="button"
+                        role="menuitem"
+                        @click="saveToBrowser(entry)"
+                      >
+                        保存到本机浏览器
+                        <span class="microcopy"
+                          >保存一份副本，之后可在下方回看（非最新核验结果）</span
+                        >
+                      </button>
+                    </li>
+                    <li role="none">
+                      <button
+                        class="save-menu__item"
+                        type="button"
+                        role="menuitem"
+                        disabled
+                        :aria-describedby="`result-ics-hint-${entry.index}`"
+                      >
+                        下载日历文件（.ics）
+                      </button>
+                      <p
+                        :id="`result-ics-hint-${entry.index}`"
+                        class="microcopy save-menu__hint"
+                      >
+                        {{ ICS_UNAVAILABLE_REASON }}
+                      </p>
+                    </li>
+                  </ul>
+                </div>
               </div>
+              <p
+                v-if="saveNotice"
+                class="notice"
+                role="status"
+                aria-live="polite"
+              >
+                {{ saveNotice }}
+              </p>
               <section
                 class="add-course"
                 :aria-labelledby="addTitleId(entry.index)"
@@ -1801,40 +1986,93 @@ async function goBackToQuestions() {
                   :key="`${card.courseCode}-${cardIndex}`"
                   class="course-card"
                 >
-                  <div class="course-card__head">
-                    <div class="course-card__title">
-                      <strong>{{ card.name ?? card.courseCode }}</strong>
-                      <span class="course-card__code">
-                        {{ card.courseCode }}
-                        <template v-if="card.credits !== null">
-                          · {{ card.credits }} 学分
-                        </template>
-                      </span>
-                    </div>
-                    <span
-                      v-if="card.tag"
-                      class="tag"
-                      :class="
-                        card.tag === '必修' ? 'tag--required' : 'tag--elective'
+                  <div class="course-row">
+                    <button
+                      :id="cardToggleId(entry.index, card.courseCode)"
+                      class="course-row__toggle"
+                      type="button"
+                      :aria-expanded="
+                        isCardOpen(entry, card.courseCode) ? 'true' : 'false'
                       "
+                      :aria-controls="
+                        cardDetailId(entry.index, card.courseCode)
+                      "
+                      @click="toggleCard(entry, card.courseCode)"
                     >
-                      {{ card.tag }}
-                    </span>
+                      <span class="course-row__line1">
+                        <strong>{{ card.name ?? card.courseCode }}</strong>
+                        <span
+                          v-if="card.credits !== null"
+                          class="course-row__meta"
+                        >
+                          · {{ card.credits }} 学分
+                        </span>
+                        <span
+                          v-if="card.tag"
+                          class="tag"
+                          :class="
+                            card.tag === '必修'
+                              ? 'tag--required'
+                              : 'tag--elective'
+                          "
+                        >
+                          {{ card.tag }}
+                        </span>
+                      </span>
+                      <span
+                        class="course-row__line2"
+                        :title="`${card.teacher} · ${card.time}`"
+                      >
+                        {{ card.teacher }} · {{ card.timeShort }}
+                      </span>
+                      <span class="visually-hidden">
+                        {{
+                          isCardOpen(entry, card.courseCode)
+                            ? "收起详情"
+                            : "展开详情"
+                        }}
+                      </span>
+                    </button>
+                    <div class="course-row__tools">
+                      <button
+                        :id="swapButtonId(entry.index, card.courseCode)"
+                        :ref="
+                          (el) =>
+                            registerFocus(
+                              swapButtonId(entry.index, card.courseCode),
+                              el,
+                            )
+                        "
+                        class="button button--quiet course-row__tool"
+                        type="button"
+                        :aria-expanded="
+                          isSwapOpen(entry, card.courseCode) ? 'true' : 'false'
+                        "
+                        :aria-controls="
+                          isSwapOpen(entry, card.courseCode)
+                            ? panelId(entry.index)
+                            : undefined
+                        "
+                        @click="toggleSwap(entry, card.courseCode)"
+                      >
+                        {{ card.classId === null ? "选班次" : "换班" }}
+                        <span class="visually-hidden">
+                          （{{ card.name ?? card.courseCode }}）
+                        </span>
+                      </button>
+                      <button
+                        class="button button--quiet course-row__tool course-card__delete"
+                        type="button"
+                        :disabled="deleting !== null"
+                        @click="deleteCourse(entry, card.courseCode)"
+                      >
+                        删除
+                        <span class="visually-hidden">
+                          （{{ card.name ?? card.courseCode }}）
+                        </span>
+                      </button>
+                    </div>
                   </div>
-                  <dl class="course-card__facts">
-                    <div>
-                      <dt>教师</dt>
-                      <dd>{{ card.teacher }}</dd>
-                    </div>
-                    <div>
-                      <dt>时间</dt>
-                      <dd>{{ card.time }}</dd>
-                    </div>
-                    <div v-if="card.classId !== null">
-                      <dt>班次</dt>
-                      <dd class="course-card__small">{{ card.classId }}</dd>
-                    </div>
-                  </dl>
 
                   <ul
                     v-if="issuesOfCourse(entry, card.courseCode).length"
@@ -1850,163 +2088,154 @@ async function goBackToQuestions() {
                     </li>
                   </ul>
 
-                  <details class="card-basis">
-                    <summary>推荐依据与课程来源</summary>
-                    <CourseReviewBasis
-                      :course-code="card.courseCode"
-                      :review-status="
-                        courseReviews[card.courseCode]?.status ?? null
-                      "
-                      :review-error="
-                        courseReviews[card.courseCode]?.error ?? ''
-                      "
-                      :reason="
-                        card.rationale?.reason ??
-                        (card.rationaleWasChanged
-                          ? '班次已调整，此版本未生成新的推荐理由。'
-                          : '暂无具体理由。')
-                      "
-                      :course-source-ref-ids="
-                        card.rationale?.courseSourceRefIds ?? []
-                      "
-                      :review-basis-status="
-                        card.rationale?.reviewBasisStatus ?? null
-                      "
-                      :rationale-source="
-                        card.rationale?.rationaleSource ?? null
-                      "
-                      :review-note-ids="card.rationale?.reviewNoteIds ?? []"
-                      :review-evidence-refs="
-                        card.rationale?.reviewEvidenceRefs ?? []
-                      "
-                      :review-notes="
-                        courseReviews[card.courseCode]?.notes ?? []
-                      "
-                      @load="onReviewBasisLoad(card.courseCode)"
-                    />
-                  </details>
-                  <details @toggle="onEvidenceToggle(card, $event)">
-                    <summary>查看评价维度汇总与资料</summary>
-                    <p
-                      v-if="
-                        !courseReviews[card.courseCode] ||
-                        courseReviews[card.courseCode].status === 'loading'
-                      "
-                    >
-                      正在读取评价…
-                    </p>
-                    <p
-                      v-else-if="
-                        courseReviews[card.courseCode].status === 'error'
-                      "
-                    >
-                      评价读取失败，请重新展开重试。
-                    </p>
-                    <ReviewSummary
-                      v-if="
-                        courseReviews[card.courseCode]?.status === 'ready' &&
-                        unboundNotesOf(card.courseCode).length > 0
-                      "
-                      title="课程整体评价（未绑定老师）"
-                      :course-code="card.courseCode"
-                      :notes="unboundNotesOf(card.courseCode)"
-                      :unconfirmed="courseReviews[card.courseCode].unknown"
-                    />
-                    <p
-                      v-if="
-                        card.teacherKey !== null &&
-                        teacherReviews[
-                          teacherReviewKey(card.courseCode, card.teacherKey)
-                        ]?.status === 'loading'
-                      "
-                      class="microcopy"
-                    >
-                      正在读取本班教师的评价…
-                    </p>
-                    <template
-                      v-if="
-                        card.teacherKey !== null &&
-                        teacherReviews[
-                          teacherReviewKey(card.courseCode, card.teacherKey)
-                        ]?.status === 'ready'
-                      "
-                    >
+                  <div
+                    v-if="isCardOpen(entry, card.courseCode)"
+                    :id="cardDetailId(entry.index, card.courseCode)"
+                    class="course-row__detail"
+                    :aria-labelledby="
+                      cardToggleId(entry.index, card.courseCode)
+                    "
+                  >
+                    <dl class="course-card__facts">
+                      <div>
+                        <dt>课程号</dt>
+                        <dd class="course-card__small">
+                          {{ card.courseCode }}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>教师</dt>
+                        <dd>{{ card.teacher }}</dd>
+                      </div>
+                      <div>
+                        <dt>时间</dt>
+                        <dd>{{ card.time }}</dd>
+                      </div>
+                      <div v-if="card.classId !== null">
+                        <dt>班次</dt>
+                        <dd class="course-card__small">{{ card.classId }}</dd>
+                      </div>
+                    </dl>
+
+                    <details class="card-basis">
+                      <summary>推荐依据与课程来源</summary>
+                      <CourseReviewBasis
+                        :course-code="card.courseCode"
+                        :review-status="
+                          courseReviews[card.courseCode]?.status ?? null
+                        "
+                        :review-error="
+                          courseReviews[card.courseCode]?.error ?? ''
+                        "
+                        :reason="
+                          card.rationale?.reason ??
+                          (card.rationaleWasChanged
+                            ? '班次已调整，此版本未生成新的推荐理由。'
+                            : '暂无具体理由。')
+                        "
+                        :course-source-ref-ids="
+                          card.rationale?.courseSourceRefIds ?? []
+                        "
+                        :review-basis-status="
+                          card.rationale?.reviewBasisStatus ?? null
+                        "
+                        :rationale-source="
+                          card.rationale?.rationaleSource ?? null
+                        "
+                        :review-note-ids="card.rationale?.reviewNoteIds ?? []"
+                        :review-evidence-refs="
+                          card.rationale?.reviewEvidenceRefs ?? []
+                        "
+                        :review-notes="
+                          courseReviews[card.courseCode]?.notes ?? []
+                        "
+                        @load="onReviewBasisLoad(card.courseCode)"
+                      />
+                    </details>
+                    <details @toggle="onEvidenceToggle(card, $event)">
+                      <summary>查看评价维度汇总与资料</summary>
+                      <p
+                        v-if="
+                          !courseReviews[card.courseCode] ||
+                          courseReviews[card.courseCode].status === 'loading'
+                        "
+                      >
+                        正在读取评价…
+                      </p>
+                      <p
+                        v-else-if="
+                          courseReviews[card.courseCode].status === 'error'
+                        "
+                      >
+                        评价读取失败，请重新展开重试。
+                      </p>
                       <ReviewSummary
                         v-if="
-                          teacherReviews[
-                            teacherReviewKey(card.courseCode, card.teacherKey)
-                          ].notes.length > 0
+                          courseReviews[card.courseCode]?.status === 'ready' &&
+                          unboundNotesOf(card.courseCode).length > 0
                         "
-                        :title="`本班教师评价（${card.teacher}）`"
+                        title="课程整体评价（未绑定老师）"
                         :course-code="card.courseCode"
-                        :notes="
-                          teacherReviews[
-                            teacherReviewKey(card.courseCode, card.teacherKey)
-                          ].notes
-                        "
-                        :unconfirmed="
-                          teacherReviews[
-                            teacherReviewKey(card.courseCode, card.teacherKey)
-                          ].unknown
-                        "
+                        :notes="unboundNotesOf(card.courseCode)"
+                        :unconfirmed="courseReviews[card.courseCode].unknown"
                       />
-                      <p v-else class="microcopy">
-                        这位老师暂无绑定到本人的评价记录。
+                      <p
+                        v-if="
+                          card.teacherKey !== null &&
+                          teacherReviews[
+                            teacherReviewKey(card.courseCode, card.teacherKey)
+                          ]?.status === 'loading'
+                        "
+                        class="microcopy"
+                      >
+                        正在读取本班教师的评价…
                       </p>
-                    </template>
-                    <p v-if="boundElsewhereCount(card) > 0" class="microcopy">
-                      另有
-                      {{ boundElsewhereCount(card) }}
-                      条评价绑定到其他老师，未计入本班教师。
-                    </p>
-                    <p
-                      v-else-if="
-                        courseReviews[card.courseCode]?.status === 'ready' &&
-                        !courseReviews[card.courseCode].unknown
-                      "
-                      class="microcopy"
-                    >
-                      暂无评价记录。
-                    </p>
-                  </details>
-                  <div class="course-card__actions">
-                    <button
-                      :id="swapButtonId(entry.index, card.courseCode)"
-                      :ref="
-                        (el) =>
-                          registerFocus(
-                            swapButtonId(entry.index, card.courseCode),
-                            el,
-                          )
-                      "
-                      class="button button--secondary"
-                      type="button"
-                      :aria-expanded="
-                        isSwapOpen(entry, card.courseCode) ? 'true' : 'false'
-                      "
-                      :aria-controls="
-                        isSwapOpen(entry, card.courseCode)
-                          ? panelId(entry.index)
-                          : undefined
-                      "
-                      @click="toggleSwap(entry, card.courseCode)"
-                    >
-                      {{ card.classId === null ? "选班次" : "换班" }}
-                      <span class="visually-hidden">
-                        （{{ card.name ?? card.courseCode }}）
-                      </span>
-                    </button>
-                    <button
-                      class="button button--quiet course-card__delete"
-                      type="button"
-                      :disabled="deleting !== null"
-                      @click="deleteCourse(entry, card.courseCode)"
-                    >
-                      删除这门课
-                      <span class="visually-hidden">
-                        （{{ card.name ?? card.courseCode }}）
-                      </span>
-                    </button>
+                      <template
+                        v-if="
+                          card.teacherKey !== null &&
+                          teacherReviews[
+                            teacherReviewKey(card.courseCode, card.teacherKey)
+                          ]?.status === 'ready'
+                        "
+                      >
+                        <ReviewSummary
+                          v-if="
+                            teacherReviews[
+                              teacherReviewKey(card.courseCode, card.teacherKey)
+                            ].notes.length > 0
+                          "
+                          :title="`本班教师评价（${card.teacher}）`"
+                          :course-code="card.courseCode"
+                          :notes="
+                            teacherReviews[
+                              teacherReviewKey(card.courseCode, card.teacherKey)
+                            ].notes
+                          "
+                          :unconfirmed="
+                            teacherReviews[
+                              teacherReviewKey(card.courseCode, card.teacherKey)
+                            ].unknown
+                          "
+                        />
+                        <p v-else class="microcopy">
+                          这位老师暂无绑定到本人的评价记录。
+                        </p>
+                      </template>
+                      <p v-if="boundElsewhereCount(card) > 0" class="microcopy">
+                        另有
+                        {{ boundElsewhereCount(card) }}
+                        条评价绑定到其他老师，未计入本班教师。
+                      </p>
+                      <p
+                        v-else-if="
+                          courseReviews[card.courseCode]?.status === 'ready' &&
+                          !courseReviews[card.courseCode].unknown
+                        "
+                        class="microcopy"
+                      >
+                        暂无评价记录。
+                      </p>
+                    </details>
                   </div>
 
                   <section
@@ -2128,7 +2357,9 @@ async function goBackToQuestions() {
       </div>
     </template>
 
-    <nav class="question-nav" aria-label="结果导航">
+    <SavedPlansPanel class="no-print" :revision="savedRevision" />
+
+    <nav class="question-nav no-print" aria-label="结果导航">
       <button
         class="button button--secondary"
         type="button"
@@ -2398,38 +2629,89 @@ async function goBackToQuestions() {
   list-style: none;
 }
 
-/* 课程卡片：浅绿色圆角，沿用全局 --wash / --line。 */
+/* 课程行：默认两行（课程名·学分·标签 / 教师·短时间），换班与删除放在右侧，点行展开详情。 */
 .course-card {
   min-width: 0;
-  padding: 14px 16px;
+  padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--wash);
 }
 
-.course-card__head {
+.course-row {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.course-card__title {
+  align-items: center;
+  gap: 6px;
   min-width: 0;
 }
 
-.course-card__title strong {
-  display: block;
+.course-row__toggle {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.course-row__toggle:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+
+.course-row__line1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.course-row__line1 strong {
   color: var(--ink);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
-.course-card__code {
-  display: block;
+.course-row__meta {
   color: var(--soft);
   font-size: 12px;
+}
+
+.course-row__line2 {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--soft);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.course-row__tools {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+
+.course-row__tool {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.course-row__detail {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
 }
 
 .tag {
@@ -2519,22 +2801,113 @@ async function goBackToQuestions() {
   cursor: pointer;
 }
 
-.course-card__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
-
 .course-card__delete {
-  min-height: 36px;
-  padding: 6px 10px;
   color: #8b3c31;
-  font-size: 13px;
 }
 
 .course-card__delete:hover:not(:disabled) {
   color: #6e2e25;
+}
+
+/* 保存方案菜单：向下展开的小菜单，Esc 关闭。 */
+.save-menu {
+  position: relative;
+}
+
+.save-menu__list {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  width: min(300px, 80vw);
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 10%);
+}
+
+.save-menu__item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.save-menu__item:hover:not(:disabled) {
+  background: var(--wash);
+}
+
+.save-menu__item:disabled {
+  color: var(--soft);
+  cursor: not-allowed;
+}
+
+.save-menu__hint {
+  margin: 0 10px 6px;
+  font-size: 12px;
+}
+
+/* 打印 / 存为 PDF：只留课表与课程行，收起按钮、菜单、展开详情与其他操作区。 */
+@media print {
+  :global(.topbar),
+  :global(.main-nav),
+  :global(.skip-link),
+  :global(.sim-banner),
+  :global(.mode-badge),
+  :global(.page-footer) {
+    display: none !important;
+  }
+
+  .result-page .no-print,
+  .plan-actions,
+  .course-row__tools,
+  .course-row__detail,
+  .swap-panel,
+  .add-course,
+  .note-details,
+  .career-details,
+  .debug-id,
+  .save-menu,
+  .course-list__note,
+  .regenerate {
+    display: none !important;
+  }
+
+  .plan-grid,
+  .plan-grid--split {
+    display: block !important;
+  }
+
+  .plan-grid__timetable {
+    margin-bottom: 12px;
+    break-inside: avoid;
+  }
+
+  .course-card {
+    break-inside: avoid;
+    border: 1px solid #bbb;
+    background: none;
+  }
+
+  .course-row__toggle {
+    pointer-events: none;
+  }
+
+  .course-card__issues {
+    background: none;
+    border: 1px solid #ddd;
+  }
 }
 
 .swap-panel {

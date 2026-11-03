@@ -19,6 +19,7 @@ import LearnedCourseGroups from "../components/LearnedCourseGroups.vue";
 import LocalAuditSummary from "../components/LocalAuditSummary.vue";
 import ReviewSummary from "../components/ReviewSummary.vue";
 import AdviceChat from "../components/AdviceChat.vue";
+import SavedPlansPanel from "../components/SavedPlansPanel.vue";
 import {
   auditSourceLabel,
   groupAuditItems,
@@ -795,6 +796,7 @@ onUnmounted(() => controller?.abort());
         </div>
       </section>
     </template>
+    <SavedPlansPanel />
   </section>
 </template>
 

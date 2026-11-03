@@ -199,6 +199,34 @@ export function meetingsText(meetings: readonly Meeting[]): string {
 }
 
 /**
+ * 课程行里的短时间：「周二7-8 周三5-6 · 9-16周」。周次相同时只写一次；不同时逐段标注。
+ * 不可读的时段不画，末尾注明「另有时段无法确认」，与 meetingsText 的门禁一致。
+ */
+export function shortMeetingsText(meetings: readonly Meeting[]): string {
+  const readable = meetings.filter(
+    (meeting) => meetingProblem(meeting) === null,
+  );
+  const hasUnreadable = readable.length !== meetings.length;
+  if (readable.length === 0) return "时间未能确认";
+  const parts = readable.map((meeting) => {
+    const day = WEEKDAY_NAMES[meeting.dayOfWeek - 1];
+    const sections =
+      meeting.sectionStart === meeting.sectionEnd
+        ? `${meeting.sectionStart}`
+        : `${meeting.sectionStart}-${meeting.sectionEnd}`;
+    return {
+      head: `${day}${sections}`,
+      weeks: compactWeeksText(meeting.weeks),
+    };
+  });
+  const sameWeeks = parts.every((part) => part.weeks === parts[0].weeks);
+  const text = sameWeeks
+    ? `${parts.map((part) => part.head).join(" ")} · ${parts[0].weeks}`
+    : parts.map((part) => `${part.head}（${part.weeks}）`).join(" ");
+  return hasUnreadable ? `${text}；另有时段无法确认` : text;
+}
+
+/**
  * 把课表画出来。reasons 为课程号 → 方案里 Java 给出的未排入原因（如 SECTION_NOT_ASSIGNED 的原因原文）；
  * 有原因时未纳入课表的说明用它，没有时才退回通用说明。
  */
