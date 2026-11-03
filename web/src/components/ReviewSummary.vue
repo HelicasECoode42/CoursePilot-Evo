@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ReviewNote } from "../contracts";
 import { reviewSourceLabel } from "../domain/review-source";
+import { expandReviewItems } from "../domain/review-items";
 import { summarizeReviewsByDimension } from "../domain/review-summary";
 
 const props = withDefaults(
@@ -69,17 +70,31 @@ function publishedYear(publishedAt: string | null): string {
         </template>
       </summary>
       <ul>
-        <li v-for="note in group.notes" :key="note.reviewNoteId">
-          <p>{{ note.excerpt }}</p>
+        <li
+          v-for="item in expandReviewItems(group.notes)"
+          :key="`${group.dimension}-${item.key}`"
+          class="review-summary__item"
+        >
           <p class="microcopy">
-            {{ SOURCE_LABEL[note.sourceKind] }} ·
-            {{ publishedYear(note.publishedAt) }} ·
-            {{ MATCH_LABEL[note.matchStatus] }}
+            {{ item.teacherLabel
+            }}<template v-if="item.termPrefix">
+              · {{ item.termPrefix }}</template
+            >
+          </p>
+          <p>{{ item.text }}</p>
+          <p class="microcopy">
+            {{ SOURCE_LABEL[item.note.sourceKind] }} ·
+            {{ publishedYear(item.note.publishedAt) }} ·
+            {{ MATCH_LABEL[item.note.matchStatus] }}
           </p>
           <details class="review-summary__source">
             <summary>来源资料</summary>
-            <p class="microcopy">{{ reviewSourceLabel(note.sourceRefId) }}</p>
-            <code :title="note.sourceRefId">{{ note.sourceRefId }}</code>
+            <p class="microcopy">
+              {{ reviewSourceLabel(item.note.sourceRefId) }}
+            </p>
+            <code :title="item.note.sourceRefId">{{
+              item.note.sourceRefId
+            }}</code>
           </details>
         </li>
       </ul>
@@ -98,5 +113,9 @@ function publishedYear(publishedAt: string | null): string {
 
 .review-summary__source {
   margin-block: 4px;
+}
+
+.review-summary__item {
+  margin-block: 8px;
 }
 </style>

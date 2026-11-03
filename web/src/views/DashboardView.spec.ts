@@ -336,7 +336,8 @@ describe("个人控制台", () => {
     await flushPromises();
     const text = wrapper.text();
     expect(text).not.toContain("已确认教过这门课的教师");
-    expect(text).not.toContain("未绑定教师");
+    // 名字只能作为「来源标注、未核实」出现，不能写成这位教师教过这门课。
+    expect(text).toContain("来源标注：未绑定教师（未核实）");
     // 但要把这件事说出来，不能静悄悄吞掉。
     expect(text).toContain("没有确认这位教师教过这门课");
   });

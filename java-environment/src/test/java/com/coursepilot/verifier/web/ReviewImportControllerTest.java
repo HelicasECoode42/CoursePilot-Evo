@@ -62,4 +62,27 @@ class ReviewImportControllerTest {
         assertEquals("李老师", note.getTeacherDisplayName());
         assertEquals("UNVERIFIED", note.getImportedMatchStatus());
     }
+
+    @Test void retiresOnlyListedReviewsAndRequiresAdminKey() throws Exception {
+        var repo = mock(ReviewNoteRepository.class);
+        var controller = new ReviewImportController(repo, new SubjectGuard(), "admin-secret");
+        var body = new ObjectMapper().readTree("""
+            {"schemaVersion":"1.0","reviewNoteIds":["review:faculty:p010:l014:08305008"]}
+            """);
+        assertEquals(401, controller.retireImportedReviews("req:3", "subject:1", "wrong", body).getStatusCode().value());
+        verifyNoInteractions(repo);
+
+        var old = new ReviewNote("review:faculty:p010:l014:08305008", "08305008", null, null,
+            ReviewNote.SourceKind.USER_IMPORT, null, null, "旧的粘连评价", List.of());
+        when(repo.findAllById(any())).thenReturn(List.of(old));
+        var ok = controller.retireImportedReviews("req:3", "subject:1", "admin-secret", body);
+        assertEquals(200, ok.getStatusCode().value());
+        verify(repo).deleteAll(List.of(old));
+
+        var bad = new ObjectMapper().readTree("""
+            {"schemaVersion":"1.0","reviewNoteIds":["review:a","review:a"]}
+            """);
+        assertEquals(400, controller.retireImportedReviews("req:4", "subject:1", "admin-secret", bad).getStatusCode().value());
+        verify(repo, times(1)).deleteAll(any());
+    }
 }

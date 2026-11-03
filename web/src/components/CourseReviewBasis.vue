@@ -3,6 +3,7 @@ import { computed } from "vue";
 import type { ReviewNote } from "../contracts";
 import { courseSourceLabel } from "../domain/course-source";
 import { reviewSourceLabel } from "../domain/review-source";
+import { expandReviewItems } from "../domain/review-items";
 
 const props = defineProps<{
   courseCode: string;
@@ -38,6 +39,8 @@ const citedNotes = computed(() =>
   ),
 );
 const evidenceRefs = computed(() => props.reviewEvidenceRefs ?? []);
+/** 已引用的评价按「一条一项」展示：拆分粘连原文，并带老师名与学期。 */
+const citedItems = computed(() => expandReviewItems(citedNotes.value));
 const uncachedEvidenceRefs = computed(() =>
   evidenceRefs.value.filter(
     (ref) =>
@@ -175,15 +178,19 @@ const SOURCE_LABEL: Record<ReviewNote["sourceKind"], string> = {
       v-if="reviewBasisStatus === 'HAS_EVIDENCE' && citedNotes.length > 0"
       aria-label="评价证据"
     >
-      <li v-for="note in citedNotes" :key="note.reviewNoteId">
-        <span>{{ note.excerpt }}</span>
+      <li v-for="item in citedItems" :key="item.key">
         <span class="microcopy">
-          {{ SOURCE_LABEL[note.sourceKind] }} ·
-          {{ reviewSourceLabel(note.sourceRefId) }}
+          {{ item.teacherLabel
+          }}<template v-if="item.termPrefix"> · {{ item.termPrefix }}</template>
+        </span>
+        <span>{{ item.text }}</span>
+        <span class="microcopy">
+          {{ SOURCE_LABEL[item.note.sourceKind] }} ·
+          {{ reviewSourceLabel(item.note.sourceRefId) }}
           <details>
             <summary>查看记录编号</summary>
-            <code>{{ note.reviewNoteId }}</code> ·
-            <code>{{ note.sourceRefId }}</code>
+            <code>{{ item.reviewNoteId }}</code> ·
+            <code>{{ item.note.sourceRefId }}</code>
           </details>
         </span>
       </li>

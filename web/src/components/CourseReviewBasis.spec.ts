@@ -151,3 +151,43 @@ describe("CourseReviewBasis", () => {
     expect(wrapper.text()).toContain("示例评价原文（虚构）");
   });
 });
+
+describe("CourseReviewBasis review items", () => {
+  it("shows each glued review as its own item with teacher name", () => {
+    const wrapper = mount(CourseReviewBasis, {
+      props: {
+        ...base,
+        reviewBasisStatus: "HAS_EVIDENCE",
+        reviewNoteIds: ["review-glued"],
+        reviewEvidenceRefs: [
+          {
+            reviewNoteId: "review-glued",
+            sourceRefId: "faculty-pdf:p010:l014",
+          },
+        ],
+        reviewNotes: [
+          {
+            reviewNoteId: "review-glued",
+            courseCode: "CS101",
+            teacherKey: null,
+            teacherDisplayName: "张三",
+            termId: null,
+            sourceKind: "USER_IMPORT",
+            publishedAt: null,
+            sourceUrl: null,
+            excerpt: "第一条评价。Ⅱ第二条评价。",
+            dimensions: ["OVERALL"],
+            matchStatus: "UNVERIFIED",
+            sourceRefId: "faculty-pdf:p010:l014",
+          },
+        ],
+      },
+    });
+    const items = wrapper.findAll('[aria-label="评价证据"] > li');
+    expect(items).toHaveLength(2);
+    expect(items[0]!.text()).toContain("来源标注：张三（未核实）");
+    expect(items[0]!.text()).toContain("第一条评价。");
+    expect(items[1]!.text()).toContain("第二条评价。");
+    expect(wrapper.text()).not.toContain("Ⅱ");
+  });
+});
