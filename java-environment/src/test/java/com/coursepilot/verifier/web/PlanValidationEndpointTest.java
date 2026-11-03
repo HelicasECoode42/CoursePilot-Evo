@@ -215,21 +215,38 @@ class PlanValidationEndpointTest {
     }
 
     @Test
-    @DisplayName("无法验的时间约束 -> 进 unknownChecks，verdict 不是 VALID（REAL 下）")
-    void unverifiableConstraintIsNotSilentlyValid() throws Exception {
+    @DisplayName("未核验来源下约束未命中 -> CONSTRAINT_CLEAR_UNVERIFIED_SOURCE 进 unknownChecks，verdict 仍是 UNKNOWN（REAL 下）")
+    void unverifiedSourceMissIsPreviewClearButStillUnknown() throws Exception {
         JsonNode d = data(validate(body("REAL", OWNER, ITEM_CS201, block("BLOCK_DAY", 3, null, "周三不排课"))));
-        assertNotEquals("VALID", d.get("verdict").asText());
         assertEquals("UNKNOWN", d.get("verdict").asText());
-        boolean fieldOk = false;
-        boolean found = false;
+        assertEquals(0, d.get("violations").size());
+        assertTrue(hasCode(d.get("unknownChecks"), "CONSTRAINT_CLEAR_UNVERIFIED_SOURCE"));
+        assertFalse(hasCode(d.get("unknownChecks"), "CONSTRAINT_UNVERIFIABLE"));
+        JsonNode clear = null;
         for (JsonNode n : d.get("unknownChecks")) {
-            if ("CONSTRAINT_UNVERIFIABLE".equals(n.get("code").asText())) {
-                found = true;
-                fieldOk = "hardConstraints[0]".equals(n.get("field").asText());
-            }
+            if ("CONSTRAINT_CLEAR_UNVERIFIED_SOURCE".equals(n.get("code").asText())) clear = n;
         }
-        assertTrue(found, "约束无法核验必须进 unknownChecks");
-        assertTrue(fieldOk, "未知项应指向 hardConstraints[0]");
+        assertNotNull(clear);
+        assertEquals("hardConstraints[0]", clear.get("field").asText());
+    }
+
+    @Test
+    @DisplayName("未核验来源下约束命中班次时间 -> CONSTRAINT_HIT_UNVERIFIED_SOURCE，不进 violations，verdict 仍是 UNKNOWN")
+    void unverifiedSourceHitIsPreviewHitButStillUnknown() throws Exception {
+        JsonNode d = data(validate(body("REAL", OWNER, ITEM_CS201, block("BLOCK_DAY", 5, null, "周五不排课"))));
+        assertEquals("UNKNOWN", d.get("verdict").asText());
+        assertEquals(0, d.get("violations").size());
+        assertTrue(hasCode(d.get("unknownChecks"), "CONSTRAINT_HIT_UNVERIFIED_SOURCE"));
+        assertFalse(hasCode(d.get("unknownChecks"), "CONSTRAINT_CLEAR_UNVERIFIED_SOURCE"));
+    }
+
+    @Test
+    @DisplayName("未核验来源下班次时间无法解析 -> CONSTRAINT_UNVERIFIABLE，仍是 UNKNOWN")
+    void unverifiedSourceUnparseableStaysUnverifiable() throws Exception {
+        JsonNode d = data(validate(body("REAL", OWNER, ITEM_CS103, block("BLOCK_DAY", 3, null, "周三不排课"))));
+        assertEquals("UNKNOWN", d.get("verdict").asText());
+        assertTrue(hasCode(d.get("unknownChecks"), "CONSTRAINT_UNVERIFIABLE"));
+        assertFalse(hasCode(d.get("unknownChecks"), "CONSTRAINT_CLEAR_UNVERIFIED_SOURCE"));
     }
 
     @Test

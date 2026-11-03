@@ -44,6 +44,8 @@ import java.util.stream.Collectors;
  * 才是 SIMULATION；mode=REAL 且班次快照 sourceValidation=VERIFIED（带学期、方案项都在该快照内）才是 REAL_TIMETABLE；
  * 其余一律 COURSE_ONLY。已核验快照由人工抽样核验接口产生，上传者标签不会产生它。
  * COURSE_ONLY / 非 SIMULATION 下，所有时间相关检查（冲突、时间类硬约束）都记进 unknownChecks。
+ * 时间类硬约束另外按解析出的班次时间给出预览结论（CONSTRAINT_HIT_UNVERIFIED_SOURCE /
+ * CONSTRAINT_CLEAR_UNVERIFIED_SOURCE），它们同样只在 unknownChecks 里，不改变整份方案的 UNKNOWN 判决。
  *
  * 时间只经 ConflictChecker.analyze（唯一 TimeParser）得到，本类不解析客户端给的任何时间文本。
  */
@@ -270,8 +272,7 @@ public class PlanValidationService {
         String field = "hardConstraints[" + i + "]";
         String label = "第 " + i + " 条硬约束（" + c.kind() + "）";
         if (!timeVerified) {
-            f.unknown(Section.TIMETABLE, "CONSTRAINT_UNVERIFIABLE",
-                label + "需要已验证的班次时间，当前没有可用来源，无法核验", field);
+            checkTimeConstraintUnverified(i, c, items, analysis, f);
             return;
         }
         f.performed("硬约束 #" + i + " " + c.kind() + " 时间核对");
@@ -303,6 +304,62 @@ public class PlanValidationService {
                     break;
                 }
             }
+        }
+    }
+
+    /**
+     * 来源未核验时（COURSE_ONLY，或 mode=REAL 但快照未经人工核验）的时间类硬约束。
+     *
+     * 班次时间仍由 TimeParser 解析，能解析的班次照常判断是否命中约束，供网页预览使用：
+     * 命中记 CONSTRAINT_HIT_UNVERIFIED_SOURCE，全部适用班次都能解析且都未命中记 CONSTRAINT_CLEAR_UNVERIFIED_SOURCE，
+     * 无法判断（教师未知、班次缺失或时间无法解析）仍记 CONSTRAINT_UNVERIFIABLE。
+     * 三种结论都只进 unknownChecks：来源未核验时整份方案的判决仍是 UNKNOWN，不会因此判为通过或违规。
+     */
+    private void checkTimeConstraintUnverified(int i, Constraint c, List<PlanItem> items,
+                                               ConflictChecker.Analysis analysis, Findings f) {
+        String field = "hardConstraints[" + i + "]";
+        String label = "第 " + i + " 条硬约束（" + c.kind() + "）";
+        boolean applicable = false;
+        boolean undecided = false;
+        boolean hit = false;
+        for (PlanItem item : items) {
+            Applicability ap = appliesTo(c, item);
+            if (ap == Applicability.NO) continue;
+            applicable = true;
+            if (ap == Applicability.UNKNOWN) {
+                undecided = true;
+                f.unknown(Section.TIMETABLE, "CONSTRAINT_UNVERIFIABLE",
+                    label + "无法确定课程 " + item.courseCode() + " 的教师是否受约束，方案项未给教师", field);
+                continue;
+            }
+            if (item.classId() == null) {
+                undecided = true;
+                f.unknown(Section.TIMETABLE, "CONSTRAINT_UNVERIFIABLE",
+                    label + "无法核验课程 " + item.courseCode() + "：方案项未指定班次", field);
+                continue;
+            }
+            List<MeetingTime> meetings = analysis.meetingsById().get(item.classId());
+            if (meetings == null) {
+                undecided = true;
+                f.unknown(Section.TIMETABLE, "CONSTRAINT_UNVERIFIABLE",
+                    label + "无法核验课程 " + item.courseCode() + "：班次 " + item.classId() + " 时间不可用", field);
+                continue;
+            }
+            for (MeetingTime m : meetings) {
+                if (hits(c, m)) {
+                    hit = true;
+                    f.unknown(Section.TIMETABLE, "CONSTRAINT_HIT_UNVERIFIED_SOURCE",
+                        "课程 " + item.courseCode() + "（班次 " + item.classId() + "）"
+                            + DAY_NAMES.get(m.getDayOfWeek()) + "第" + m.getStartSection() + "-"
+                            + m.getEndSection() + "节，按未核验课表命中" + label
+                            + "（班次来源未核验，仅为预览，不能判为通过）", field);
+                    break;
+                }
+            }
+        }
+        if (applicable && !undecided && !hit) {
+            f.unknown(Section.TIMETABLE, "CONSTRAINT_CLEAR_UNVERIFIED_SOURCE",
+                label + "按未核验课表核对，未命中（班次来源未核验，仅为预览，不能判为通过）", field);
         }
     }
 

@@ -594,6 +594,32 @@ describe("result page course search and replacement", () => {
     expect(clear?.text()).toContain("与你设定的必避时段没有冲突");
   });
 
+  it("lets a section pass the must-avoid check on unverified data, with the source caveat, and still blocks a real hit", async () => {
+    vi.spyOn(api, "searchSessionOfferings").mockImplementation(
+      async (previousPlanId, courseCode) => ({
+        previousPlanId,
+        courseCode,
+        status: "OK",
+        items: structuredClone(DEFAULT_OFFERINGS[courseCode] ?? []),
+        mustAvoidChecks: [
+          { classId: "CS103-01", verdict: "CONFLICT" },
+          { classId: "CS103-02", verdict: "CLEAR_UNVERIFIED" },
+        ],
+      }),
+    );
+    const wrapper = mountPage();
+    await openAndSearch(wrapper, "CS103");
+
+    const clear = rowOf(wrapper, "CS103-02");
+    expect(clear?.get("button").text()).toBe("选这个班次");
+    expect(clear?.get("button").attributes("disabled")).toBeUndefined();
+    expect(clear?.text()).toContain("按未核验课表");
+    expect(clear?.text()).not.toContain("无法确认是否与你设定的必避时段冲突");
+    expect(rowOf(wrapper, "CS103-01")?.text()).toContain(
+      "与你设定的必避时段冲突",
+    );
+  });
+
   it("does not claim a section is conflict-free when the student has must-avoid times but Java gave no check for it", async () => {
     const wrapper = mountPage();
     store.$patch({

@@ -451,7 +451,11 @@ export interface RunReport {
 
 /** `GET /api/v1/session-offerings` 的 data。items 为空数组是正常业务状态。 */
 /** Java 对单个候选班次与学生硬时间约束（必避时段）的核对结果。只映射 Java 的判决，不做时间计算。 */
-export type MustAvoidVerdict = "CONFLICT" | "CLEAR" | "UNKNOWN";
+export type MustAvoidVerdict =
+  | "CONFLICT"
+  | "CLEAR_UNVERIFIED"
+  | "CLEAR"
+  | "UNKNOWN";
 
 export interface MustAvoidCheck {
   classId: string;

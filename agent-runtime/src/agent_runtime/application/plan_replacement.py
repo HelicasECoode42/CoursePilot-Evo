@@ -90,14 +90,31 @@ class MustAvoidCheck:
     """Java's verdict on one candidate class against the hard time constraints."""
 
     classId: str
-    verdict: str  # CONFLICT | CLEAR | UNKNOWN
+    verdict: str  # CONFLICT | CLEAR_UNVERIFIED | CLEAR | UNKNOWN
+
+
+# Java's preview codes for a source that is not verified (see PlanValidationService).
+_HIT_UNVERIFIED = "CONSTRAINT_HIT_UNVERIFIED_SOURCE"
+_CLEAR_UNVERIFIED = "CONSTRAINT_CLEAR_UNVERIFIED_SOURCE"
 
 
 def _must_avoid_verdict(verification: PlanValidation) -> str:
+    """Map Java's constraint findings for one candidate to a preview verdict.
+
+    Java decides; this only names the result. A hit is a CONFLICT even when the
+    source is unverified, because the parsed meeting time really falls inside a
+    must-avoid slot. A miss on unverified data is CLEAR_UNVERIFIED, not CLEAR.
+    Anything Java could not decide is UNKNOWN.
+    """
     if any(item.code.startswith("CONSTRAINT_BLOCK_") for item in verification.violations):
         return "CONFLICT"
-    if any(item.code.startswith("CONSTRAINT_") for item in verification.unknownChecks):
+    unknown_codes = [item.code for item in verification.unknownChecks]
+    if any(code == _HIT_UNVERIFIED for code in unknown_codes):
+        return "CONFLICT"
+    if any(code.startswith("CONSTRAINT_") and code != _CLEAR_UNVERIFIED for code in unknown_codes):
         return "UNKNOWN"
+    if any(code == _CLEAR_UNVERIFIED for code in unknown_codes):
+        return "CLEAR_UNVERIFIED"
     return "CLEAR"
 
 

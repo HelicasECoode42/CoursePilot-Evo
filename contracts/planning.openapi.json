@@ -2222,7 +2222,7 @@
                               "type": "array",
                               "minItems": 0,
                               "maxItems": 50,
-                              "description": "Java 对每个候选班次单独核验硬时间约束（CONSTRAINT_BLOCK_* 违规即 CONFLICT）。方案没有硬约束时为空数组，不代表已核对。候选班次只是预览，换班后仍须整份重新核验。",
+                              "description": "Java 对每个候选班次单独核验硬时间约束。CONSTRAINT_BLOCK_* 违规或来源未核验时命中（CONSTRAINT_HIT_UNVERIFIED_SOURCE）即 CONFLICT；来源未核验但按解析出的时间未命中（CONSTRAINT_CLEAR_UNVERIFIED_SOURCE）为 CLEAR_UNVERIFIED；无法判断（CONSTRAINT_UNVERIFIABLE）为 UNKNOWN。方案没有硬约束时为空数组，不代表已核对。候选班次只是预览，换班后仍须整份重新核验。",
                               "items": {
                                 "type": "object",
                                 "additionalProperties": false,
@@ -2236,6 +2236,7 @@
                                     "type": "string",
                                     "enum": [
                                       "CONFLICT",
+                                      "CLEAR_UNVERIFIED",
                                       "CLEAR",
                                       "UNKNOWN"
                                     ]

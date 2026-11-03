@@ -210,3 +210,9 @@ owner 决定：本地学业核对必须与导入的学校报告同步（替代�
 - 契约变更：`AuditItem` 增加可选 `source`、`inProgressCredits`；`AuditResult` 增加可选 `transcriptCompleteSource`。Python `audit.py` 同步；Web `contracts.ts` 仅增加类型。
 - 测试：`SchoolReportAuditTest`（同名类别采用学校口径且课程不在库、学校剩余学分与在读学分、课程按学校链接归类、读全自动完整、未读全保持手动、无同名回退 LOCAL）；`AuditResultAssemblerTest` 的在读用例改为「不致 UNKNOWN」；`SchoolProgressEndpointTest.fullyReadImportIsSavedAsCompleteTranscript`。
 - 限制：学校报告按主体取最近一次导入，未与培养快照版本做逐项比对（学业记录的快照不一致仍由 `SnapshotMismatch` 拦截）；同名但不同层级且都未读全的节点不映射。
+
+### 必避时段预览：未核验来源也按解析时间判断（2026-11-03）
+
+- 来源未核验（COURSE_ONLY，或 mode=REAL 但快照未核验）时，时间类硬约束仍用 TimeParser 解析出的班次时间判断命中，只作预览结论，整份方案判决仍是 UNKNOWN。
+- 新增 unknownChecks 代码：`CONSTRAINT_HIT_UNVERIFIED_SOURCE`（命中）、`CONSTRAINT_CLEAR_UNVERIFIED_SOURCE`（适用班次都能解析且未命中）。`CONSTRAINT_UNVERIFIABLE` 只保留给教师未知、班次缺失或时间无法解析的情况。
+- 换班与加课的候选班次预览（Python `mustAvoidChecks`）据此给出 `CONFLICT`、`CLEAR_UNVERIFIED`、`CLEAR` 或 `UNKNOWN`。此前官方快照未核验时，所有受约束班次都被记为 `CONSTRAINT_UNVERIFIABLE`，网页只能显示“无法确认是否与必避时段冲突”。

@@ -272,6 +272,7 @@ function isMustAvoidCheck(value: unknown): value is MustAvoidCheck {
     isObject(value) &&
     typeof value.classId === "string" &&
     (value.verdict === "CONFLICT" ||
+      value.verdict === "CLEAR_UNVERIFIED" ||
       value.verdict === "CLEAR" ||
       value.verdict === "UNKNOWN")
   );
