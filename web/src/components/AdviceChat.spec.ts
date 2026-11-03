@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from "pinia";
 import { mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdviceChatAnswer } from "../contracts";
 import { emptyPlanningDraft } from "../domain/question-flow";
 import { usePlanningStore } from "../stores/planning";
@@ -90,5 +90,52 @@ describe("advice chat suggestions", () => {
     await wrapper.vm.$nextTick();
     await wrapper.vm.$nextTick();
     expect(box.scrollTop).toBe(900);
+  });
+
+  describe("advice chat keyboard", () => {
+    beforeEach(() => {
+      setActivePinia(createPinia());
+    });
+
+    function pressEnter(
+      wrapper: ReturnType<typeof mount>,
+      init: KeyboardEventInit,
+    ): void {
+      const area = wrapper.get("#dash-question").element as HTMLTextAreaElement;
+      area.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          ...init,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }
+
+    it("Enter sends the question, Shift+Enter does not", async () => {
+      const store = usePlanningStore();
+      store.$patch({ adviceMessages: [], draft: emptyPlanningDraft() });
+      const send = vi.spyOn(store, "sendAdviceMessage").mockResolvedValue(true);
+      const wrapper = mount(AdviceChat);
+      await wrapper.get("#dash-question").setValue("想学数据库");
+      pressEnter(wrapper, { shiftKey: true });
+      expect(send).not.toHaveBeenCalled();
+      pressEnter(wrapper, {});
+      expect(send).toHaveBeenCalledWith("想学数据库");
+    });
+
+    it("ignores Enter while an IME is composing, and never sends an empty question", async () => {
+      const store = usePlanningStore();
+      store.$patch({ adviceMessages: [], draft: emptyPlanningDraft() });
+      const send = vi.spyOn(store, "sendAdviceMessage").mockResolvedValue(true);
+      const wrapper = mount(AdviceChat);
+      await wrapper.get("#dash-question").setValue("数据库");
+      pressEnter(wrapper, { isComposing: true });
+      pressEnter(wrapper, { keyCode: 229 } as KeyboardEventInit);
+      expect(send).not.toHaveBeenCalled();
+      await wrapper.get("#dash-question").setValue("   ");
+      pressEnter(wrapper, {});
+      expect(send).not.toHaveBeenCalled();
+    });
   });
 });

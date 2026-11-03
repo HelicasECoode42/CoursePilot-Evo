@@ -5,12 +5,14 @@
  * 数据全部来自 domain/timetable.ts；这里只负责展示。
  * scope 不是 REAL_TIMETABLE 时，课表上方必须写明它不是真实课表。
  */
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import type { PlanScope } from "../contracts";
 import {
   buildTimetable,
+  compactWeeksText,
   meetingsText,
   type TimetableSource,
+  type WeekView,
 } from "../domain/timetable";
 import {
   SCHEDULE_DAYS,
@@ -30,8 +32,22 @@ const props = withDefaults(
   { courseNames: () => ({}), unplacedReasons: () => ({}) },
 );
 
+/** 周次切换：全学期 / 前八周 / 后八周。只影响格子，不影响明细与未排说明。 */
+const weekView = ref<WeekView>("ALL");
+const WEEK_OPTIONS: { value: WeekView; label: string }[] = [
+  { value: "ALL", label: "全学期" },
+  { value: "FIRST_8", label: "前八周（1-8）" },
+  { value: "LAST_8", label: "后八周（9-16）" },
+];
+
 const view = computed(() =>
-  buildTimetable(props.sources, props.unplacedReasons),
+  buildTimetable(props.sources, props.unplacedReasons, {
+    weekView: weekView.value,
+  }),
+);
+const nameOf = (courseCode: string) => props.courseNames[courseCode] ?? null;
+const cellsEmptyInView = computed(
+  () => view.value.placed.length > 0 && view.value.cells.size === 0,
 );
 
 /** 明细卡片：课程名、真实教师、人话时间。班次号只作小字辅助信息。 */
@@ -76,6 +92,28 @@ function dayLabel(day: number): string {
     </p>
 
     <div
+      v-if="view.placed.length"
+      class="timetable-weeks"
+      role="group"
+      aria-label="周次范围"
+    >
+      <button
+        v-for="option in WEEK_OPTIONS"
+        :key="option.value"
+        type="button"
+        class="timetable-weeks__btn"
+        :aria-pressed="weekView === option.value"
+        :class="{ 'timetable-weeks__btn--on': weekView === option.value }"
+        @click="weekView = option.value"
+      >
+        {{ option.label }}
+      </button>
+    </div>
+    <p v-if="cellsEmptyInView" class="microcopy" role="status">
+      所选周次范围内没有这些课的上课时段，可切换到全学期查看。
+    </p>
+
+    <div
       class="timetable-layout"
       :class="{
         'timetable-layout--split':
@@ -114,8 +152,14 @@ function dayLabel(day: number): string {
                     :key="entry.courseCode + entry.classId"
                     class="timetable-chip"
                   >
-                    <strong>{{ entry.courseCode }}</strong>
-                    <span>{{ entry.classId }}</span>
+                    <strong>{{
+                      nameOf(entry.courseCode) ?? entry.courseCode
+                    }}</strong>
+                    <span>{{ entry.teacherText.trim() || "教师未填写" }}</span>
+                    <span class="timetable-chip__meta"
+                      >{{ compactWeeksText(entry.weeks) }} · 班
+                      {{ entry.classId }}</span
+                    >
                   </li>
                 </ul>
               </td>
@@ -251,6 +295,38 @@ function dayLabel(day: number): string {
   color: #164f55;
   background: #e8f1ef;
   overflow-wrap: anywhere;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.timetable-chip__meta {
+  color: var(--soft);
+  font-size: 11px;
+}
+
+.timetable-weeks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+
+.timetable-weeks__btn {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.timetable-weeks__btn--on {
+  border-color: var(--green);
+  background: var(--green-soft, #e7f4ec);
+  color: var(--green);
+  font-weight: 600;
 }
 
 /* 明细卡片：浅绿色圆角，沿用全局 --wash / --line 变量。 */

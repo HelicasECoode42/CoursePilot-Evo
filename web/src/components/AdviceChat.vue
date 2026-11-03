@@ -39,6 +39,23 @@ async function send() {
   const sent = await store.sendAdviceMessage(message.value);
   if (sent) message.value = "";
 }
+/**
+ * Enter 发送，Shift+Enter 换行。输入法组字过程中的 Enter 是选字，不能发送。
+ * keyCode 229 是部分浏览器在组字时给出的值，同样忽略。
+ */
+function onMessageKeydown(event: {
+  key: string;
+  shiftKey: boolean;
+  isComposing: boolean;
+  keyCode: number;
+  preventDefault: () => void;
+}) {
+  if (event.key !== "Enter" || event.shiftKey) return;
+  if (event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (store.adviceBusy || !message.value.trim()) return;
+  void send();
+}
 async function recoverAdvice() {
   const failure = store.adviceFailure;
   if (!failure) return;
@@ -306,6 +323,7 @@ function capturedAtLabel(value: string) {
         maxlength="1000"
         placeholder="例如：想了解人工智能方向，可以先选哪些专业选修？"
         :disabled="store.adviceBusy"
+        @keydown="onMessageKeydown"
       />
       <div class="advice-chat__controls">
         <span class="microcopy">{{ message.length }}/1000</span

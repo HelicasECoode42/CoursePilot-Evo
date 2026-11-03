@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Meeting } from "../contracts";
-import { buildTimetable, meetingsText } from "./timetable";
+import { buildTimetable, compactWeeksText, meetingsText } from "./timetable";
 
 const WEEKS = Array.from({ length: 16 }, (_, index) => index + 1);
 
@@ -75,5 +75,57 @@ describe("buildTimetable 未排进课表的原因", () => {
       },
     ]);
     expect(view.gaps[0].message).toContain("还没有选定班次");
+  });
+
+  describe("week view and compact week text", () => {
+    it("compactWeeksText writes runs as 1-8周 and joins gaps with 、", () => {
+      expect(compactWeeksText([1, 2, 3, 4, 5, 6, 7, 8])).toBe("1-8周");
+      expect(compactWeeksText([1, 2, 3, 4, 10])).toBe("1-4、10周");
+      expect(compactWeeksText([])).toBe("");
+    });
+
+    it("only keeps meetings whose weeks overlap the chosen half, and keeps details whole", () => {
+      const first: Meeting = {
+        dayOfWeek: 1,
+        sectionStart: 1,
+        sectionEnd: 2,
+        weeks: [1, 2, 3, 4, 5, 6, 7, 8],
+      };
+      const last: Meeting = {
+        dayOfWeek: 2,
+        sectionStart: 3,
+        sectionEnd: 4,
+        weeks: [9, 10, 11, 12, 13, 14, 15, 16],
+      };
+      const offering = {
+        courseCode: "CS102",
+        classId: "CS102-01",
+        teacherKey: null,
+        teacherText: "测试教师（合成）",
+        credits: 3,
+        capacity: 60,
+        meetingTextRaw: "测试时间",
+        meetings: [first, last],
+        parseStatus: "PARSED" as const,
+        sourceRefId: "source:CS102-01",
+      };
+      const sources = [
+        { courseCode: "CS102", classId: "CS102-01", offering, missing: null },
+      ];
+
+      const all = buildTimetable(sources);
+      expect(all.cells.has("1-1")).toBe(true);
+      expect(all.cells.has("2-3")).toBe(true);
+
+      const front = buildTimetable(sources, {}, { weekView: "FIRST_8" });
+      expect(front.cells.has("1-1")).toBe(true);
+      expect(front.cells.has("2-3")).toBe(false);
+      expect(front.gaps).toEqual([]);
+      expect(front.placed[0].weeksText).toBe("第1–16周");
+
+      const back = buildTimetable(sources, {}, { weekView: "LAST_8" });
+      expect(back.cells.has("1-1")).toBe(false);
+      expect(back.cells.get("2-3")?.[0].weeks).toEqual(last.weeks);
+    });
   });
 });

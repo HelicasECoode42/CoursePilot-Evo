@@ -27,6 +27,19 @@ export interface TimetableEntry {
   teacherText: string;
   meetingTextRaw: string;
   meeting: Meeting;
+  /** 这一段时间的教学周（来自结构化 weeks，不再解析原文）。 */
+  weeks: number[];
+}
+
+/** 课表的周次视图：全学期，或只看前八周 / 后八周（按周次与之有交集的时段显示）。 */
+export type WeekView = "ALL" | "FIRST_8" | "LAST_8";
+export const WEEK_VIEW_RANGES: Record<WeekView, [number, number] | null> = {
+  ALL: null,
+  FIRST_8: [1, 8],
+  LAST_8: [9, 16],
+};
+export interface TimetableOptions {
+  weekView?: WeekView;
 }
 
 /** 已真正画进课表的班次（每门一条，用于下方的明细列表）。 */
@@ -133,6 +146,33 @@ export function weeksText(weeks: readonly number[]): string {
     .join("、")}周`;
 }
 
+/** 格子里的短周次：「1-8周」「1-8、10周」。没有周次时返回空字符串。 */
+export function compactWeeksText(weeks: readonly number[]): string {
+  if (weeks.length === 0) return "";
+  const sorted = [...new Set(weeks)].sort((a, b) => a - b);
+  const runs: number[][] = [];
+  for (const week of sorted) {
+    const last = runs[runs.length - 1];
+    if (last && last[last.length - 1] === week - 1) last.push(week);
+    else runs.push([week]);
+  }
+  return `${runs
+    .map((run) =>
+      run.length >= 2 ? `${run[0]}-${run[run.length - 1]}` : `${run[0]}`,
+    )
+    .join("、")}周`;
+}
+
+/** 时段的周次与所选周次视图是否有交集。全学期时总是 true。 */
+export function meetingInWeekView(
+  weeks: readonly number[],
+  view: WeekView,
+): boolean {
+  const range = WEEK_VIEW_RANGES[view];
+  if (range === null) return true;
+  return weeks.some((week) => week >= range[0] && week <= range[1]);
+}
+
 /**
  * 把上课时段写成人话，如「周一 第1-2节 · 第1–16周」，多段用「；」连接。
  * 不直接输出 meetingTextRaw（里面是 {第1-16周} 之类的原始写法）。
@@ -165,7 +205,9 @@ export function meetingsText(meetings: readonly Meeting[]): string {
 export function buildTimetable(
   sources: readonly TimetableSource[],
   reasons: Readonly<Record<string, string>> = {},
+  options: TimetableOptions = {},
 ): TimetableView {
+  const weekView = options.weekView ?? "ALL";
   const cells = new Map<string, TimetableEntry[]>();
   const placed: PlacedCourse[] = [];
   const gaps: TimetableGap[] = [];
@@ -213,12 +255,15 @@ export function buildTimetable(
         continue;
       }
       placedWeeks.push(...meeting.weeks);
+      // 周次视图只影响格子；明细和未排说明仍按整学期计算。
+      if (!meetingInWeekView(meeting.weeks, weekView)) continue;
       const entry: TimetableEntry = {
         courseCode,
         classId,
         teacherText: offering.teacherText,
         meetingTextRaw: offering.meetingTextRaw,
         meeting,
+        weeks: meeting.weeks,
       };
       for (
         let section = meeting.sectionStart;

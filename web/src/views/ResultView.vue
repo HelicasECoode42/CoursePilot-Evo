@@ -12,6 +12,7 @@ import { useRouter } from "vue-router";
 import { api } from "../api";
 import { ApiFailure } from "../api/client";
 import type {
+  Course,
   CourseOffering,
   MustAvoidCheck,
   MustAvoidVerdict,
@@ -58,6 +59,7 @@ import {
   type TimetableSource,
 } from "../domain/timetable";
 import PlanTimetable from "../components/PlanTimetable.vue";
+import { resolveCourseQuery } from "../domain/course-query";
 import CourseReviewBasis from "../components/CourseReviewBasis.vue";
 import ReviewSummary from "../components/ReviewSummary.vue";
 import { usePlanningStore } from "../stores/planning";
@@ -654,6 +656,8 @@ const openKey = ref<string | null>(null);
 const courseInput = ref("");
 const searchStatus = ref<"idle" | "loading" | "ready" | "error">("idle");
 const searchError = ref("");
+/** 课程名匹配到多门时，列出来让学生点选（不猜）。 */
+const courseChoices = ref<Course[]>([]);
 const searchedCourse = ref<string | null>(null);
 const offerings = ref<CourseOffering[]>([]);
 /** 班次资料是 UNKNOWN（快照缺失或非当前）：空列表不能说成「没有班次」。 */
@@ -870,8 +874,8 @@ function meetingsOverlap(a: Meeting, b: Meeting): boolean {
 }
 
 async function runSearch(entry: PlanEntry) {
-  const course = courseInput.value.trim();
-  if (course === "") {
+  const typed = courseInput.value.trim();
+  if (typed === "") {
     searchStatus.value = "error";
     searchError.value = "请先输入课程号。";
     return;
@@ -884,6 +888,33 @@ async function runSearch(entry: PlanEntry) {
   clearSelection();
   searchStatus.value = "loading";
   searchError.value = "";
+
+  let course: string;
+  try {
+    const snapshotId = result.value?.academicAudit.curriculumSnapshotId ?? null;
+    const resolved = await resolveCourseQuery(
+      typed,
+      snapshotId === null
+        ? null
+        : async (text) =>
+            (await api.listCourses(snapshotId, null, controller.signal, text))
+              .items,
+    );
+    if (version !== searchVersion) return;
+    if (!resolved.ok) {
+      searchStatus.value = "error";
+      searchError.value = resolved.message;
+      courseChoices.value = resolved.candidates;
+      return;
+    }
+    courseChoices.value = [];
+    course = resolved.code;
+  } catch (error) {
+    if (version !== searchVersion || isAborted(error)) return;
+    searchStatus.value = "error";
+    searchError.value = visibleError(error);
+    return;
+  }
 
   // 方案里其他已选班次的课程：去查它们的时间，用来做搜索时的预览比较。
   const selected = plan.items.filter(
@@ -928,8 +959,17 @@ async function runSearch(entry: PlanEntry) {
   } catch (error) {
     if (version !== searchVersion || isAborted(error)) return;
     searchStatus.value = "error";
-    searchError.value = visibleError(error);
+    searchError.value =
+      error instanceof ApiFailure && error.status === 422
+        ? "请输入课程名或课程号，从列表中选择课程。"
+        : visibleError(error);
   }
+}
+
+/** 从候选列表里点选一门课，直接用它的课程号查班次。 */
+function chooseCourse(entry: PlanEntry, code: string) {
+  courseInput.value = code;
+  void runSearch(entry);
 }
 
 /**
@@ -1629,7 +1669,7 @@ async function goBackToQuestions() {
                   type="search"
                   maxlength="32"
                   autocomplete="off"
-                  placeholder="例如 CS103"
+                  placeholder="课程号，例如 CS103"
                 />
                 <button
                   class="button button--primary"
@@ -1654,8 +1694,26 @@ async function goBackToQuestions() {
               class="notice notice--error"
               role="alert"
             >
-              {{ searchError }} 可以稍后再试一次。
+              {{ searchError
+              }}<template v-if="!courseChoices.length">
+                可以稍后再试一次。</template
+              >
             </p>
+            <ul
+              v-if="searchStatus === 'error' && courseChoices.length"
+              class="course-choices"
+              aria-label="匹配的课程"
+            >
+              <li v-for="choice in courseChoices" :key="choice.courseCode">
+                <button
+                  class="button button--secondary"
+                  type="button"
+                  @click="chooseCourse(entry, choice.courseCode)"
+                >
+                  {{ choice.courseCode }} · {{ choice.name }}
+                </button>
+              </li>
+            </ul>
             <template v-else-if="searchStatus === 'ready' && searchedCourse">
               <h3 class="sub-label">{{ searchedCourse }} 的开课班次</h3>
               <p
@@ -1808,6 +1866,14 @@ async function goBackToQuestions() {
 </template>
 
 <style scoped>
+.course-choices {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  padding: 0;
+}
 .search-panel {
   margin: 14px 0 0;
   padding: 14px 16px;

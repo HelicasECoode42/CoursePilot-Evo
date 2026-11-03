@@ -17,7 +17,10 @@ import {
   MAX_SUGGESTION_COURSES,
   UNMODELED_RULES_CODE,
   buildCategoryPlan,
+  deepestGapSubcategories,
+  narrowPlanToSubcategories,
   schoolCategoryGap,
+  subcategoryCandidates,
   suggestCompletions,
   suggestionsApply,
   summarizeSelection,
@@ -80,17 +83,22 @@ const sourceRecord = computed<AcademicRecord | null>(() => {
     ) ?? null
   );
 });
-const completedCodes = computed(
-  () =>
-    new Set(
-      (sourceRecord.value?.completedCourses ?? [])
-        .filter(
-          (course) =>
-            course.outcome === "PASSED" || course.outcome === "IN_PROGRESS",
-        )
-        .map((course) => course.courseCode.trim()),
-    ),
-);
+/** 已修或在读的课程号：不能再作为候选。来源是本次核对的学业记录，加上学校导入的修读状态。 */
+const completedCodes = computed(() => {
+  const codes = new Set<string>();
+  const records = sourceRecord.value ? [sourceRecord.value] : store.records;
+  for (const record of records) {
+    for (const course of record.completedCourses) {
+      if (course.outcome === "PASSED" || course.outcome === "IN_PROGRESS")
+        codes.add(course.courseCode.trim());
+    }
+  }
+  for (const course of store.schoolProgress?.snapshot.courses ?? []) {
+    if (course.outcome === "PASSED" || course.outcome === "IN_PROGRESS")
+      codes.add(course.courseCode.trim());
+  }
+  return codes;
+});
 const recordedCredits = computed(() => {
   const passed = (sourceRecord.value?.completedCourses ?? []).filter(
     (course) => course.outcome === "PASSED",
@@ -124,20 +132,53 @@ const interestTags = computed(() => {
     .filter(Boolean);
   return [...new Set([...tags, ...careerTerms])];
 });
+/**
+ * 有缺口的类别收窄到学校报告里真正缺分的最细子类（如「公共基础课」→「思想政治必修课」）。
+ * 学校树里找不到唯一对应的类别，或子类没有缺口，就保留类别级候选。
+ */
+function narrowToGapSubcategory(plan: CategoryCreditPlan): CategoryCreditPlan {
+  const school = store.schoolProgress;
+  if (!school || plan.category === null) return plan;
+  if (plan.gapCredits === null || plan.gapCredits <= 0) return plan;
+  const roots = school.snapshot.nodes.filter(
+    (node) => node.name.trim() === plan.category?.trim(),
+  );
+  if (roots.length !== 1) return plan;
+  const subcategories = deepestGapSubcategories(
+    school.snapshot.nodes,
+    roots[0]!.nodeId,
+  );
+  if (subcategories.length === 0) return plan;
+  return narrowPlanToSubcategories(
+    plan,
+    subcategories,
+    subcategoryCandidates(
+      subcategories,
+      school.snapshot.courses,
+      catalog.value,
+    ),
+    completedCodes.value,
+    interestTags.value,
+    catalog.value,
+  );
+}
+
 const plans = computed<CategoryCreditPlan[]>(() => {
   if (!audit.value || catalogStatus.value !== "ready") return [];
   return audit.value.requirements.map((requirement) =>
-    buildCategoryPlan(
-      requirement,
-      catalog.value,
-      completedCodes.value,
-      interestTags.value,
-      store.schoolProgress && requirement.category !== null
-        ? schoolCategoryGap(
-            requirement.category,
-            store.schoolProgress.snapshot.nodes,
-          )
-        : null,
+    narrowToGapSubcategory(
+      buildCategoryPlan(
+        requirement,
+        catalog.value,
+        completedCodes.value,
+        interestTags.value,
+        store.schoolProgress && requirement.category !== null
+          ? schoolCategoryGap(
+              requirement.category,
+              store.schoolProgress.snapshot.nodes,
+            )
+          : null,
+      ),
     ),
   );
 });
@@ -274,15 +315,27 @@ function ledgerLine(plan: CategoryCreditPlan): string {
   return `${head} · ${tail}`;
 }
 
+/** 组合只用本学期确认开课的课；未开和无法确认的不参与组合。 */
+function offeredOnly(plan: CategoryCreditPlan): CategoryCreditPlan {
+  return {
+    ...plan,
+    countable: plan.countable.filter(
+      (course) => availabilityOf(course.courseCode)?.state !== "NOT_OFFERED",
+    ),
+  };
+}
+
+/** 组合卡片只显示至少两门课的组合；单门课已在候选列表里逐门勾选。 */
 const suggestionsByRequirement = computed(
   () =>
     new Map(
       plans.value.map((plan) => [
         plan.requirementId,
         suggestCompletions(
-          plan,
+          offeredOnly(plan),
           selectedCodes.value,
           ledgerOf(plan).remainingCredits,
+          { minCourses: 2 },
         ),
       ]),
     ),
@@ -523,19 +576,31 @@ watch(
 );
 
 /** 类别内的候选：先按筛选词过滤（课程号或课程名），再把已开课的排在前面。 */
-function visibleCourses(plan: CategoryCreditPlan): PlanCourse[] {
+function matchingCourses(plan: CategoryCreditPlan): PlanCourse[] {
   const needle = (filterOf.value[plan.requirementId] ?? "")
     .trim()
     .toLowerCase();
-  const matching =
-    needle === ""
-      ? plan.countable
-      : plan.countable.filter(
-          (course) =>
-            course.courseCode.toLowerCase().includes(needle) ||
-            course.name.toLowerCase().includes(needle),
-        );
-  return sortByAvailability(matching, availabilityOf);
+  return needle === ""
+    ? plan.countable
+    : plan.countable.filter(
+        (course) =>
+          course.courseCode.toLowerCase().includes(needle) ||
+          course.name.toLowerCase().includes(needle),
+      );
+}
+
+/** 本学期未开的课单独折叠，不混进可选列表。 */
+function notOfferedCourses(plan: CategoryCreditPlan): PlanCourse[] {
+  return matchingCourses(plan).filter(
+    (course) => availabilityOf(course.courseCode)?.state === "NOT_OFFERED",
+  );
+}
+
+function visibleCourses(plan: CategoryCreditPlan): PlanCourse[] {
+  const offered = matchingCourses(plan).filter(
+    (course) => availabilityOf(course.courseCode)?.state !== "NOT_OFFERED",
+  );
+  return sortByAvailability(offered, availabilityOf);
 }
 
 function pageKey(plan: CategoryCreditPlan): string {
@@ -922,6 +987,12 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
                   这个类别已满足，不需要再选。仍可以自由勾选。
                 </p>
 
+                <p v-if="plan.focusLabel" class="notice" role="note">
+                  缺口已下钻到学校报告的小类「{{
+                    plan.focusLabel
+                  }}」，下方候选只来自这个小类。
+                </p>
+
                 <!-- 候选课程：筛选 + 分页，勾选才计入账本。 -->
                 <div v-if="plan.countable.length" class="credits-block">
                   <label
@@ -1008,6 +1079,9 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
                     </button>
                   </div>
                 </div>
+                <p v-else-if="plan.focusLabel" class="microcopy" role="status">
+                  这个小类（{{ plan.focusLabel }}）在课程库里没有可选课程。
+                </p>
                 <p
                   v-else-if="
                     plan.category !== null && plan.uncountable.length === 0
@@ -1016,6 +1090,25 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
                 >
                   这个类别的课程目录里没有可选课程。
                 </p>
+
+                <details
+                  v-if="notOfferedCourses(plan).length"
+                  class="credits-not-offered"
+                >
+                  <summary>
+                    本学期未开（{{ notOfferedCourses(plan).length }}
+                    门，不能加入本次规划）
+                  </summary>
+                  <ul class="credits-list">
+                    <li
+                      v-for="course in notOfferedCourses(plan)"
+                      :key="course.courseCode"
+                    >
+                      <span>{{ courseLine(course) }}</span>
+                      <span class="microcopy">本学期未开</span>
+                    </li>
+                  </ul>
+                </details>
 
                 <!-- 无法纳入凑分的课程：单独列出，不当成 0。 -->
                 <div v-if="plan.uncountable.length" class="credits-block">
@@ -1041,7 +1134,9 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
 
                 <!-- 依学分差额展示组合建议。 -->
                 <div
-                  v-if="showsSuggestionArea(plan)"
+                  v-if="
+                    showsSuggestionArea(plan) && suggestionsOf(plan).length > 0
+                  "
                   class="credits-block credits-suggest"
                 >
                   <h3 class="credits-subhead">
@@ -1050,29 +1145,25 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
                     学分）
                   </h3>
                   <p class="microcopy">
-                    每组最多
+                    每组 2 到
                     {{ suggestionCourseLimit }} 门，优先显示刚好补齐的组合；
-                    计算有数量上限，完整课程仍可在上方选择。
+                    只用本学期开课的课。计算有数量上限，单门课仍可在上方逐门勾选。
                   </p>
-                  <p
-                    v-if="suggestionsOf(plan).length === 0"
-                    class="microcopy"
-                    role="status"
-                  >
-                    暂无可计算的课程组合。
-                  </p>
-                  <ul v-else class="credits-list">
+                  <ul class="credits-combos">
                     <li
                       v-for="suggestion in suggestionsOf(plan)"
                       :key="suggestion.courseCodes.join('+')"
+                      class="credits-combo"
                     >
-                      <span>
+                      <p class="credits-combo__names">
                         {{
                           suggestion.courseCodes
                             .map((code) => nameOf(plan, code))
                             .join(" + ")
                         }}
-                        = {{ formatCredits(suggestion.totalCredits) }} 学分
+                      </p>
+                      <p class="credits-combo__total">
+                        共 {{ formatCredits(suggestion.totalCredits) }} 学分
                         <span v-if="suggestion.category === 'EXACT'">
                           · 刚好补齐</span
                         >
@@ -1084,16 +1175,16 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
                           · 还差
                           {{ formatCredits(suggestion.difference) }} 学分</span
                         >
-                        <span class="microcopy"
-                          >（{{ suggestion.courseCodes.join(" + ") }}）</span
-                        >
-                      </span>
+                      </p>
+                      <p class="microcopy">
+                        {{ suggestion.courseCodes.join(" · ") }}
+                      </p>
                       <button
                         class="button button--secondary"
                         type="button"
                         @click="addAll(suggestion.courseCodes)"
                       >
-                        勾选这组
+                        整组加入
                       </button>
                     </li>
                   </ul>
@@ -1208,6 +1299,33 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
   margin: 0.5rem 0 0.25rem;
 }
 
+.credits-combos {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+  display: grid;
+  gap: 0.6rem;
+}
+.credits-combo {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+  background: var(--canvas);
+}
+.credits-combo p {
+  margin: 0.2rem 0;
+}
+.credits-combo__names {
+  font-weight: 550;
+}
+.credits-not-offered {
+  margin-top: 0.6rem;
+}
+.credits-not-offered > summary {
+  color: var(--soft);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
 .credits-list {
   list-style: none;
   padding: 0;

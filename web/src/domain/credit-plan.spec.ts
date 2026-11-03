@@ -3,8 +3,11 @@ import type { AuditItem, Course } from "../contracts";
 import {
   MAX_SUGGESTIONS,
   buildCategoryPlan,
+  deepestGapSubcategories,
   interestRelevance,
+  narrowPlanToSubcategories,
   schoolCategoryGap,
+  subcategoryCandidates,
   suggestCompletions,
   suggestionsApply,
   summarizeSelection,
@@ -345,5 +348,155 @@ describe("学校报告数字作为缺口的后备来源", () => {
     );
     expect(plan.state).toBe("SATISFIED");
     expect(plan.gapSource).toBe("SCHOOL");
+  });
+
+  describe("缺口下钻到学校子类（合成数据）", () => {
+    const node = (
+      nodeId: string,
+      parentId: string | null,
+      name: string,
+      remaining: number | null,
+    ): SchoolProgressNode => ({
+      nodeId,
+      parentId,
+      schoolNodeId: nodeId,
+      leaf: false,
+      name,
+      requiredCredits: null,
+      earnedCredits: null,
+      remainingCredits: remaining,
+    });
+
+    it("一直往下找到没有更深缺口的子类；并列子类全部返回", () => {
+      const nodes = [
+        node("root", null, "公共基础课", 6),
+        node("a", "root", "思想政治必修课", 4),
+        node("a1", "a", "马克思主义", 4),
+        node("a2", "a", "形势与政策", 0),
+        node("b", "root", "体育", 2),
+        node("c", "root", "已满足", 0),
+      ];
+      expect(
+        deepestGapSubcategories(nodes, "root")
+          .map((s) => s.name)
+          .sort(),
+      ).toEqual(["体育", "马克思主义"]);
+    });
+
+    it("根节点没有缺口或没有数字时返回空，不猜", () => {
+      expect(deepestGapSubcategories([node("r", null, "x", 0)], "r")).toEqual(
+        [],
+      );
+      expect(
+        deepestGapSubcategories([node("r", null, "x", null)], "r"),
+      ).toEqual([]);
+    });
+
+    it("子类候选来自学校挂靠的课程号，或课程目录里同名类别；已修课由调用方排除", () => {
+      const catalog: Course[] = [
+        {
+          courseCode: "M1",
+          name: "马原",
+          credits: 3,
+          category: "其他",
+          sourceRefIds: [],
+        },
+        {
+          courseCode: "M2",
+          name: "毛概",
+          credits: 2,
+          category: "思想政治必修课",
+          sourceRefIds: [],
+        },
+        {
+          courseCode: "X1",
+          name: "无关",
+          credits: 2,
+          category: "通识课",
+          sourceRefIds: [],
+        },
+      ];
+      const subs = [
+        { nodeId: "a1", name: "思想政治必修课", remainingCredits: 5 },
+      ];
+      const result = subcategoryCandidates(
+        subs,
+        [{ nodeId: "a1", courseCode: "M1" }],
+        catalog,
+      ).map((course) => course.courseCode);
+      expect(result.sort()).toEqual(["M1", "M2"]);
+    });
+
+    it("收窄后候选只来自子类，缺口用子类剩余学分，已修课被排除", () => {
+      const plan = buildCategoryPlan(
+        requirement(1, { category: "公共基础课" }),
+        [],
+        NONE,
+        [],
+      );
+      const catalog: Course[] = [
+        {
+          courseCode: "M1",
+          name: "马原",
+          credits: 1,
+          category: "公共基础课",
+          sourceRefIds: [],
+        },
+        {
+          courseCode: "M2",
+          name: "毛概",
+          credits: 2,
+          category: "公共基础课",
+          sourceRefIds: [],
+        },
+      ];
+      const narrowed = narrowPlanToSubcategories(
+        plan,
+        [{ nodeId: "a1", name: "思想政治必修课", remainingCredits: 1 }],
+        [catalog[0], catalog[1]],
+        new Set(["M2"]),
+        [],
+        catalog,
+      );
+      expect(narrowed.countable.map((c) => c.courseCode)).toEqual(["M1"]);
+      expect(narrowed.gapCredits).toBe(1);
+      expect(narrowed.focusLabel).toBe("思想政治必修课");
+    });
+
+    it("子类没有可选课程时 countable 为空，不回退到大类", () => {
+      const plan = buildCategoryPlan(
+        requirement(2),
+        [course("A", 2)],
+        NONE,
+        [],
+      );
+      const narrowed = narrowPlanToSubcategories(
+        plan,
+        [{ nodeId: "p", name: "体育", remainingCredits: 2 }],
+        [],
+        NONE,
+        [],
+        [course("A", 2)],
+      );
+      expect(narrowed.countable).toEqual([]);
+      expect(narrowed.focusLabel).toBe("体育");
+    });
+
+    it("minCourses 为 2 时只给多门课组合", () => {
+      const plan = buildCategoryPlan(
+        requirement(4),
+        [course("A", 2), course("B", 2), course("C", 4)],
+        NONE,
+        [],
+      );
+      const multi = suggestCompletions(plan, [], 4, { minCourses: 2 });
+      expect(multi.length).toBeGreaterThan(0);
+      expect(multi.every((s) => s.courseCodes.length >= 2)).toBe(true);
+      expect(
+        suggestCompletions(plan, [], 4, { minCourses: 2 }).some(
+          (s) => s.courseCodes.length === 1,
+        ),
+      ).toBe(false);
+    });
   });
 });

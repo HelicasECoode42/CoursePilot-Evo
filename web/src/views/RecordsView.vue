@@ -10,7 +10,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "../api";
 import CourseSearchPicker from "../components/CourseSearchPicker.vue";
-import SchoolProgressTree from "../components/SchoolProgressTree.vue";
+import SchoolProgressSummary from "../components/SchoolProgressSummary.vue";
 import LocalAuditSummary from "../components/LocalAuditSummary.vue";
 import {
   coursesSuggestedBeforeYear,
@@ -664,9 +664,10 @@ async function goToCredits() {
           )
         }}
       </p>
-      <SchoolProgressTree
+      <SchoolProgressSummary
         :nodes="store.schoolProgress.snapshot.nodes"
         :courses="store.schoolProgress.snapshot.courses"
+        :name-lookup="nameOf"
       />
       <p>
         课程行：{{

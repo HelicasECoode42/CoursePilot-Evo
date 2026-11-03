@@ -275,4 +275,77 @@ describe("PlanTimetable unplaced courses", () => {
     expect(wrapper.find(".timetable-gaps").exists()).toBe(true);
     expect(wrapper.find(".timetable-layout--split").exists()).toBe(false);
   });
+
+  it("格子显示课程名、老师与周次，不只显示课程号", () => {
+    const wrapper = mount(PlanTimetable, {
+      props: {
+        scope: "REAL_TIMETABLE",
+        courseNames: { CS102: "数据库" },
+        sources: [
+          placed(
+            "CS102",
+            offering("CS102", "CS102-01", [
+              {
+                dayOfWeek: 1,
+                sectionStart: 1,
+                sectionEnd: 2,
+                weeks: WEEKS.slice(0, 8),
+              },
+            ]),
+          ),
+        ],
+      },
+    });
+    const chip = wrapper.find("td .timetable-chip");
+    expect(chip.find("strong").text()).toBe("数据库");
+    expect(chip.text()).toContain("测试教师（合成）");
+    expect(chip.text()).toContain("1-8周");
+    expect(chip.text()).toContain("CS102-01");
+  });
+
+  it("前八周 / 后八周切换按周次过滤格子，明细仍按整学期", async () => {
+    const wrapper = mount(PlanTimetable, {
+      props: {
+        scope: "REAL_TIMETABLE",
+        courseNames: { CS102: "数据库" },
+        sources: [
+          placed(
+            "CS102",
+            offering("CS102", "CS102-01", [
+              {
+                dayOfWeek: 1,
+                sectionStart: 1,
+                sectionEnd: 2,
+                weeks: WEEKS.slice(0, 8),
+              },
+              {
+                dayOfWeek: 4,
+                sectionStart: 7,
+                sectionEnd: 8,
+                weeks: WEEKS.slice(8),
+              },
+            ]),
+          ),
+        ],
+      },
+    });
+    const button = (label: string) =>
+      wrapper
+        .findAll("button.timetable-weeks__btn")
+        .find((item) => item.text() === label)!;
+    expect(button("全学期").attributes("aria-pressed")).toBe("true");
+    expect(cellText(wrapper, 1, 1)).toContain("数据库");
+    expect(cellText(wrapper, 7, 4)).toContain("数据库");
+
+    await button("前八周（1-8）").trigger("click");
+    expect(button("前八周（1-8）").attributes("aria-pressed")).toBe("true");
+    expect(cellText(wrapper, 1, 1)).toContain("数据库");
+    expect(cellText(wrapper, 7, 4)).toBe("");
+
+    await button("后八周（9-16）").trigger("click");
+    expect(cellText(wrapper, 1, 1)).toBe("");
+    expect(cellText(wrapper, 7, 4)).toContain("9-16周");
+    // 明细卡片不受周次视图影响。
+    expect(wrapper.find(".timetable-cards").text()).toContain("第1–8周");
+  });
 });
