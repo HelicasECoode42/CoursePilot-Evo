@@ -64,7 +64,7 @@ flowchart LR
 
 - **职责分离**：网页只调用 Python；Python 只通过带类型的接口向 Java 取事实；Java 不调用模型。学分、冲突这类可复核的结论只由 Java 给出。
 - **契约先行**：所有跨模块字段都定义在 `contracts/` 中，CI 会校验正反例。
-- **Java 做了什么**：培养方案 Excel 导入、课表导入与重新解析、全系统唯一的时间解析器、人工核验留痕、学业核对、方案核验、鉴权与数据隔离。详见 **[Java 核验服务说明](docs/40-java-implementation.md)**（含流程图）。
+- **Java 做了什么**：培养方案 Excel 导入、课表导入与重新解析、全系统唯一的时间解析器、人工核验留痕、学业核对、方案核验、鉴权与数据隔离。
 
 ## 目录
 
@@ -126,7 +126,6 @@ cd web && npm ci && npm run dev:fixture
 | 各模块 TRD | [A 数据](docs/trd/a-data.md)、[B Java](docs/trd/b-verifier.md)、[C Agent](docs/trd/c-agent.md)、[D 评测](docs/trd/d-benchmark-rsi.md)、[E Web](docs/trd/e-web-integration.md) |
 | 页面与数据流 | [学生页面与数据流转](docs/27-student-experience-and-data-flow.md)、[AI 对话接口](docs/29-advice-chat-contract.md) |
 | 接口与规范 | [总体 TRD](docs/03-trd.md)、[行为契约](docs/04-infrastructure-workflow.md)、[OpenAPI/Schema](contracts/README.md)、[工程规范](docs/16-engineering-and-debugging.md) |
-| 课表与核验 | [课表人工核验指南](docs/37-offering-verification-guide.md)、[Java 核验服务说明](docs/40-java-implementation.md) |
 | 协作 | [GitHub 协作](docs/12-github-collaboration.md)、[PR 模板](.github/pull_request_template.md)、[仓库维护](docs/24-repo-maintenance.md)、[看板](https://github.com/users/HelicasECoode42/projects/1) |
 | 图与评测 | [Mermaid 图](docs/diagrams/README.md)、[Benchmark 协议](docs/07-benchmark-protocol.md) |
 | 体验原型 | [交互式 HTML 示例](demo/coursepilot-guided-demo.html) |
