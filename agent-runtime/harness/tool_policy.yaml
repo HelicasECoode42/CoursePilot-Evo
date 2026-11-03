@@ -16,10 +16,12 @@ tools:
   # budget; capped by Budget.max_review_calls (8). Must not exceed that value.
   - name: searchReviews
     max_calls: 8
-  # Section assignment: one listOfferings per planned course. Not counted in the
-  # 6-call run budget; capped by Budget.max_offering_calls (4).
+  # Offered-this-term check plus section assignment: one unfiltered page and one call
+  # per candidate course (precheck, capped by Budget.max_offering_precheck_calls=10),
+  # then one call per model-picked course. Not counted in the 6-call run budget; the
+  # total is capped by Budget.max_offering_calls (16). Must not exceed that value.
   - name: listOfferings
-    max_calls: 4
+    max_calls: 16
   - name: listCareerDirections
     max_calls: 1
   - name: validatePlan

@@ -44,6 +44,12 @@ from agent_runtime.api.schemas.answer import CourseRationale, ReviewEvidenceRef
 from agent_runtime.application.budget import Budget, BudgetExceeded, BudgetTracker
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.ids import digest, new_id
+from agent_runtime.application.offering_check import (
+    OFFERING_PAGE_LIMIT,
+    OfferingCheck,
+    ScanResult,
+    check_offerings,
+)
 from agent_runtime.application.plan_replacement import ReusedVerification
 from agent_runtime.application.plan_store import PlanNotInSession, SavedPlan, SessionPlanStore
 from agent_runtime.application.run_manifest import RunIdentity, build_run_manifest
@@ -68,6 +74,7 @@ from agent_runtime.domain.policies.candidate_guard import (
 from agent_runtime.domain.policies.clarification_policy import ClarificationPolicy
 from agent_runtime.domain.policies.course_scope import (
     eligible_course_codes,
+    requirement_nature,
     school_gap_categories,
     school_taken_codes,
 )
@@ -82,6 +89,23 @@ def _school_report_gaps(school_progress: dict[str, object] | None) -> list[objec
     if not isinstance(progress, dict):
         return []
     return list(progress.get("gapCategories", []))
+
+
+def _dedupe_issues(issues: list[Issue]) -> list[Issue]:
+    """Drop repeats of the same code, message and field, keeping the first occurrence.
+
+    The same check can come back from Java and from the audit with identical text; the
+    result page then showed one item twice.
+    """
+    seen: set[tuple[str, str, str | None]] = set()
+    unique: list[Issue] = []
+    for issue in issues:
+        key = (issue.code, issue.message, issue.field)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(issue)
+    return unique
 
 
 class PlanningRunner:
@@ -162,7 +186,9 @@ class PlanningRunner:
             )
             return self._deliver(answer, trace, context)
 
-        facts, school_progress = self._collect_facts(request, audit, context, budget, trace)
+        facts, school_progress, offering = self._collect_facts(
+            request, audit, context, budget, trace
+        )
         reply = self._propose(
             request, context, facts, audit, budget, trace, school_progress=school_progress
         )
@@ -179,33 +205,71 @@ class PlanningRunner:
             )
             return self._deliver(self._mark_fake_model(answer), trace, context)
 
-        items = list(reply.items or [])
-        if items:
-            selected = {item.courseCode for item in items}
-            required_teachers = {
-                pair.courseCode: pair.teacherKey
-                for pair in request.intent.pinnedTeacherCoursePairs
-                if pair.mode == "MUST"
-            }
-            for constraint in request.intent.hardConstraints:
-                if (
-                    constraint.kind == "PIN_COURSE"
-                    and constraint.courseCode is not None
-                    and constraint.courseCode not in selected
-                    and constraint.courseCode not in facts.taken_course_codes
-                ):
-                    items.append(
-                        PlanItem(
-                            courseCode=constraint.courseCode,
-                            teacherKey=required_teachers.get(constraint.courseCode),
-                            classId=None,
-                        )
+        pinned_codes = self._pinned_codes(request)
+        offering_issues = self._offering_issues(offering, pinned_codes)
+        items: list[PlanItem] = []
+        dropped_codes: set[str] = set()
+        for item in reply.items or []:
+            # Only offered-this-term courses (or the student's pins, handled below) may be
+            # recommended. A model pick outside the verified set is dropped, not repaired.
+            if (
+                facts.offering_checked
+                and item.courseCode not in facts.offered_course_codes
+                and item.courseCode not in pinned_codes
+            ):
+                if offering is not None and item.courseCode in offering.not_offered:
+                    dropped = Issue(
+                        code="NOT_OFFERED_DROPPED",
+                        message=f"课程 {item.courseCode} 本学期没有开设这门课，未纳入推荐",
+                        field="courseCode",
+                        retryable=False,
                     )
-                    selected.add(constraint.courseCode)
-            if len(items) > 30:
-                raise ModelInvalidOutput("推荐课程和学生所选课程合计超过 30 门")
+                else:
+                    dropped = Issue(
+                        code="UNVERIFIED_OFFERING_DROPPED",
+                        message=f"课程 {item.courseCode} 未在本学期开课快照中核实，未纳入推荐",
+                        field="courseCode",
+                        retryable=False,
+                    )
+                offering_issues.append(dropped)
+                dropped_codes.add(item.courseCode)
+                continue
+            items.append(item)
+        selected = {item.courseCode for item in items}
+        required_teachers = {
+            pair.courseCode: pair.teacherKey
+            for pair in request.intent.pinnedTeacherCoursePairs
+            if pair.mode == "MUST"
+        }
+        # Student pins go in even when the model proposed nothing; a pin that is not
+        # offered is kept and reported by section assignment, not dropped here.
+        for constraint in request.intent.hardConstraints:
+            if (
+                constraint.kind == "PIN_COURSE"
+                and constraint.courseCode is not None
+                and constraint.courseCode not in selected
+                and constraint.courseCode not in facts.taken_course_codes
+            ):
+                items.append(
+                    PlanItem(
+                        courseCode=constraint.courseCode,
+                        teacherKey=required_teachers.get(constraint.courseCode),
+                        classId=None,
+                    )
+                )
+                selected.add(constraint.courseCode)
+        # Pinned courses first, then the model's picks in their own order (stable sort).
+        items.sort(key=lambda item: item.courseCode not in pinned_codes)
+        if len(items) > 30:
+            raise ModelInvalidOutput("推荐课程和学生所选课程合计超过 30 门")
         items, facts, section_issues = self._assign_sections(
-            request, items, facts, context, budget, trace
+            request,
+            items,
+            facts,
+            context,
+            budget,
+            trace,
+            known_rows=offering.known_rows() if offering is not None else None,
         )
         guard_issues = self._guard.check(
             items, facts, required_teacher_pairs=request.intent.pinnedTeacherCoursePairs
@@ -216,6 +280,7 @@ class PlanningRunner:
                 trace_id=trace_id,
                 audit=audit,
                 issues=guard_issues
+                or offering_issues
                 or [
                     Issue(
                         code="EVIDENCE_MISMATCH",
@@ -259,7 +324,10 @@ class PlanningRunner:
             (fact.course_code, fact.review_note_id)
             for fact in facts.review_facts[: self._harness.context.max_review_notes]
         }
-        rationales = reply.course_rationales or []
+        # A rationale for a pick that was dropped above is not an error: the pick is gone.
+        rationales = [
+            item for item in (reply.course_rationales or []) if item.courseCode not in dropped_codes
+        ]
         if len({item.courseCode for item in rationales}) != len(rationales) or any(
             item.courseCode not in chosen
             or any((item.courseCode, note) not in allowed_reviews for note in item.reviewNoteIds)
@@ -278,11 +346,13 @@ class PlanningRunner:
             if fact is None:
                 raise ModelInvalidOutput("推荐课程缺少课程事实来源")
             rationale = provided_rationales.get(item.courseCode)
-            if rationale is None:
-                credit_text = f"{fact.credits} 学分" if fact.credits is not None else "学分未注明"
+            # A course Java says is not offered this term gets the fact text, whatever
+            # the model wrote: the model never saw it as a candidate.
+            from_model = rationale is not None and fact.offered_this_term is not False
+            if not from_model:
                 rationale = CourseRationale(
                     courseCode=item.courseCode,
-                    reason=f"课程目录列示为「{fact.name}」，{credit_text}，类别为「{fact.category}」。",
+                    reason=self._fallback_reason(fact),
                     reviewNoteIds=[],
                 )
             if rationale.courseSourceRefIds and not set(rationale.courseSourceRefIds).issubset(
@@ -301,9 +371,7 @@ class PlanningRunner:
                     update={
                         "courseSourceRefIds": list(fact.source_ref_ids),
                         "reviewBasisStatus": review_basis_status,
-                        "rationaleSource": (
-                            "MODEL" if item.courseCode in provided_rationales else "COURSE_FACTS"
-                        ),
+                        "rationaleSource": "MODEL" if from_model else "COURSE_FACTS",
                         "reviewEvidenceRefs": [
                             ReviewEvidenceRef(
                                 reviewNoteId=note_id,
@@ -340,7 +408,14 @@ class PlanningRunner:
                 verifier_result_id=verdict.verifierResultId,
             )
         unknowns = self._with_fake_model_issue(
-            list(verdict.unknownChecks) + section_issues + list(audit.unknowns)
+            _dedupe_issues(
+                [
+                    *verdict.unknownChecks,
+                    *offering_issues,
+                    *section_issues,
+                    *audit.unknowns,
+                ]
+            )
         )
         answer = self._answer.recommendations(
             task_id=task_id,
@@ -370,7 +445,7 @@ class PlanningRunner:
         context: ExecutionContext,
         budget: BudgetTracker,
         trace: TracePort,
-    ) -> tuple[KnownFacts, dict[str, object] | None]:
+    ) -> tuple[KnownFacts, dict[str, object] | None, OfferingCheck | None]:
         school_result: SchoolProgressImportResult | None = None
         try:
             school_result = cast(
@@ -526,6 +601,43 @@ class PlanningRunner:
                 course.courseCode,
             )
 
+        ordered_courses = [
+            course
+            for course in sorted(courses, key=course_order)
+            if course.courseCode in course_codes
+        ]
+        offering: OfferingCheck | None = None
+        if request.offeringSnapshotId is not None:
+            offering = self._check_offerings(
+                request,
+                [course.courseCode for course in ordered_courses],
+                pinned,
+                context,
+                budget,
+                trace,
+                stop_after=self._harness.context.max_course_facts,
+            )
+        offered_codes = frozenset(offering.offered) if offering is not None else frozenset()
+        section_rows = offering.rows_by_course if offering is not None else {}
+        gap_credits = (
+            {
+                node.name: str(node.remainingCredits)
+                for node in report_snapshot.nodes
+                if node.name in report_gaps and node.remainingCredits is not None
+            }
+            if report_snapshot is not None
+            else {}
+        )
+
+        def offered_flag(code: str) -> bool | None:
+            if offering is None:
+                return None
+            if code in offering.offered:
+                return True
+            return False if code in offering.not_offered else None
+
+        # Pinned courses stay as facts even when not offered, so the runner can keep
+        # them and state why. Unoffered, unpinned courses are not facts at all.
         course_facts = tuple(
             CourseFact(
                 course_code=course.courseCode,
@@ -533,43 +645,69 @@ class PlanningRunner:
                 credits=None if course.credits is None else str(course.credits),
                 category=course.category,
                 source_ref_ids=tuple(course.sourceRefIds),
+                offered_this_term=offered_flag(course.courseCode),
+                section_count=(
+                    len(section_rows[course.courseCode])
+                    if course.courseCode in section_rows
+                    else None
+                ),
+                teacher_texts=tuple(
+                    dict.fromkeys(
+                        row.teacherText
+                        for row in section_rows.get(course.courseCode, ())
+                        if row.teacherText
+                    )
+                ),
+                requirement_nature=requirement_nature(course.category),
+                school_gap_credits=gap_credits.get(course.category),
             )
-            for course in sorted(courses, key=course_order)
-            if course.courseCode in course_codes
+            for course in ordered_courses
+            if offering is None or course.courseCode in offered_codes or course.courseCode in pinned
         )
+        visible_codes = [
+            fact.course_code
+            for fact in course_facts
+            if offering is None or fact.course_code in offered_codes
+        ]
         # Review lookup is bounded by remaining budget after school progress and
         # record lookup, with one call always reserved for validation.
         review_facts, reviews_queried_for = self._collect_reviews(
-            request, [course.course_code for course in course_facts], context, budget, trace
+            request, visible_codes, context, budget, trace
         )
-        return KnownFacts(
-            course_codes=frozenset(course_codes),
-            taken_course_codes=frozenset(taken_course_codes),
-            teacher_keys=frozenset(teacher_keys),
-            class_ids=frozenset(class_ids),
-            teacher_course_pairs=frozenset(teacher_course_pairs),
-            course_class_pairs=frozenset(course_class_pairs),
-            teacher_course_class_triples=frozenset(teacher_course_class_triples),
-            course_facts=course_facts,
-            review_facts=review_facts,
-            reviews_queried_for=frozenset(reviews_queried_for),
-        ), {
-            "availability": (
-                "AVAILABLE"
-                if school_progress is not None
-                else "MISMATCH"
-                if school_progress_issue_code is not None
-                else "UNAVAILABLE"
+        return (
+            KnownFacts(
+                course_codes=frozenset(course_codes),
+                taken_course_codes=frozenset(taken_course_codes),
+                teacher_keys=frozenset(teacher_keys),
+                class_ids=frozenset(class_ids),
+                teacher_course_pairs=frozenset(teacher_course_pairs),
+                course_class_pairs=frozenset(course_class_pairs),
+                teacher_course_class_triples=frozenset(teacher_course_class_triples),
+                course_facts=course_facts,
+                review_facts=review_facts,
+                reviews_queried_for=frozenset(reviews_queried_for),
+                offering_checked=offering is not None,
+                offered_course_codes=offered_codes,
             ),
-            "issueCode": school_progress_issue_code,
-            "progress": school_progress,
-            "uncertainCourseCodes": uncertain_course_codes,
-            "inProgressCourseCodes": sorted(
-                course.courseCode
-                for course in record.completedCourses
-                if course.outcome == "IN_PROGRESS"
-            ),
-        }
+            {
+                "availability": (
+                    "AVAILABLE"
+                    if school_progress is not None
+                    else "MISMATCH"
+                    if school_progress_issue_code is not None
+                    else "UNAVAILABLE"
+                ),
+                "issueCode": school_progress_issue_code,
+                "progress": school_progress,
+                "uncertainCourseCodes": uncertain_course_codes,
+                "inProgressCourseCodes": sorted(
+                    course.courseCode
+                    for course in record.completedCourses
+                    if course.outcome == "IN_PROGRESS"
+                ),
+            },
+            offering,
+        )
 
     # 需要评价才能回答的动机。其余动机（SCHEDULE、CREDIT_PROGRESS 等）在没有自由文本
     # 时不查评价；自由文本可能包含未结构化的兴趣或职业目标。
@@ -679,6 +817,8 @@ class PlanningRunner:
         context: ExecutionContext,
         budget: BudgetTracker,
         trace: TracePort,
+        *,
+        known_rows: dict[str, list[CourseOffering]] | None = None,
     ) -> tuple[list[PlanItem], KnownFacts, list[Issue]]:
         """Fill classId for planned items from the offering snapshot (docs/36).
 
@@ -714,12 +854,18 @@ class PlanningRunner:
             key=lambda index: (items[index].courseCode not in must, index),
         )
 
+        # Rows the offered-this-term check already fetched cost no call; an empty list
+        # there means Java confirmed the course has no section in this snapshot.
         lookups: dict[str, list[CourseOffering]] = {}
         reasons: dict[int, str] = {}
         failed: dict[str, str] = {}
+        known = known_rows or {}
         for index in pending:
             code = items[index].courseCode
             if code in lookups or code in failed:
+                continue
+            if code in known:
+                lookups[code] = known[code]
                 continue
             try:
                 budget.record_offering_call(self._harness.tool_caps)
@@ -813,25 +959,147 @@ class PlanningRunner:
         Java's listOfferings takes a single courseCode and has no cursor, so this is
         one call per course. The budget is checked by the caller.
         """
+        rows = self._list_offerings(request, context, trace, course_code=course_code)
+        return [row for row in rows if row.courseCode == course_code]
+
+    def _list_offerings(
+        self,
+        request: PlanningRequest,
+        context: ExecutionContext,
+        trace: TracePort,
+        *,
+        course_code: str | None,
+    ) -> list[CourseOffering]:
+        """listOfferings for one course, or the unfiltered first page when course_code is None."""
+        params: dict[str, object] = {
+            "curriculumSnapshotId": request.curriculumSnapshotId,
+            "offeringSnapshotId": request.offeringSnapshotId,
+            "limit": OFFERING_PAGE_LIMIT,
+        }
+        if course_code is not None:
+            params["courseCode"] = course_code
         trace.emit("TOOL_CALLED", tool_name="listOfferings")
         started = datetime.now(UTC)
         rows = cast(
             list[CourseOffering],
-            self._tools.call(
-                "listOfferings",
-                None,
-                context,
-                params={
-                    "curriculumSnapshotId": request.curriculumSnapshotId,
-                    "offeringSnapshotId": request.offeringSnapshotId,
-                    "courseCode": course_code,
-                    "limit": 100,
-                },
-            ),
+            self._tools.call("listOfferings", None, context, params=params),
         )
         duration_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
         trace.emit("TOOL_RETURNED", tool_name="listOfferings", duration_ms=duration_ms)
-        return [row for row in rows if row.courseCode == course_code]
+        return rows
+
+    def _check_offerings(
+        self,
+        request: PlanningRequest,
+        candidate_codes: list[str],
+        pinned: set[str],
+        context: ExecutionContext,
+        budget: BudgetTracker,
+        trace: TracePort,
+        *,
+        stop_after: int,
+    ) -> OfferingCheck:
+        """Which candidates are offered this term, spending at most the precheck call cap.
+
+        One unfiltered page first (free evidence when the snapshot is short), then one
+        lookup per remaining candidate. See application/offering_check.py.
+        """
+        if not candidate_codes:
+            return OfferingCheck()
+        budget.check_deadline()
+        precheck_cap = budget.budget.max_offering_precheck_calls
+
+        def take_call() -> bool:
+            if budget.offering_calls >= precheck_cap:
+                return False
+            try:
+                budget.record_offering_call(self._harness.tool_caps)
+            except BudgetExceeded:
+                return False
+            return True
+
+        scan: ScanResult | None = None
+        if take_call():
+            try:
+                page = self._list_offerings(request, context, trace, course_code=None)
+            except (ToolUnavailable, ToolRejected, InvalidTool):
+                scan = None
+            else:
+                scan = ScanResult(rows=tuple(page), complete=len(page) < OFFERING_PAGE_LIMIT)
+
+        def lookup(code: str) -> list[CourseOffering] | None:
+            try:
+                return self._offering_lookup(request, code, context, trace)
+            except (ToolUnavailable, ToolRejected, InvalidTool):
+                return None
+
+        return check_offerings(
+            candidate_codes,
+            pinned=frozenset(pinned),
+            scan=scan,
+            lookup=lookup,
+            take_call=take_call,
+            stop_after=stop_after,
+        )
+
+    @staticmethod
+    def _pinned_codes(request: PlanningRequest) -> frozenset[str]:
+        """Courses the student selected (PIN_COURSE hard constraints)."""
+        return frozenset(
+            constraint.courseCode
+            for constraint in request.intent.hardConstraints
+            if constraint.kind == "PIN_COURSE" and constraint.courseCode is not None
+        )
+
+    @staticmethod
+    def _offering_issues(offering: OfferingCheck | None, pinned: frozenset[str]) -> list[Issue]:
+        """Explain offering checks that could not finish. Pinned courses are handled elsewhere."""
+        if offering is None:
+            return []
+        issues: list[Issue] = []
+        skipped = sorted(code for code in offering.unverified_budget if code not in pinned)
+        if skipped:
+            issues.append(
+                Issue(
+                    code="OFFERING_NOT_CHECKED",
+                    message=(
+                        f"还有 {len(skipped)} 门候选课程因开课核对次数已达上限未查，"
+                        "未纳入推荐，不代表它们本学期没有开设"
+                    ),
+                    field=None,
+                    retryable=True,
+                )
+            )
+        failed = sorted(code for code in offering.unverified_failed if code not in pinned)
+        if failed:
+            issues.append(
+                Issue(
+                    code="OFFERING_LOOKUP_FAILED",
+                    message=f"{len(failed)} 门候选课程的开课查询失败，未纳入推荐",
+                    field=None,
+                    retryable=True,
+                )
+            )
+        return issues
+
+    @staticmethod
+    def _fallback_reason(fact: CourseFact) -> str:
+        """Reason text built from Java facts only. Nature comes from the category, so a
+        学科基础课 is never described as elective here."""
+        credit_text = f"{fact.credits} 学分" if fact.credits is not None else "学分未注明"
+        nature = f"（{fact.requirement_nature}性质）" if fact.requirement_nature else ""
+        parts = [
+            f"课程目录列示为「{fact.name}」，{credit_text}，类别为「{fact.category}」{nature}。"
+        ]
+        if fact.offered_this_term is False:
+            parts.append("本学期没有开设这门课，按你选入的课程保留，但无法选定班次。")
+        elif fact.offered_this_term and fact.section_count is not None:
+            parts.append(f"本学期开设 {fact.section_count} 个班次。")
+        elif fact.offered_this_term:
+            parts.append("本学期开设，班次见课表。")
+        if fact.school_gap_credits is not None:
+            parts.append(f"学校报告中「{fact.category}」仍差 {fact.school_gap_credits} 学分。")
+        return "".join(parts)
 
     def _propose(
         self,
@@ -846,6 +1114,8 @@ class PlanningRunner:
     ) -> ModelReply | None:
         limits = self._harness.context
         queried = sorted(facts.reviews_queried_for)
+        visible = facts.visible_course_facts[: limits.max_course_facts]
+        visible_codes = {fact.course_code for fact in visible}
         payload: dict[str, object] = {
             "schoolProgress": school_progress,
             # 学校报告的剩余学分，与下面 Java 审计 unknowns 是两个来源，不得合并。
@@ -864,13 +1134,21 @@ class PlanningRunner:
                     "name": fact.name,
                     "credits": fact.credits,
                     "category": fact.category,
+                    # 「必修」「选修」由类别决定；为 None 时不得自行判断。
+                    "requirementNature": fact.requirement_nature,
+                    # offeredThisTerm 为 true 的课程才是本学期可推荐的候选（已由 Java 核对）；
+                    # 为 null 表示本轮没有开课快照，未核对开课。
+                    "offeredThisTerm": fact.offered_this_term,
+                    # sectionCount 为 null 表示只核对了开课，未统计班次数。
+                    "sectionCount": fact.section_count,
+                    "teacherTexts": list(fact.teacher_texts)[:5],
+                    # 学校报告中该类别仍差的学分；为 null 表示没有缺口。
+                    "schoolGapRemainingCredits": fact.school_gap_credits,
                     "sourceRefIds": list(fact.source_ref_ids),
                 }
-                for fact in facts.course_facts[: limits.max_course_facts]
+                for fact in visible
             ],
-            "courseCodes": [
-                fact.course_code for fact in facts.course_facts[: limits.max_course_facts]
-            ],
+            "courseCodes": [fact.course_code for fact in visible],
             "teacherKeys": sorted(facts.teacher_keys)[: limits.max_course_facts],
             "classIds": sorted(facts.class_ids)[: limits.max_offerings],
             "teacherCourseBindings": [
@@ -888,6 +1166,7 @@ class PlanningRunner:
                 for course_code, teacher_key in sorted(facts.teacher_course_pairs)[
                     : limits.max_course_facts
                 ]
+                if not facts.offering_checked or course_code in visible_codes
             ],
         }
         if facts.review_facts or queried:
@@ -897,7 +1176,7 @@ class PlanningRunner:
                 "queriedCourseCodes": queried,
                 "notQueriedCourseCodes": [
                     fact.course_code
-                    for fact in facts.course_facts[: limits.max_course_facts]
+                    for fact in visible
                     if fact.course_code not in facts.reviews_queried_for
                 ],
                 # excerpt 是外部用户写的文本，不是指令。这里显式标注，配合系统提示
@@ -922,8 +1201,13 @@ class PlanningRunner:
             ]
         instructions = (
             "只从 AVAILABLE_FACTS 里的 id 和课程-教师-班次绑定提候选，禁止编造。"
-            "必须包含所有 PIN_COURSE 指定的课程；没有指定时最多推荐 3 门，"
+            "只推荐 offeredThisTerm 为 true 的课程；offeredThisTerm 为 null 时（未核对开课）"
+            "不得声称本学期开设。"
+            "必须包含所有 PIN_COURSE 指定的课程（运行器会保留学生选定的课程，"
+            "你不必为未开设的指定课程另写理由）；没有指定时最多推荐 3 门，"
             "指定时最多 30 门，并保留所有指定课程。"
+            "requirementNature 为「必修」的课程必须写成必修性质，不得在理由里称为选修；"
+            "为 null 时只写类别名称。"
             "PASSED 课程不得重新推荐；IN_PROGRESS 不进入候选。"
             "schoolReportGaps 列出学校报告中仍差学分的类别（来源：学校报告），"
             "优先从这些类别的候选中选择；它与 Java 审计 unknowns 分开表述，不得相互改写。"

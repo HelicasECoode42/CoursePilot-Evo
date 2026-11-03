@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from agent_runtime.adapters.fake_tools import TypedFakeToolClient
 from agent_runtime.adapters.harness_loader import HarnessSnapshot
-from agent_runtime.adapters.model_client import ModelReply
+from agent_runtime.adapters.model_client import FACTS_MESSAGE_PREFIX, ModelReply
 from agent_runtime.api.schemas import (
+    Constraint,
     CourseOffering,
+    Issue,
     Meeting,
     PlanItem,
     PlanningRequest,
@@ -18,7 +21,8 @@ from agent_runtime.api.schemas import (
 )
 from agent_runtime.application.budget import Budget
 from agent_runtime.application.context import ExecutionContext
-from agent_runtime.application.runner import PlanningRunner
+from agent_runtime.application.runner import PlanningRunner, _dedupe_issues
+from agent_runtime.domain.policies.candidate_guard import CourseFact
 
 OFFERING_SNAPSHOT = "offering-snapshot:demo"
 
@@ -79,17 +83,28 @@ class _OfferingTools(TypedFakeToolClient):
         ),
     )
 
-    def __init__(self, offerings: list[CourseOffering]) -> None:
+    def __init__(self, offerings: list[CourseOffering], *, extra_rows: int = 0) -> None:
         self._offerings = offerings
+        # Other courses in the snapshot. With 100 or more rows the unfiltered page is
+        # full, which the runner must treat as "not the whole snapshot".
+        self._extra_rows = extra_rows
         self.calls: list[str] = []
         self.offering_lookups: list[str] = []
+        self.scans = 0
         self.validation_items: list[PlanItem] | None = None
 
     def call(self, tool, dto, context, *, params=None, idempotency_key=None):
         self.calls.append(tool)
         if tool == "listOfferings":
             assert params is not None
-            code = params["courseCode"]
+            code = params.get("courseCode")
+            if code is None:
+                self.scans += 1
+                rows = list(self._offerings) + [
+                    _row(f"FILL{index:03d}", f"class:fill-{index:03d}")
+                    for index in range(self._extra_rows)
+                ]
+                return rows[: params["limit"]]
             self.offering_lookups.append(code)
             return [row for row in self._offerings if row.courseCode == code]
         if tool == "listTeacherCourseOptions":
@@ -191,7 +206,9 @@ def test_one_lookup_per_course_and_tool_budget_unchanged(
         _row("CS101", "class:cs101-a", meetings=[_meeting(1, 1, 2)]),
         _row("MATH201", "class:math-b", meetings=[_meeting(3, 5, 6)]),
     ]
-    tools = _OfferingTools(rows)
+    # A full unfiltered page (100 rows): offered courses are known, but the rows for
+    # section assignment still need one listOfferings call per course.
+    tools = _OfferingTools(rows, extra_rows=200)
     answer = _run(_request(planning_request), tools, _cs101_math201_items())
 
     assert tools.offering_lookups == ["CS101", "MATH201"]
@@ -209,12 +226,13 @@ def test_offering_cap_leaves_extra_courses_empty_with_reason(
         _row("CS101", "class:cs101-a", meetings=[_meeting(1, 1, 2)]),
         _row("MATH201", "class:math-b", meetings=[_meeting(3, 5, 6)]),
     ]
-    tools = _OfferingTools(rows)
+    tools = _OfferingTools(rows, extra_rows=200)
+    # One call for the unfiltered page, one for CS101; MATH201 hits the total cap.
     answer = _run(
         _request(planning_request),
         tools,
         _cs101_math201_items(),
-        budget=Budget(max_offering_calls=1),
+        budget=Budget(max_offering_calls=2),
     )
 
     assert tools.offering_lookups == ["CS101"]
@@ -299,3 +317,205 @@ def test_without_offering_snapshot_nothing_is_looked_up(
 
     assert tools.offering_lookups == []
     assert _class_by_course(answer) == {"CS101": None, "MATH201": None}
+
+
+class _CapturingModel:
+    """Records the facts payload the model would see, then returns the given items."""
+
+    def __init__(self, items: list[PlanItem]) -> None:
+        self._items = items
+        self.facts: dict | None = None
+
+    def generate(self, *, context, messages, tool_schemas):
+        del context, tool_schemas
+        for message in messages:
+            content = message.get("content", "")
+            if content.startswith(FACTS_MESSAGE_PREFIX):
+                self.facts = json.loads(content[len(FACTS_MESSAGE_PREFIX) :])
+        return ModelReply(items=list(self._items))
+
+
+def _pin(course_code: str) -> Constraint:
+    return Constraint(
+        kind="PIN_COURSE",
+        courseCode=course_code,
+        teacherKey=None,
+        dayOfWeek=None,
+        section=None,
+        value=None,
+        sourceText="学生选入规划的课程",
+    )
+
+
+def _run_with_model(request: PlanningRequest, tools: _OfferingTools, model) -> object:
+    runner = PlanningRunner(
+        tool_client=tools,
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=model,
+    )
+    return runner.run(request, _context(request))
+
+
+def _unknown_codes(answer) -> list[tuple[str, str]]:
+    return [(u.code, u.message) for u in answer.unknowns]
+
+
+def test_model_pick_that_is_not_offered_is_not_recommended(
+    planning_request: PlanningRequest,
+) -> None:
+    # Only CS101 is offered this term. The model still names MATH201.
+    tools = _OfferingTools([_row("CS101", "class:cs101-a", meetings=[_meeting(1, 1, 2)])])
+    answer = _run(_request(planning_request), tools, _cs101_math201_items())
+
+    assert [item.courseCode for item in answer.recommendations[0].items] == ["CS101"]
+    assert tools.validation_items is not None
+    assert [item.courseCode for item in tools.validation_items] == ["CS101"]
+    dropped = [u for u in answer.unknowns if u.code == "NOT_OFFERED_DROPPED"]
+    assert dropped and "MATH201" in dropped[0].message
+    assert "本学期没有开设这门课" in dropped[0].message
+
+
+def test_pinned_course_not_offered_is_kept_and_stated_from_java_facts(
+    planning_request: PlanningRequest,
+) -> None:
+    tools = _OfferingTools([_row("CS101", "class:cs101-a", meetings=[_meeting(1, 1, 2)])])
+    request = _request(planning_request)
+    request.intent.hardConstraints = [_pin("MATH201")]
+    model = _CapturingModel([PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
+    answer = _run_with_model(request, tools, model)
+
+    recommendation = answer.recommendations[0]
+    assert [item.courseCode for item in recommendation.items] == ["MATH201", "CS101"]
+    assert _class_by_course(answer)["MATH201"] is None
+    reason = [u for u in answer.unknowns if u.code == "SECTION_NOT_ASSIGNED"]
+    assert reason and reason[0].message == "课程 MATH201：本学期没有开设这门课"
+    rationale = {r.courseCode: r for r in recommendation.courseRationales}
+    assert "本学期没有开设这门课" in rationale["MATH201"].reason
+    assert rationale["MATH201"].rationaleSource == "COURSE_FACTS"
+    # The model never saw the unoffered pin, so it is not in the candidate payload.
+    assert "MATH201" not in model.facts["courseCodes"]
+
+
+def test_pinned_offered_course_goes_first_and_model_picks_follow(
+    planning_request: PlanningRequest,
+) -> None:
+    tools = _OfferingTools(
+        [
+            _row("CS101", "class:cs101-a", meetings=[_meeting(1, 1, 2)]),
+            _row("MATH201", "class:math-b", meetings=[_meeting(3, 5, 6)]),
+        ]
+    )
+    request = _request(planning_request)
+    request.intent.hardConstraints = [_pin("MATH201")]
+    model = _CapturingModel([PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
+    answer = _run_with_model(request, tools, model)
+
+    assert [item.courseCode for item in answer.recommendations[0].items] == ["MATH201", "CS101"]
+    assert _class_by_course(answer) == {"MATH201": "class:math-b", "CS101": "class:cs101-a"}
+
+
+def test_payload_marks_offered_and_requirement_nature(planning_request: PlanningRequest) -> None:
+    tools = _OfferingTools([_row("CS101", "class:cs101-a", meetings=[_meeting(1, 1, 2)])])
+    model = _CapturingModel(
+        [
+            PlanItem(courseCode="CS101", teacherKey=None, classId=None),
+        ]
+    )
+    _run_with_model(_request(planning_request), tools, model)
+
+    assert model.facts is not None
+    assert model.facts["courseCodes"] == ["CS101"]
+    course = model.facts["courses"][0]
+    assert course["courseCode"] == "CS101"
+    assert course["offeredThisTerm"] is True
+    assert course["sectionCount"] == 1
+    # CS101 is 专业选修课 in the fixture catalog, so the nature is 选修.
+    assert course["requirementNature"] == "选修"
+    assert course["schoolGapRemainingCredits"] is None
+
+
+def test_snapshot_without_offering_rows_for_candidates_recommends_nothing(
+    planning_request: PlanningRequest,
+) -> None:
+    tools = _OfferingTools([_row("OTHER", "class:other", meetings=[_meeting(1, 1, 2)])])
+    answer = _run(_request(planning_request), tools, _cs101_math201_items())
+
+    # Both picks are dropped (neither is offered), so nothing is recommended.
+    assert not answer.recommendations
+    dropped = {u.message for u in answer.unknowns if u.code == "NOT_OFFERED_DROPPED"}
+    assert dropped == {
+        "课程 CS101 本学期没有开设这门课，未纳入推荐",
+        "课程 MATH201 本学期没有开设这门课，未纳入推荐",
+    }
+
+
+def test_precheck_budget_spent_leaves_courses_unrecommended_and_says_so(
+    planning_request: PlanningRequest,
+) -> None:
+    # The unfiltered page is full, and CS101 is the only course on it. MATH201 cannot
+    # be checked because the precheck budget (scan only) is spent.
+    tools = _OfferingTools(
+        [_row("CS101", "class:cs101-a", meetings=[_meeting(1, 1, 2)])], extra_rows=200
+    )
+    answer = _run(
+        _request(planning_request),
+        tools,
+        _cs101_math201_items(),
+        budget=Budget(max_offering_precheck_calls=1),
+    )
+
+    assert [item.courseCode for item in answer.recommendations[0].items] == ["CS101"]
+    checked = [u for u in answer.unknowns if u.code == "OFFERING_NOT_CHECKED"]
+    assert checked and "1 门" in checked[0].message
+    assert "不代表它们本学期没有开设" in checked[0].message
+
+
+def test_duplicate_unknowns_are_reported_once() -> None:
+    first = Issue(code="TIME_RULE", message="时间类条件未核验", field=None, retryable=False)
+    same = Issue(code="TIME_RULE", message="时间类条件未核验", field=None, retryable=False)
+    other = Issue(code="TIME_RULE", message="另一条", field=None, retryable=False)
+    assert _dedupe_issues([first, same, other]) == [first, other]
+
+
+def test_fallback_reason_never_calls_a_required_course_elective() -> None:
+    fact = CourseFact(
+        course_code="08305014",
+        name="数据库原理",
+        credits="3.00",
+        category="学科基础课",
+        requirement_nature="必修",
+        offered_this_term=False,
+        school_gap_credits="3",
+    )
+    text = PlanningRunner._fallback_reason(fact)
+    assert "（必修性质）" in text
+    assert "选修" not in text
+    assert "本学期没有开设这门课" in text
+    assert "学校报告中「学科基础课」仍差 3 学分" in text
+
+
+def test_rationale_for_a_dropped_pick_does_not_fail_the_run(
+    planning_request: PlanningRequest,
+) -> None:
+    from agent_runtime.api.schemas.answer import CourseRationale
+
+    class _RationaleModel:
+        def generate(self, *, context, messages, tool_schemas):
+            del context, messages, tool_schemas
+            return ModelReply(
+                items=[
+                    PlanItem(courseCode="CS101", teacherKey=None, classId=None),
+                    PlanItem(courseCode="MATH201", teacherKey=None, classId=None),
+                ],
+                course_rationales=[
+                    CourseRationale(courseCode="CS101", reason="可以选。", reviewNoteIds=[]),
+                    CourseRationale(courseCode="MATH201", reason="也可以。", reviewNoteIds=[]),
+                ],
+            )
+
+    tools = _OfferingTools([_row("CS101", "class:cs101-a", meetings=[_meeting(1, 1, 2)])])
+    answer = _run_with_model(_request(planning_request), tools, _RationaleModel())
+
+    recommendation = answer.recommendations[0]
+    assert [item.courseCode for item in recommendation.items] == ["CS101"]
+    assert [r.courseCode for r in recommendation.courseRationales] == ["CS101"]

@@ -30,7 +30,7 @@ from agent_runtime.api.schemas import Constraint, CourseOffering, Meeting, SoftP
 # which is never worse than the greedy seed. Keeps a worst case bounded.
 NODE_LIMIT = 20000
 
-REASON_NO_OFFERING = "开课快照中没有该课程的班次"
+REASON_NO_OFFERING = "本学期没有开设这门课"
 REASON_TEACHER_NO_OFFERING = "所选教师在本开课快照中没有该课程的班次"
 REASON_UNPARSED = "班次时间未解析，无法判断冲突，未自动选定班次"
 REASON_BLOCKED = "可选班次都与学生设定的必避时段冲突"

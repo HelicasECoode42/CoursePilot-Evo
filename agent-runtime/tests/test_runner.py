@@ -1106,6 +1106,11 @@ def test_facts_carry_course_name_credits_and_category(planning_request: Planning
         "name",
         "credits",
         "category",
+        "requirementNature",
+        "offeredThisTerm",
+        "sectionCount",
+        "teacherTexts",
+        "schoolGapRemainingCredits",
         "sourceRefIds",
     }
     assert courses[0]["name"], "课程名不能为空"

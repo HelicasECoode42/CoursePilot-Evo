@@ -22,11 +22,15 @@ class Budget:
     max_tool_calls: int = 6
     max_model_calls: int = 3
     deadline_ms: int = 45000
-    # listOfferings lookups for section assignment. Counted apart from max_tool_calls:
-    # the 6-call run budget is already used by audit, school progress, courses,
-    # teacher options, reviews and validation. One lookup per course, capped here.
+    # listOfferings lookups for the run (offered-this-term precheck plus section
+    # assignment). Counted apart from max_tool_calls: the 6-call run budget is already
+    # used by audit, school progress, courses, teacher options, reviews and validation.
     # RunManifest has no field for this yet, so the cap is not recorded there.
-    max_offering_calls: int = 4
+    max_offering_calls: int = 16
+    # Part of max_offering_calls the offered-this-term precheck may spend (its unfiltered
+    # scan included). The rest is kept for section assignment of the courses the model
+    # picked. Must not exceed max_offering_calls.
+    max_offering_precheck_calls: int = 10
     # searchReviews lookups, one per course (Java takes a single courseCode per call).
     # Counted apart from max_tool_calls so that a review lookup can never use up the
     # calls needed for validation. Eight covers a typical recommendation list; the

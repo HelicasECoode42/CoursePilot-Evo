@@ -48,6 +48,19 @@ def eligible_course_codes(
     return eligible
 
 
+# Requirement nature by curriculum category. Only categories whose nature the
+# curriculum file states are mapped; anything else is None and never guessed.
+_REQUIREMENT_NATURE = {
+    "学科基础课": "必修",
+    "专业选修课": "选修",
+}
+
+
+def requirement_nature(category: str) -> str | None:
+    """「必修」「选修」or None when the category does not state it."""
+    return _REQUIREMENT_NATURE.get(category)
+
+
 def school_gap_categories(
     nodes: Iterable[Any], catalog_categories: Iterable[str]
 ) -> frozenset[str]:
