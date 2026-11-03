@@ -25,6 +25,7 @@ import {
   type PlanCourse,
   type SelectionLedger,
 } from "../domain/credit-plan";
+import { auditSourceLabel } from "../domain/academic-record";
 import { buildCourseNameIndex } from "../domain/course-names";
 import {
   availabilityFromSectionCount,
@@ -871,7 +872,13 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
                 <summary>
                   <strong>{{ plan.category ?? "未命名类别" }}</strong> ·
                   {{ ledgerLine(plan) }}
+                  <span class="microcopy"
+                    >（{{ auditSourceLabel(plan) }}）</span
+                  >
                 </summary>
+                <p v-if="plan.inProgressCredits" class="microcopy">
+                  另有 {{ plan.inProgressCredits }} 学分在读，未计入已获学分。
+                </p>
 
                 <p
                   v-if="schoolCategoryReference(plan.category)"
@@ -880,7 +887,11 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
                   {{ schoolCategoryReference(plan.category) }}
                 </p>
                 <p v-if="plan.gapSource === 'JAVA'" class="microcopy">
-                  下方候选和组合按 Java 核验的培养方案缺口计算。
+                  {{
+                    plan.source === "SCHOOL_REPORT"
+                      ? "下方候选和组合按学校报告同名类别的缺口计算（已与本地核对同步）。"
+                      : "下方候选和组合按本地核对的培养方案缺口计算。"
+                  }}
                 </p>
                 <p v-else-if="plan.gapSource === 'SCHOOL'" class="microcopy">
                   下方候选和组合按学校报告的剩余学分计算，学校数字未经本地核对。

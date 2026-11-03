@@ -19,7 +19,13 @@ import LearnedCourseGroups from "../components/LearnedCourseGroups.vue";
 import LocalAuditSummary from "../components/LocalAuditSummary.vue";
 import ReviewSummary from "../components/ReviewSummary.vue";
 import AdviceChat from "../components/AdviceChat.vue";
-import { groupAuditItems, recordSourceLabel } from "../domain/academic-record";
+import {
+  auditSourceLabel,
+  groupAuditItems,
+  inProgressNote,
+  needsCompleteCheckbox,
+  recordSourceLabel,
+} from "../domain/academic-record";
 import { isCurriculumUsableForMode } from "../domain/planning-request";
 import { groupLearnedCourses, usableName } from "../domain/school-categories";
 import { usePlanningStore } from "../stores/planning";
@@ -512,12 +518,26 @@ onUnmounted(() => controller?.abort());
                 :audit="store.audit"
                 :lookup-name="lookupCourseName"
               />
-              <p class="microcopy">
+              <p
+                v-if="inProgressNote(store.audit.requirements)"
+                class="microcopy"
+              >
+                {{ inProgressNote(store.audit.requirements) }}
+              </p>
+              <p v-if="needsCompleteCheckbox(store.audit)" class="microcopy">
                 核对无误后勾选「记录已完整」，无法确认的项目才会变成可确认的结论。<RouterLink
                   class="cta-link"
                   :to="{ path: '/records', query: { focus: 'complete' } }"
                   >去勾选「记录已完整」</RouterLink
                 >
+              </p>
+              <p
+                v-else-if="
+                  store.audit.transcriptCompleteSource === 'SCHOOL_IMPORT_FULL'
+                "
+                class="microcopy"
+              >
+                学校导入已读全，按完整记录核对。
               </p>
             </template>
           </details>
@@ -533,6 +553,12 @@ onUnmounted(() => controller?.abort());
                 <li v-for="item in group.items" :key="item.requirementId">
                   {{ item.category ?? "类别未注明" }} ·
                   {{ formatGap(item.gapCredits) }}
+                  <span class="audit-source"
+                    >（{{ auditSourceLabel(item) }}）</span
+                  >
+                  <span v-if="item.inProgressCredits" class="microcopy">
+                    · 另有 {{ item.inProgressCredits }} 学分在读
+                  </span>
                 </li>
               </ul>
             </li>

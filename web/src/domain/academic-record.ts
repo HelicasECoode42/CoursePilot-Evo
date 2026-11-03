@@ -9,6 +9,7 @@ import type {
   AcademicRecord,
   AcademicRecordInput,
   AuditItem,
+  AuditResult,
   CompletedCourse,
 } from "../contracts";
 import { SCHEMA_VERSION } from "../contracts";
@@ -58,16 +59,71 @@ export function groupAuditItems(items: readonly AuditItem[]): AuditGroup[] {
   })).filter((group) => group.items.length > 0);
 }
 
+/** 核对项的数字来源：学校报告同名类别（SCHOOL_REPORT）或本地课程折算（LOCAL）。缺省按 LOCAL。 */
+export function auditSourceLabel(item: Pick<AuditItem, "source">): string {
+  return item.source === "SCHOOL_REPORT" ? "按学校报告" : "本地核对";
+}
+
+/**
+ * 在读学分汇总（不计入已获学分）。以分为单位累加，避免小数误差。
+ * unknownCount 为在读学分未知（null）或未提供的类别数。
+ */
+export function inProgressSummary(
+  items: readonly Pick<AuditItem, "inProgressCredits">[],
+): { credits: number; unknownCount: number } {
+  let cents = 0;
+  let unknownCount = 0;
+  for (const item of items) {
+    if (typeof item.inProgressCredits === "number") {
+      cents += Math.round(item.inProgressCredits * 100);
+    } else {
+      unknownCount += 1;
+    }
+  }
+  return { credits: cents / 100, unknownCount };
+}
+
+/** 在读学分的一句说明；没有在读学分且都已知时返回 null，不在页面上占行。 */
+export function inProgressNote(
+  items: readonly Pick<AuditItem, "inProgressCredits">[],
+): string | null {
+  const { credits, unknownCount } = inProgressSummary(items);
+  const parts: string[] = [];
+  if (credits > 0) parts.push(`另有 ${credits} 学分在读，尚未计入已获学分`);
+  if (unknownCount > 0 && credits === 0) {
+    parts.push("部分类别的在读学分待确认");
+  }
+  return parts.length > 0 ? parts.join("；") : null;
+}
+
 /**
  * 完整性说明。未声明完整时，必须让学生预期会有「无法确认」项，
- * 而不是以为系统会给出确定结论。
+ * 而不是以为系统会给出确定结论。学校导入已读全时，按完整记录核对。
  */
 export function describeCompleteness(
-  record: Pick<AcademicRecord, "transcriptComplete">,
+  record: Pick<AcademicRecord, "transcriptComplete"> & {
+    transcriptCompleteSource?: "SCHOOL_IMPORT_FULL" | "MANUAL" | null;
+  },
 ): string {
+  if (
+    record.transcriptComplete &&
+    record.transcriptCompleteSource === "SCHOOL_IMPORT_FULL"
+  ) {
+    return "学校导入已读全，按完整记录核对。";
+  }
   return record.transcriptComplete
     ? "已声明记录完整。"
     : "未声明完整，无法判断的要求会显示为「无法确认」。";
+}
+
+/** 学校导入已读全时不再需要学生手动勾选「记录已完整」。 */
+export function needsCompleteCheckbox(
+  audit: Pick<AuditResult, "transcriptComplete" | "transcriptCompleteSource">,
+): boolean {
+  return (
+    !audit.transcriptComplete &&
+    audit.transcriptCompleteSource !== "SCHOOL_IMPORT_FULL"
+  );
 }
 
 /** Use the student-facing explanation already defined for common audit UNKNOWN codes. */

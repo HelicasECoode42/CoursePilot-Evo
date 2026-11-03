@@ -719,6 +719,66 @@ describe("个人控制台 · 学校类别与核对摘要", () => {
     expect(wrapper.text()).not.toContain("· C-WITH-REVIEWS ·");
   });
 
+  it("学校导入已读全时不给去勾选记录已完整的入口，并标出来源与在读学分", async () => {
+    const { wrapper, store } = await mountDashboard(true, true);
+    store.$patch({
+      schoolProgress: {
+        receipt: { importedAt: "2026-10-30T00:00:00Z" },
+        snapshot: { nodes: [], courses: [] },
+        academicRecord: {},
+      } as never,
+    });
+    // 直接赋值而不用 $patch：$patch 会合并进共享的 audit 夹具对象，污染其他用例。
+    store.audit = {
+      curriculumSnapshotId: "curr-fake",
+      academicRecordId: "rec-fake",
+      recordRevision: 2,
+      transcriptComplete: true,
+      transcriptCompleteSource: "SCHOOL_IMPORT_FULL",
+      requirements: [
+        {
+          requirementId: "req-gap",
+          category: "学科基础课",
+          courseCodes: [],
+          requiredCredits: 40,
+          earnedCredits: 6,
+          gapCredits: 34,
+          state: "UNSATISFIED",
+          sourceRefIds: ["ref-b"],
+          source: "SCHOOL_REPORT",
+          inProgressCredits: 0,
+        },
+      ],
+      suggestedCourseCodes: [],
+      unknowns: [],
+    };
+    await flushPromises();
+    const details = wrapper.get(".dashboard-panel > .record-help");
+    expect(details.text()).toContain("学校导入已读全，按完整记录核对");
+    expect(wrapper.find('a[href="/records?focus=complete"]').exists()).toBe(
+      false,
+    );
+  });
+
+  it("没有学校导入时，类别行标出按学校报告/本地核对与在读学分", async () => {
+    const { wrapper, store } = await mountDashboard(true, false);
+    store.audit = {
+      ...audit,
+      requirements: [
+        {
+          ...audit.requirements[1]!,
+          source: "LOCAL",
+          inProgressCredits: 3,
+        },
+      ],
+    };
+    await flushPromises();
+    const text = wrapper.get(".dash-audit").text();
+    expect(text).toContain("还差 13 学分");
+    expect(text).toContain("（本地核对）");
+    expect(text).toContain("另有 3 学分在读");
+  });
+
   it("本地核对默认收起成一段摘要，并给出去勾选记录已完整的入口", async () => {
     const { wrapper, store } = await mountDashboard(true, true);
     store.$patch({

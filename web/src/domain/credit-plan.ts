@@ -94,6 +94,10 @@ export interface CategoryCreditPlan {
   javaGapCredits: number | null;
   /** 与本类别唯一对应的学校报告数字；没有则为 null。 */
   school: SchoolCategoryGap | null;
+  /** 核对项的数字来源（来自 Java 核对项）：SCHOOL_REPORT 或 LOCAL，缺省视为 LOCAL。 */
+  source?: AuditItem["source"];
+  /** 在读学分，不计入已获学分；未知或未提供为 null。 */
+  inProgressCredits: number | null;
   state: CategoryPlanState;
   /** 可计入凑分的候选，按相关度、再按课程号排序。 */
   countable: PlanCourse[];
@@ -165,6 +169,8 @@ export function buildCategoryPlan(
     gapSource,
     javaGapCredits: requirement.gapCredits,
     school,
+    source: requirement.source,
+    inProgressCredits: requirement.inProgressCredits ?? null,
   };
   if (requirement.category === null) {
     return { ...base, state: "NO_CATEGORY", countable: [], uncountable: [] };

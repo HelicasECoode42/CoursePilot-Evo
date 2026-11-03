@@ -21,7 +21,9 @@ import { buildCourseNameIndex, limitCourseCodes } from "../domain/course-names";
 import { courseTitle, usableName } from "../domain/school-categories";
 import type { CompletedCourse, Course, CourseOutcome } from "../contracts";
 import {
+  auditSourceLabel,
   describeCompleteness,
+  needsCompleteCheckbox,
   duplicateCourseCodes,
   recordSourceLabel,
   groupAuditItems,
@@ -1003,6 +1005,15 @@ async function goToCredits() {
                     · 还差 {{ item.gapCredits }} 学分
                   </template>
                   <template v-else>· 学分缺口未知</template>
+                  <span class="audit-source">
+                    （{{ auditSourceLabel(item) }}）
+                  </span>
+                </span>
+                <span
+                  v-if="item.inProgressCredits"
+                  class="audit-progress microcopy"
+                >
+                  另有 {{ item.inProgressCredits }} 学分在读，未计入已获学分
                 </span>
                 <ul v-if="item.courseCodes.length" class="audit-codes">
                   <li
@@ -1046,7 +1057,7 @@ async function goToCredits() {
           <div class="notice notice--warning" role="note">
             <LocalAuditSummary :audit="store.audit" :lookup-name="nameOf" />
             <button
-              v-if="!store.audit.transcriptComplete"
+              v-if="needsCompleteCheckbox(store.audit)"
               class="button button--secondary"
               type="button"
               @click="focusCompleteCheckbox"
