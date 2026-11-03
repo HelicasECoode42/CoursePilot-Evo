@@ -33,6 +33,7 @@ import {
   type CurriculumResult,
   type OfferingSnapshotResult,
   type CourseSearch,
+  type OfferingListSearch,
   type ReviewNoteSearch,
   type SessionOfferingSearch,
   type SessionView,
@@ -802,6 +803,22 @@ export class FixtureApiClient implements CoursePilotApiClient {
     if (!this.sessionToken)
       throw new Error("Fixture session has not been created");
     return null;
+  }
+
+  async listOfferings(
+    _curriculumSnapshotId: string,
+    _offeringSnapshotId: string,
+    courseCode: string,
+    signal?: AbortSignal,
+  ): Promise<OfferingListSearch> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    // 演示数据是确定的：没有班次就是确定的「未开」，status 显式给 OK。
+    return {
+      items: structuredClone(FIXTURE_OFFERINGS.get(courseCode) ?? []),
+      status: "OK",
+    };
   }
 
   async listTeacherCourseOptions(

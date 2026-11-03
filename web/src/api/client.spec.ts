@@ -998,6 +998,52 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     expect(options.method).toBe("GET");
   });
 
+  it("lists offerings of the selected offering snapshot for one course", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(200, envelope("OK", { items: [offering] })),
+      );
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.listOfferings("curriculum-2026", "offering-2026", "CS103"),
+    ).resolves.toEqual({ items: [offering], status: "OK" });
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe(
+      "http://127.0.0.1:8000/api/v1/offerings?curriculumSnapshotId=curriculum-2026&offeringSnapshotId=offering-2026&courseCode=CS103&limit=100",
+    );
+    expect(options.method).toBe("GET");
+  });
+
+  it("keeps an UNKNOWN offering list as UNKNOWN rather than an empty confirmed list", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(200, envelope("UNKNOWN", { items: [] })));
+    const client = await authedClient(fetcher);
+
+    const result = await client.listOfferings(
+      "curriculum-2026",
+      "offering-2026",
+      "CS103",
+    );
+    expect(result).toEqual({ items: [], status: "UNKNOWN" });
+  });
+
+  it("reports a missing gateway route as an error instead of an empty list", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(404, { detail: "Not Found" }));
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.listOfferings("curriculum-2026", "offering-2026", "CS103"),
+    ).rejects.toBeInstanceOf(ApiFailure);
+  });
+
   it("lists curriculum courses with a cursor for the next page", async () => {
     const course = {
       courseCode: "CS103",

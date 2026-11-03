@@ -66,17 +66,36 @@ export function sectionLines(
   section: PlanSection,
   explain: (issue: Issue) => string,
 ): SectionLine[] {
-  const violations: SectionLine[] = section.violations.map((issue, index) => ({
-    key: `v${index}:${issue.code}`,
-    kind: "violation",
-    text: issue.message,
-  }));
-  const unknowns: SectionLine[] = section.unknownChecks.map((issue, index) => ({
-    key: `u${index}:${issue.code}`,
-    kind: "unknown",
-    // 未建模规则保留 Java 文案（含条数与原表位置），不走通用解释。
-    text: issue.code === UNMODELED_RULES_CODE ? issue.message : explain(issue),
-  }));
+  // 同一条未知项（代码与显示文字都相同）只列一次：Java 可能对同一约束给出多条相同判决。
+  const seen = new Set<string>();
+  const once = (code: string, text: string): boolean => {
+    const fingerprint = `${code}\u0000${text}`;
+    if (seen.has(fingerprint)) return false;
+    seen.add(fingerprint);
+    return true;
+  };
+  const violations: SectionLine[] = section.violations.flatMap(
+    (issue, index) =>
+      once(issue.code, issue.message)
+        ? [
+            {
+              key: `v${index}:${issue.code}`,
+              kind: "violation",
+              text: issue.message,
+            },
+          ]
+        : [],
+  );
+  const unknowns: SectionLine[] = section.unknownChecks.flatMap(
+    (issue, index) => {
+      // 未建模规则保留 Java 文案（含条数与原表位置），不走通用解释。
+      const text =
+        issue.code === UNMODELED_RULES_CODE ? issue.message : explain(issue);
+      return once(issue.code, text)
+        ? [{ key: `u${index}:${issue.code}`, kind: "unknown", text }]
+        : [];
+    },
+  );
   return [...violations, ...unknowns];
 }
 

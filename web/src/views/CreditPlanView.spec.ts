@@ -14,10 +14,12 @@ vi.mock("../api", () => ({
     listCourses: vi.fn(),
     listSessionRecords: vi.fn(),
     getSchoolProgress: vi.fn(),
+    listOfferings: vi.fn(),
   },
 }));
 
 const SNAPSHOT = "curriculum-2026";
+const OFFERING_SNAPSHOT = "offering-2026";
 
 const catalog: Course[] = [
   {
@@ -219,6 +221,7 @@ describe("凑学分选课页", () => {
       items: catalog,
       nextCursor: null,
     });
+    vi.mocked(api.listOfferings).mockReset();
   });
 
   it("shows the unmodeled cross-category rule notice verbatim", async () => {
@@ -568,5 +571,144 @@ describe("凑学分选课页", () => {
     await link.trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/plan/teachers");
+  });
+
+  /** 只在 mount 之后挂上学校报告（测试数据为虚构）。 */
+  function attachSchool(nodes: Array<Record<string, unknown>>) {
+    usePlanningStore().$patch({
+      schoolProgress: {
+        receipt: {
+          schoolProgressId: "school:fixture",
+          contentHash: "c".repeat(64),
+          importedAt: "2026-10-29T00:00:00Z",
+          reused: false,
+        },
+        snapshot: {
+          format: "coursepilot-shu-academic-progress",
+          version: 1,
+          capturedAt: "2026-10-29T00:00:00Z",
+          source: "fictional fixture",
+          nodes: nodes as never,
+          courses: [],
+        },
+        academicRecord: record,
+      },
+    });
+  }
+
+  function attachOfferingSnapshot() {
+    usePlanningStore().$patch({
+      offeringSnapshots: [
+        {
+          snapshotId: OFFERING_SNAPSHOT,
+          kind: "OFFERING",
+          state: "PUBLISHED",
+          sourceKind: "SYNTHETIC",
+          termId: "2026-27-1",
+          createdAt: "2026-10-01T00:00:00Z",
+          sourceValidation: "SYNTHETIC",
+        },
+      ],
+      selectedOfferingSnapshotId: OFFERING_SNAPSHOT,
+    });
+  }
+
+  it("uses the school report gap when the Java gap is unknown and keeps candidates selectable", async () => {
+    const { wrapper } = await mountView({ unknownGap: true });
+    attachSchool([
+      {
+        nodeId: "elective",
+        parentId: null,
+        schoolNodeId: "S1",
+        leaf: true,
+        name: "专业选修课",
+        requiredCredits: 24,
+        earnedCredits: 18,
+        remainingCredits: 6,
+      },
+    ]);
+    await flushPromises();
+    expect(wrapper.text()).toContain(
+      "按学校报告还差 6 学分；本地核对无法确认。",
+    );
+    expect(wrapper.text()).toContain("学校报告 要求 24 · 已获 18 · 还差 6");
+    expect(wrapper.text()).toContain("本地核对缺口无法确定");
+    expect(wrapper.text()).not.toContain("已修 0");
+    const firstCandidate = wrapper
+      .findAll("details.credits-category")[0]!
+      .find('input[type="checkbox"]');
+    expect((firstCandidate.element as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it("groups repeated unknown audit items into the shared summary instead of listing each one", async () => {
+    const { wrapper, store } = await mountView();
+    const notInCatalog = [1, 2, 3].map((n) => ({
+      code: "COURSE_NOT_IN_CATALOG",
+      field: null,
+      message: `课程 SYN090${n} 不在课程库中，无法归入培养要求。`,
+      retryable: false,
+    }));
+    store.$patch({
+      audit: {
+        ...audit,
+        unknowns: [...audit.unknowns, ...notInCatalog],
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find(".local-audit-summary").exists()).toBe(true);
+    expect(wrapper.text()).toContain("3 门课无法归入本专业培养要求");
+    expect(wrapper.findAll(".credits-issue")).toHaveLength(0);
+  });
+
+  it("marks candidates by whether the selected offering snapshot has sections, offered first", async () => {
+    const { wrapper } = await mountView({ interestTags: [] });
+    vi.mocked(api.listOfferings).mockImplementation(async (_c, _s, code) => {
+      if (code === "E2")
+        return {
+          status: "OK",
+          items: [{ courseCode: "E2", classId: "E2-01" } as never],
+        };
+      if (code === "E3")
+        return {
+          status: "OK",
+          items: [
+            { courseCode: "E3", classId: "E3-01" } as never,
+            { courseCode: "E3", classId: "E3-02" } as never,
+          ],
+        };
+      if (code === "E6") throw new Error("boom");
+      return { status: "OK", items: [] };
+    });
+    attachOfferingSnapshot();
+    await flushPromises();
+    const rows = wrapper
+      .findAll("details.credits-category")[0]!
+      .findAll("label.credits-check")
+      .map((label) => label.text());
+    expect(rows.map((text) => text.split(" · ")[0])).toEqual([
+      "E2",
+      "E3",
+      "E6",
+      "AI01",
+      "E4",
+    ]);
+    expect(rows[0]).toContain("本学期开 1 个班");
+    expect(rows[1]).toContain("本学期开 2 个班");
+    expect(rows[2]).toContain("开课情况无法确认");
+    expect(rows[3]).toContain("本学期未开");
+    expect(wrapper.text()).toContain("本学期开课情况暂无法确认");
+  });
+
+  it("says offering is unknown rather than not offered when the query fails", async () => {
+    const { wrapper } = await mountView({ interestTags: [] });
+    vi.mocked(api.listOfferings).mockRejectedValue(new Error("network"));
+    attachOfferingSnapshot();
+    await flushPromises();
+    const rows = wrapper
+      .findAll("details.credits-category")[0]!
+      .findAll("label.credits-check");
+    expect(rows[0]!.text()).toContain("开课情况无法确认");
+    expect(rows[0]!.text()).not.toContain("本学期未开");
+    expect(wrapper.text()).toContain("本学期开课情况暂无法确认");
   });
 });

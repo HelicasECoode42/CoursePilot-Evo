@@ -11,6 +11,7 @@ import type {
   AuditResult,
   CareerDirection,
   Course,
+  CourseOffering,
   Envelope,
   Issue,
   PlanningAnswer,
@@ -88,6 +89,14 @@ export type CourseSearch = {
 };
 export type ReviewNoteSearch = {
   items: ReviewNote[];
+  status: BusinessStatus;
+};
+/**
+ * 某开课快照里的班次。items 为空且 status 为 OK 才表示「所选快照里没有这门课」；
+ * UNKNOWN 时是无法确认，不能当作未开。
+ */
+export type OfferingListSearch = {
+  items: CourseOffering[];
   status: BusinessStatus;
 };
 
@@ -179,6 +188,18 @@ export interface CoursePilotApiClient {
     signal?: AbortSignal,
     query?: string | null,
   ): Promise<TeacherCourseOptionSearch>;
+  /**
+   * 所选开课快照里某门课的班次（只数班次，不做时间计算）。
+   * 调用的是 Java 的 listOfferings（GET /api/v1/offerings，契约要求 offeringSnapshotId）。
+   * TODO：Python 网关尚未暴露 /api/v1/offerings（tool_client 已注册 listOfferings，
+   * 路由由 agent-runtime 负责补上）；未补上前这里会得到 404，页面按「无法确认」显示。
+   */
+  listOfferings(
+    curriculumSnapshotId: string,
+    offeringSnapshotId: string,
+    courseCode: string,
+    signal?: AbortSignal,
+  ): Promise<OfferingListSearch>;
   /**
    * E4：检索课程（可选教师）的评价证据。teacherKey 传 null 表示不按教师过滤。
    * status 为 UNKNOWN 时评价资料无法确认，空数组不代表没有找到评价。
@@ -1012,6 +1033,42 @@ export class HttpApiClient implements CoursePilotApiClient {
     }
     return {
       items: data.items as TeacherCourseOption[],
+      status: businessStatus(envelope),
+    };
+  }
+
+  async listOfferings(
+    curriculumSnapshotId: string,
+    offeringSnapshotId: string,
+    courseCode: string,
+    signal?: AbortSignal,
+  ): Promise<OfferingListSearch> {
+    const { response, envelope } = await this.request(
+      withQuery("/api/v1/offerings", {
+        curriculumSnapshotId,
+        offeringSnapshotId,
+        courseCode,
+        limit: "100",
+      }),
+      { method: "GET", sessionToken: this.requireSession(), signal },
+    );
+    if (!isSuccessEnvelope(envelope)) {
+      throw errorForResponse(response.status, envelope);
+    }
+    const data = envelope.data;
+    if (
+      !isObject(data) ||
+      !Array.isArray(data.items) ||
+      !everyValid(data.items, validateCourseOffering)
+    ) {
+      throw new ApiFailure(
+        "服务返回的开课班次不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return {
+      items: data.items as CourseOffering[],
       status: businessStatus(envelope),
     };
   }

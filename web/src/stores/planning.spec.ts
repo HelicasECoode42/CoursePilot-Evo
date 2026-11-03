@@ -48,6 +48,7 @@ function fakeClient(
       items: [],
       unknownMessages: [],
     })),
+    listOfferings: vi.fn(async () => ({ items: [], status: "OK" as const })),
     clearSession: vi.fn(),
     restoreSession: vi.fn(),
     currentSessionToken: vi.fn(() => null),

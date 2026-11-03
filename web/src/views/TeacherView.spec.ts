@@ -576,6 +576,38 @@ describe("teacher comparison page", () => {
     expect(wrapper.find("li.teacher-option").exists()).toBe(false);
   });
 
+  it("labels an unverified current timetable as unverified, not unknown, and does not warn about it as an error", async () => {
+    listOptions.mockResolvedValueOnce({
+      items: [
+        {
+          courseCode: "CS103",
+          teacherKey: "teacher-zhang-01",
+          teacherDisplayName: "张伟（合成）",
+          availability: "UNKNOWN",
+          reviewNoteIds: [],
+          classIds: [],
+          courseName: "数据结构",
+          sectionCount: 3,
+          offeringSnapshotId: "OFS_fictional",
+          offeringSourceValidation: "UNVERIFIED",
+          factSource: "OFFERING_SNAPSHOT",
+        },
+      ],
+      status: "UNKNOWN",
+    });
+    const wrapper = mountPage();
+    await search(wrapper);
+
+    const row = wrapper
+      .findAll("li.teacher-option")
+      .find((item) => item.text().includes("张伟（合成）"))!;
+    expect(row.text()).toContain("本学期开课表（未核验）");
+    expect(row.text()).toContain("3 个班次");
+    expect(row.text()).not.toContain("目标学期开课状态未知");
+    expect(wrapper.text()).not.toContain("下面的教师资料无法确认");
+    expect(wrapper.text()).toContain("尚未核验");
+  });
+
   it("marks listed teachers as possibly incomplete when the teacher list is UNKNOWN", async () => {
     listOptions.mockResolvedValueOnce({
       items: [zhang, wang],

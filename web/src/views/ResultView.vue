@@ -362,6 +362,8 @@ const courseReviews = ref<
       status: "loading" | "ready" | "error";
       notes: ReviewNote[];
       unknown: boolean;
+      /** 读取失败的原因，原样显示给学生。 */
+      error?: string;
     }
   >
 >({});
@@ -413,12 +415,23 @@ async function loadCourseEvidence(courseCode: string) {
         unknown: result.status === "UNKNOWN",
       },
     };
-  } catch {
+  } catch (error) {
     courseReviews.value = {
       ...courseReviews.value,
-      [courseCode]: { status: "error", notes: [], unknown: false },
+      [courseCode]: {
+        status: "error",
+        notes: [],
+        unknown: false,
+        error: visibleError(error),
+      },
     };
   }
+}
+
+/** 推荐依据里「查看评价原文」展开时调用：已经读到过就不重复请求。 */
+function onReviewBasisLoad(courseCode: string) {
+  if (courseReviews.value[courseCode]?.status === "ready") return;
+  void loadCourseEvidence(courseCode);
 }
 
 /** 按老师读取评价：键为 课程号::教师键。只保留这门课、且 teacherKey 完全一致的记录。 */
@@ -1381,6 +1394,8 @@ async function goBackToQuestions() {
               </p>
               <CourseReviewBasis
                 :course-code="card.courseCode"
+                :review-status="courseReviews[card.courseCode]?.status ?? null"
+                :review-error="courseReviews[card.courseCode]?.error ?? ''"
                 :reason="
                   card.rationale?.reason ??
                   (card.rationaleWasChanged
@@ -1395,6 +1410,7 @@ async function goBackToQuestions() {
                 :review-note-ids="card.rationale?.reviewNoteIds ?? []"
                 :review-evidence-refs="card.rationale?.reviewEvidenceRefs ?? []"
                 :review-notes="courseReviews[card.courseCode]?.notes ?? []"
+                @load="onReviewBasisLoad(card.courseCode)"
               />
               <details @toggle="onEvidenceToggle(card, $event)">
                 <summary>查看评价维度汇总与资料</summary>

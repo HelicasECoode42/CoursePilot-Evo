@@ -13,7 +13,25 @@ const props = defineProps<{
   reviewNoteIds: string[];
   reviewEvidenceRefs?: Array<{ reviewNoteId: string; sourceRefId: string }>;
   reviewNotes: ReviewNote[];
+  /** 原文读取状态：null 表示还没请求过。 */
+  reviewStatus?: "loading" | "ready" | "error" | null;
+  /** 读取失败时的原因（服务端或网络给出的文字），原样显示。 */
+  reviewError?: string;
 }>();
+const emit = defineEmits<{ load: [] }>();
+
+/** 展开「查看评价原文」时才请求；已经读过就不再发请求。 */
+function onLoadToggle(event: globalThis.Event) {
+  const target = event.target as { open?: boolean } | null;
+  if (target?.open === true && !props.reviewStatus) emit("load");
+}
+/** 读取后仍对不上的编号：说明原文没找到，而不是继续显示「尚未加载」。 */
+const missingRefs = computed(() =>
+  evidenceRefs.value.filter(
+    (ref) =>
+      !props.reviewNotes.some((note) => note.reviewNoteId === ref.reviewNoteId),
+  ),
+);
 const citedNotes = computed(() =>
   props.reviewNotes.filter((note) =>
     props.reviewNoteIds.includes(note.reviewNoteId),
@@ -81,9 +99,28 @@ const SOURCE_LABEL: Record<ReviewNote["sourceKind"], string> = {
       "
     >
       <p v-if="evidenceRefs.length > 0" class="microcopy">
-        已关联 {{ evidenceRefs.length }} 条评价记录，原文尚未加载。
+        已关联 {{ evidenceRefs.length }} 条评价记录。
       </p>
       <p v-else class="microcopy">已引用评价记录；该旧答复未附来源引用。</p>
+      <details
+        v-if="evidenceRefs.length > 0"
+        class="microcopy"
+        @toggle="onLoadToggle"
+      >
+        <summary>查看评价原文</summary>
+        <p v-if="reviewStatus === 'loading'" role="status">正在读取评价原文…</p>
+        <p
+          v-else-if="reviewStatus === 'error'"
+          class="notice notice--error"
+          role="alert"
+        >
+          读取评价原文失败：{{ reviewError || "原因未知，请稍后重试。" }}
+        </p>
+        <p v-else-if="reviewStatus === 'ready'">
+          评价库中没有找到这 {{ missingRefs.length }} 条记录的原文（编号见下）。
+        </p>
+        <p v-else>展开后读取评价原文。</p>
+      </details>
       <details class="microcopy">
         <summary>查看评价来源引用</summary>
         <ul v-if="evidenceRefs.length > 0">
@@ -111,9 +148,17 @@ const SOURCE_LABEL: Record<ReviewNote["sourceKind"], string> = {
       "
       class="microcopy"
     >
-      另有 {{ uncachedEvidenceRefs.length }} 条已引用评价尚未加载原文。
-      <details>
-        <summary>查看未加载记录来源</summary>
+      另有 {{ uncachedEvidenceRefs.length }} 条已引用评价尚未显示原文。
+      <details @toggle="onLoadToggle">
+        <summary>查看未显示记录的来源</summary>
+        <p v-if="reviewStatus === 'loading'" role="status">正在读取评价原文…</p>
+        <p
+          v-else-if="reviewStatus === 'error'"
+          class="notice notice--error"
+          role="alert"
+        >
+          读取评价原文失败：{{ reviewError || "原因未知，请稍后重试。" }}
+        </p>
         <ul>
           <li v-for="ref in uncachedEvidenceRefs" :key="ref.reviewNoteId">
             {{ reviewSourceLabel(ref.sourceRefId) }}

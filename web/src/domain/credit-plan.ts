@@ -11,6 +11,7 @@
  */
 
 import type { AuditItem, Course } from "../contracts";
+import type { SchoolProgressNode } from "./school-progress";
 
 /** 补齐建议最多由几门课组成。 */
 export const MAX_SUGGESTION_COURSES = 4;
@@ -43,12 +44,56 @@ export type CategoryPlanState =
   | "UNKNOWN_GAP"
   | "NO_CATEGORY";
 
+/**
+ * 学校报告里与本类别唯一对应的节点数字。学校数字只作参考来源，保留学校原值。
+ * 没有唯一对应（无此类别，或父子同名）时整体为 null，不猜。
+ */
+export interface SchoolCategoryGap {
+  schoolNodeId: string | null;
+  requiredCredits: number | null;
+  earnedCredits: number | null;
+  remainingCredits: number | null;
+}
+
+/**
+ * 按类别名在学校报告里找唯一节点。找不到或重名（例如父子同名「专业选修课」）都返回 null，
+ * 不挑一个来用。
+ */
+export function schoolCategoryGap(
+  category: string | null,
+  nodes: readonly SchoolProgressNode[],
+): SchoolCategoryGap | null {
+  if (category === null) return null;
+  const wanted = category.trim();
+  const matches = nodes.filter((node) => node.name.trim() === wanted);
+  if (matches.length !== 1) return null;
+  const node = matches[0]!;
+  return {
+    schoolNodeId: node.schoolNodeId,
+    requiredCredits: node.requiredCredits,
+    earnedCredits: node.earnedCredits,
+    remainingCredits: node.remainingCredits,
+  };
+}
+
+/**
+ * gapCredits 的来源：JAVA 为本地核对给出的缺口；SCHOOL 表示本地核对无法确定，
+ * 账本改用学校报告的剩余学分（页面必须注明「本地核对无法确认」）。
+ */
+export type GapSource = "JAVA" | "SCHOOL";
+
 export interface CategoryCreditPlan {
   requirementId: string;
   category: string | null;
   requiredCredits: number | null;
   earnedCredits: number | null;
+  /** 账本使用的缺口：Java 有值用 Java，否则用学校报告的剩余学分，两者都没有为 null。 */
   gapCredits: number | null;
+  gapSource: GapSource | null;
+  /** Java 本地核对给出的缺口（不论学校报告如何），供页面说明「本地核对」一侧。 */
+  javaGapCredits: number | null;
+  /** 与本类别唯一对应的学校报告数字；没有则为 null。 */
+  school: SchoolCategoryGap | null;
   state: CategoryPlanState;
   /** 可计入凑分的候选，按相关度、再按课程号排序。 */
   countable: PlanCourse[];
@@ -101,13 +146,25 @@ export function buildCategoryPlan(
   courses: readonly Course[],
   completedCodes: ReadonlySet<string>,
   interestTags: readonly string[],
+  school: SchoolCategoryGap | null = null,
 ): CategoryCreditPlan {
+  const schoolRemaining = school?.remainingCredits ?? null;
+  const gapCredits = requirement.gapCredits ?? schoolRemaining;
+  const gapSource: GapSource | null =
+    requirement.gapCredits !== null
+      ? "JAVA"
+      : schoolRemaining !== null
+        ? "SCHOOL"
+        : null;
   const base = {
     requirementId: requirement.requirementId,
     category: requirement.category,
     requiredCredits: requirement.requiredCredits,
     earnedCredits: requirement.earnedCredits,
-    gapCredits: requirement.gapCredits,
+    gapCredits,
+    gapSource,
+    javaGapCredits: requirement.gapCredits,
+    school,
   };
   if (requirement.category === null) {
     return { ...base, state: "NO_CATEGORY", countable: [], uncountable: [] };
@@ -167,8 +224,8 @@ export function buildCategoryPlan(
   );
 
   let state: CategoryPlanState = "NEEDS_CREDITS";
-  if (requirement.gapCredits === null) state = "UNKNOWN_GAP";
-  else if (requirement.gapCredits <= 0) state = "SATISFIED";
+  if (gapCredits === null) state = "UNKNOWN_GAP";
+  else if (gapCredits <= 0) state = "SATISFIED";
   return { ...base, state, countable, uncountable };
 }
 

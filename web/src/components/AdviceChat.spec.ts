@@ -73,4 +73,22 @@ describe("advice chat suggestions", () => {
     expect(store.draft.selectedCourseCodes).toEqual(["08306099"]);
     expect(store.draft.preferredCourseCodes).toEqual([]);
   });
+
+  it("keeps the conversation in a fixed-height box and scrolls it to the newest message", async () => {
+    const wrapper = mount(AdviceChat);
+    const box = wrapper.get(".advice-chat__scroll").element as HTMLElement;
+    Object.defineProperty(box, "scrollHeight", {
+      configurable: true,
+      value: 900,
+    });
+    store.$patch({
+      adviceMessages: [
+        ...store.adviceMessages,
+        { role: "user", text: "再问一个问题" },
+      ],
+    });
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    expect(box.scrollTop).toBe(900);
+  });
 });

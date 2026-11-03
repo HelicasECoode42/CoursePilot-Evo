@@ -114,3 +114,59 @@ describe("plan verification sections", () => {
     expect(hasSections({ ...base, sections: [section({})] })).toBe(true);
   });
 });
+
+describe("分项未知项去重", () => {
+  it("lists one line for identical unknown items repeated by the verifier", () => {
+    const repeated: Issue = {
+      code: "CONSTRAINT_UNVERIFIABLE",
+      message: "CONSTRAINT_UNVERIFIABLE: 必避时段缺少已核验班次时间",
+      field: "constraints",
+      retryable: false,
+    };
+    const lines = sectionLines(
+      section({
+        scope: "TIMETABLE",
+        verdict: "UNKNOWN",
+        unknownChecks: [repeated, { ...repeated }],
+      }),
+      () => "时间类条件（例如必避时段）无法确认",
+    );
+    expect(lines.map((line) => line.text)).toEqual([
+      "时间类条件（例如必避时段）无法确认",
+    ]);
+  });
+
+  it("merges items whose different raw messages explain to the same sentence", () => {
+    const first: Issue = {
+      code: "CONSTRAINT_UNVERIFIABLE",
+      message: "约束 A 无法核验",
+      field: null,
+      retryable: false,
+    };
+    const second: Issue = { ...first, message: "约束 B 无法核验" };
+    const lines = sectionLines(
+      section({
+        scope: "TIMETABLE",
+        verdict: "UNKNOWN",
+        unknownChecks: [first, second],
+      }),
+      () => "时间类条件（例如必避时段）无法确认",
+    );
+    expect(lines).toHaveLength(1);
+  });
+
+  it("keeps distinct unknown items", () => {
+    const lines = sectionLines(
+      section({
+        scope: "TIMETABLE",
+        verdict: "UNKNOWN",
+        unknownChecks: [
+          { code: "A", message: "甲", field: null, retryable: false },
+          { code: "B", message: "乙", field: null, retryable: false },
+        ],
+      }),
+      (issue) => issue.message,
+    );
+    expect(lines.map((line) => line.text)).toEqual(["甲", "乙"]);
+  });
+});

@@ -67,4 +67,87 @@ describe("CourseReviewBasis", () => {
     });
     expect(wrapper.text()).toContain("该课程有评价记录，但本条理由未引用评价");
   });
+
+  it("asks the page to load review originals when the evidence details are opened", async () => {
+    const wrapper = mount(CourseReviewBasis, {
+      props: {
+        ...base,
+        reviewBasisStatus: "HAS_EVIDENCE",
+        reviewNoteIds: ["review-1"],
+        reviewEvidenceRefs: [
+          { reviewNoteId: "review-1", sourceRefId: "winter-pdf:p3-p4:l8-l12" },
+        ],
+      },
+    });
+    const details = wrapper
+      .findAll("details")
+      .find((d) => d.text().includes("查看评价原文"))!;
+    expect(details.text()).toContain("展开后读取评价原文");
+    details.element.open = true;
+    await details.trigger("toggle");
+    expect(wrapper.emitted("load")).toHaveLength(1);
+  });
+
+  it("shows why loading the originals failed, not a generic pending line", () => {
+    const wrapper = mount(CourseReviewBasis, {
+      props: {
+        ...base,
+        reviewBasisStatus: "HAS_EVIDENCE",
+        reviewNoteIds: ["review-1"],
+        reviewEvidenceRefs: [
+          { reviewNoteId: "review-1", sourceRefId: "winter-pdf:p3-p4:l8-l12" },
+        ],
+        reviewStatus: "error",
+        reviewError: "暂时无法完成请求，请稍后重试。",
+      },
+    });
+    expect(wrapper.text()).toContain("读取评价原文失败：暂时无法完成请求");
+    expect(wrapper.text()).not.toContain("尚未加载");
+  });
+
+  it("says the originals were not found once a load has finished without them", () => {
+    const wrapper = mount(CourseReviewBasis, {
+      props: {
+        ...base,
+        reviewBasisStatus: "HAS_EVIDENCE",
+        reviewNoteIds: ["review-1"],
+        reviewEvidenceRefs: [
+          { reviewNoteId: "review-1", sourceRefId: "winter-pdf:p3-p4:l8-l12" },
+        ],
+        reviewStatus: "ready",
+        reviewNotes: [],
+      },
+    });
+    expect(wrapper.text()).toContain("评价库中没有找到这 1 条记录的原文");
+  });
+
+  it("shows the excerpt once the matching original is passed in", () => {
+    const wrapper = mount(CourseReviewBasis, {
+      props: {
+        ...base,
+        reviewBasisStatus: "HAS_EVIDENCE",
+        reviewNoteIds: ["review-1"],
+        reviewEvidenceRefs: [
+          { reviewNoteId: "review-1", sourceRefId: "winter-pdf:p3-p4:l8-l12" },
+        ],
+        reviewStatus: "ready",
+        reviewNotes: [
+          {
+            reviewNoteId: "review-1",
+            courseCode: "CS101",
+            teacherKey: null,
+            termId: null,
+            sourceKind: "SYNTHETIC",
+            publishedAt: null,
+            sourceUrl: null,
+            excerpt: "示例评价原文（虚构）",
+            dimensions: ["WORKLOAD"],
+            matchStatus: "COURSE_ONLY",
+            sourceRefId: "winter-pdf:p3-p4:l8-l12",
+          },
+        ],
+      },
+    });
+    expect(wrapper.text()).toContain("示例评价原文（虚构）");
+  });
 });
