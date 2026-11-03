@@ -1,0 +1,11 @@
+{
+  "caseId": "G2-005",
+  "groupId": "G2",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G2-005-planning-request.json",
+  "userQuery": "周三下午我有固定的实习安排，课绝对不能排在周三下午。另外我不想连着上四节大课，最好也别排晚上的课。还有我想上王老师的课。你能保证这三条都满足吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：约束清单与学生原话均为虚构 fixture。硬约束与软偏好的区分依据来源于意图契约里的 Constraint 与 motives 两类字段。"
+}

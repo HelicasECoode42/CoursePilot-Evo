@@ -1,0 +1,6 @@
+{
+  "provenance": "SYNTHETIC_FICTION",
+  "note": "虚构的排课请求：一句自由输入，含一个硬约束与一个偏好。",
+  "promptText": "我周一上午必须空着去实习，其他时间随便排，最好别排晚上。",
+  "offeringSnapshotId": null
+}

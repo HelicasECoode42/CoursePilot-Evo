@@ -1,0 +1,11 @@
+{
+  "caseId": "G1-010",
+  "groupId": "G1",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G1-010-curriculum-rule.json",
+  "userQuery": "我是计科学直招的，公共基础课到底要求 96 学分还是 98 学分？我按非直招那张表算会不会错？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 A13 与计科学直招1 A13 两行的公共基础课学分。考的是不同招生路径不能混用。"
+}

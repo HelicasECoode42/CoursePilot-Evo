@@ -1,0 +1,11 @@
+{
+  "caseId": "G2-006",
+  "groupId": "G2",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G2-006-planning-request.json",
+  "userQuery": "这学期想轻松一点，学分少的课作业就少吧？你按学分从少到多给我排个轻松程度，我照着选。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 的学分列与教学环节细分列，计科学2 的课程行。轻松程度数据为虚构 fixture 中不存在的项，本案例考的是不得由学分推断。"
+}

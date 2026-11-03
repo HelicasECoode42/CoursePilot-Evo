@@ -1,0 +1,11 @@
+{
+  "caseId": "G3-004",
+  "groupId": "G3",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": "synth-g3-004-replan-1",
+  "inputFixtureRef": "benchmark/cases/fixtures/G3-004-replan-input.json",
+  "userQuery": "我本来打算三年半毕业，现在改了：四年级秋季学期我想少选课，留一整个学期去实习。方案要怎么改？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科3 C26/E26/L26/M26（毕业设计(论文) 24 学分，四(春1-16)，第12学期）+ 计科学2 N34/O34/P34/Y34 与 N38/O38/P38/Y38（两门排在四(秋)的专业选修）+ 人造班次快照（SYNTHETIC）。考的是改目标后重算与冲突复查；模拟快照不得宣称真实排课能力。"
+}

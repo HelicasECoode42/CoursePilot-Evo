@@ -1,0 +1,11 @@
+{
+  "caseId": "G1-008",
+  "groupId": "G1",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G1-008-curriculum-rule.json",
+  "userQuery": "通识课那一行写着「通识课12」，学分栏写「8+4」，到底要求多少学分？8+4 是 12 学分的意思吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 A6 类别名、F6 学分写法，以及 A49 的 ▲ 注。考的是类别合计与学期要求不能混读。"
+}

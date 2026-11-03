@@ -1,0 +1,11 @@
+{
+  "caseId": "G2-010",
+  "groupId": "G2",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G2-010-career-goal.json",
+  "userQuery": "我想做算法岗，帮我挑点有用的课。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考岗位目标到课程的映射不存在时不得编造。"
+}

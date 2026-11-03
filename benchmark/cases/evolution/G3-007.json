@@ -1,0 +1,11 @@
+{
+  "caseId": "G3-007",
+  "groupId": "G3",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G3-007-odd-even.json",
+  "userQuery": "《数据结构实验》是单周上课，《Python计算》是双周上课，两门会撞吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考单双周冲突判断需要班次数据；没有快照时应答未知。"
+}

@@ -1,0 +1,11 @@
+{
+  "caseId": "G2-008",
+  "groupId": "G2",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G2-008-high-gpa.json",
+  "userQuery": "我想拿高绩点，你帮我安排下学期的课。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考歧义不清就反问：『高绩点』未说明含义，且学校不发布成绩分布。"
+}

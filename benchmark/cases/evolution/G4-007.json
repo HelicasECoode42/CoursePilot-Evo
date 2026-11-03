@@ -1,0 +1,11 @@
+{
+  "caseId": "G4-007",
+  "groupId": "G4",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G4-007-unpublished-rule.json",
+  "userQuery": "我辅修的学分能抵专业选修吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考未发布规则：语料没有辅修认定规则时应答未知，不编造。"
+}

@@ -1,0 +1,11 @@
+{
+  "caseId": "G4-009",
+  "groupId": "G4",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G4-009-subjective-review.json",
+  "userQuery": "听说这位老师不点名，是真的吗？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考主观评价：只能作参考并标来源与修读学期，不得当作本学期事实。"
+}

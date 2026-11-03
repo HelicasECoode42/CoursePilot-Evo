@@ -1,6 +1,6 @@
 {
   "provenance": "SYNTHETIC_FICTION",
-  "note": "虚构的已修记录：只覆盖一年级三个学期，不含本学期计划，也不含不及格记录。",
+  "note": "虚构的已修记录：只覆盖一年级三个学期，不含本学期计划，也不含不及格记录。 已修课程 scorePassed 全为 true，据此写 outcome=PASSED。",
   "termId": "2025-2026-1",
   "termLabel": "二(秋)",
   "studentTerm": 4,
@@ -12,7 +12,8 @@
       "credits": 6.0,
       "category": "公共基础课",
       "termIndex": 1,
-      "scorePassed": true
+      "scorePassed": true,
+      "outcome": "PASSED"
     },
     {
       "courseCode": "00864088",
@@ -20,7 +21,8 @@
       "credits": 4.0,
       "category": "公共基础课",
       "termIndex": 1,
-      "scorePassed": true
+      "scorePassed": true,
+      "outcome": "PASSED"
     },
     {
       "courseCode": "00944008",
@@ -28,7 +30,8 @@
       "credits": 2.0,
       "category": "公共基础课",
       "termIndex": 1,
-      "scorePassed": true
+      "scorePassed": true,
+      "outcome": "PASSED"
     },
     {
       "courseCode": "01014126",
@@ -36,7 +39,8 @@
       "credits": 6.0,
       "category": "公共基础课",
       "termIndex": 2,
-      "scorePassed": true
+      "scorePassed": true,
+      "outcome": "PASSED"
     },
     {
       "courseCode": "01014104",
@@ -44,7 +48,8 @@
       "credits": 3.0,
       "category": "公共基础课",
       "termIndex": 2,
-      "scorePassed": true
+      "scorePassed": true,
+      "outcome": "PASSED"
     },
     {
       "courseCode": "01014127",
@@ -52,7 +57,8 @@
       "credits": 4.0,
       "category": "公共基础课",
       "termIndex": 3,
-      "scorePassed": true
+      "scorePassed": true,
+      "outcome": "PASSED"
     },
     {
       "courseCode": "01034117",
@@ -60,7 +66,8 @@
       "credits": 4.0,
       "category": "公共基础课",
       "termIndex": 3,
-      "scorePassed": true
+      "scorePassed": true,
+      "outcome": "PASSED"
     }
   ],
   "plannedCredits": null,

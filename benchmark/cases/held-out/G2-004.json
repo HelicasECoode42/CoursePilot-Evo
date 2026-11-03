@@ -1,0 +1,11 @@
+{
+  "caseId": "G2-004",
+  "groupId": "G2",
+  "split": "held-out",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G2-004-planning-request.json",
+  "userQuery": "我想选给分高的课，你推荐几门。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：人工题面 + 计科学2 第3行表头（培养方案只有课程编号/名称/学分/学期/备注，没有成绩分布字段）+ docs/01、docs/10 对评价入口的说明。考的是「给分高」的歧义澄清、不编造成绩数据，以及唯一可参考的主观来源是选课小本本。"
+}

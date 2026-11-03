@@ -1,0 +1,11 @@
+{
+  "caseId": "G1-007",
+  "groupId": "G1",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G1-007-curriculum-rule.json",
+  "userQuery": "培养方案里《微积分(1-3)》那行的课程编号写的是 01014125~127，学分 16。这是一门课还是三门课？16 学分怎么分摊到每个学期？",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "来源：计科学1 的微积分行（B34 合上编号、E34 课程名、F34 学分）。考的是合上编号不能自行拆学期，也不能编造分学期学分。"
+}

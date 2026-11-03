@@ -1,0 +1,11 @@
+{
+  "caseId": "G3-008",
+  "groupId": "G3",
+  "split": "evolution",
+  "curriculumSnapshotId": "3c405feaa6d7",
+  "offeringSnapshotId": null,
+  "inputFixtureRef": "benchmark/cases/fixtures/G3-008-replan.json",
+  "userQuery": "我原来按四年毕业排的方案，现在大三下要整学期去实习，帮我重排一下。",
+  "rubricVersion": "rubric-d1-v1",
+  "notes": "考 replan：目标改变后原方案必须重算，不能沿用。"
+}
