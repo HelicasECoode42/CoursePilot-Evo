@@ -38,7 +38,9 @@ PlanSectionScope = Literal["TIMETABLE", "CURRICULUM"]
 
 
 class PlanSection(DomainModel):
-    """contracts: PlanSection。TIMETABLE 本学期课表 / CURRICULUM 毕业要求；verdict 只由本分项的列表推出。"""
+    """contracts: PlanSection。
+    TIMETABLE 本学期课表 / CURRICULUM 毕业要求；verdict 只由本分项的列表推出。
+    """
 
     scope: PlanSectionScope
     verdict: Verdict
@@ -80,7 +82,9 @@ class PlanValidation(DomainModel):
         if not self.sections:
             return self
         verdicts = {section.verdict for section in self.sections}
-        worst = "INVALID" if "INVALID" in verdicts else "UNKNOWN" if "UNKNOWN" in verdicts else "VALID"
+        worst = (
+            "INVALID" if "INVALID" in verdicts else "UNKNOWN" if "UNKNOWN" in verdicts else "VALID"
+        )
         if self.verdict != worst:
             raise ValueError(f"verdict must equal the worst section verdict ({worst})")
         return self
