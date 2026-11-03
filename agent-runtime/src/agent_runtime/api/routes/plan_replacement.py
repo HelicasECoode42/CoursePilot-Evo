@@ -13,6 +13,7 @@ Replace still does not invent a ``PlanValidation``. The returned
 from __future__ import annotations
 
 import json
+import re
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request
@@ -27,7 +28,7 @@ from agent_runtime.api.deps import (
 from agent_runtime.api.errors import InvalidInputError, NotFoundError, envelope
 from agent_runtime.api.idempotency import IdempotencyStore
 from agent_runtime.api.schemas import DomainModel, Issue, SessionPlanCourseRemovalRequest
-from agent_runtime.api.schemas._base import Id
+from agent_runtime.api.schemas._base import ID_PATTERN, Id
 from agent_runtime.application.ids import digest
 from agent_runtime.application.plan_replacement import (
     CourseNotInPlan,
@@ -103,6 +104,16 @@ def search_session_offerings(
     plans: Annotated[SessionPlanStore, Depends(get_plan_store)],
     tool_client: Annotated[Any, Depends(get_tool_client)],
 ) -> dict:
+    # A course name typed into the search box is not a course code. It used to reach
+    # the Id pattern check inside the handler, which is not an envelope path, so the
+    # client saw a bare 500. Answer with the same 422 envelope as other bad input.
+    if re.fullmatch(ID_PATTERN, course_code) is None:
+        raise InvalidInputError(
+            "请输入课程号（例如 08305014），按课程名搜索暂不支持",
+            field="courseCode",
+        )
+    if re.fullmatch(ID_PATTERN, previous_plan_id) is None:
+        raise InvalidInputError("方案编号格式不对", field="previousPlanId")
     query = OfferingQuery(previousPlanId=previous_plan_id, courseCode=course_code)
     context = make_context(request, subject_id, x_request_id)
     service = PlanReplacement(plans, cast(Any, tool_client))

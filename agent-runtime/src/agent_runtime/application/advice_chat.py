@@ -150,6 +150,9 @@ class AdviceChatService:
         if not usable:
             raise InvalidInputError("培养方案来源与当前模式不匹配", field="curriculumSnapshotId")
 
+        # Taken status from the school report counts even when the report is not used as
+        # a fact for this turn (mismatch below); see course_scope.build_course_scope.
+        school_for_taken = progress
         if progress and (
             progress.academicRecord.curriculumSnapshotId != request.curriculumSnapshotId
             or (
@@ -191,26 +194,23 @@ class AdviceChatService:
         courses = [item for item in all_courses if isinstance(item, Course)]
 
         from agent_runtime.domain.policies.course_scope import (
-            eligible_course_codes,
-            school_gap_categories,
+            build_course_scope,
             school_taken_codes,
         )
 
         record_courses = list(record.completedCourses) if record else []
-        # 学校报告只在本轮与培养方案/学业记录一致时使用；缺口与 Java 审计分开表述。
-        report_gaps = (
-            school_gap_categories(progress.snapshot.nodes, {c.category for c in courses})
-            if progress
-            else frozenset()
-        )
-        report_taken = school_taken_codes(progress.snapshot.courses) if progress else frozenset()
-        allowed = eligible_course_codes(
+        # 学校报告的缺口只在本轮与培养方案/学业记录一致时使用；缺口与 Java 审计分开表述。
+        scope = build_course_scope(
             courses,
             record_courses,
+            school_taken=(
+                school_taken_codes(school_for_taken.snapshot.courses) if school_for_taken else ()
+            ),
+            school_nodes=progress.snapshot.nodes if progress else (),
+            school_courses=progress.snapshot.courses if progress else (),
             explicitly_selected=request.selectedCourseCodes,
-            gap_categories=report_gaps,
-            school_taken_codes=report_taken,
         )
+        allowed = scope.eligible
         if not record:
             # No Java academic record matches this curriculum in the current session.
             unknowns = [
@@ -286,7 +286,7 @@ class AdviceChatService:
             key=lambda course: (
                 course.courseCode not in request.selectedCourseCodes,
                 course.courseCode not in request.preferredCourseCodes,
-                course.category not in report_gaps,
+                scope.gap_leaf_for(course.courseCode) is None,
                 -_bigram_relevance(context_terms, f"{course.name} {course.category}"),
                 course.courseCode,
             ),
@@ -336,9 +336,8 @@ class AdviceChatService:
             "schoolProgress": self._model_progress(progress),
             # 学校报告的剩余学分（来源：学校报告），与 Java 审计结果分开给出。
             "schoolReportGaps": [
-                {"category": node.name, "remainingCredits": str(node.remainingCredits)}
-                for node in (progress.snapshot.nodes if progress else [])
-                if node.name in report_gaps
+                {"category": leaf.name, "remainingCredits": leaf.remaining_credits}
+                for leaf in scope.gap_leaves
             ],
             "availableCourses": available_courses,
             "reviews": {

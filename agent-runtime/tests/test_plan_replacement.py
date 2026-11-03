@@ -743,3 +743,22 @@ def test_planning_http_hides_another_sessions_plan() -> None:
     assert response.status_code == 404
     assert response.json()["issues"][0]["message"] == "方案不在当前会话"
     assert response.json()["issues"][0]["field"] == "previousPlanId"
+
+
+def test_search_with_a_course_name_is_a_422_envelope_not_a_server_error() -> None:
+    tools = ScriptedTools()
+    client = _app(tools)
+    session_id, token = _session(client)
+    _remember(client.app, session_id)
+
+    response = client.get(
+        "/api/v1/session-offerings",
+        params={"previousPlanId": "plan:old", "courseCode": "数据库"},
+        headers=_headers(token, key=None),
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["status"] == "INVALID_INPUT"
+    assert body["issues"][0]["field"] == "courseCode"
+    assert tools.calls == []

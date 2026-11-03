@@ -73,9 +73,8 @@ from agent_runtime.domain.policies.candidate_guard import (
 )
 from agent_runtime.domain.policies.clarification_policy import ClarificationPolicy
 from agent_runtime.domain.policies.course_scope import (
-    eligible_course_codes,
+    build_course_scope,
     requirement_nature,
-    school_gap_categories,
     school_taken_codes,
 )
 from agent_runtime.domain.policies.intent_resolver import IntentResolver
@@ -244,15 +243,32 @@ class PlanningRunner:
             if item.teacherKey is None and item.courseCode in required_teachers:
                 item = item.model_copy(update={"teacherKey": required_teachers[item.courseCode]})
             items.append(item)
+        # Offered professional required courses go into the plan before any elective
+        # (docs/38 section 6). They are added here, not left to the model's choice.
+        limit = self._harness.context.max_recommended_courses
+        required_codes, required_issues = self._required_courses(
+            request, facts, offering, pinned_codes, limit=max(limit - len(pinned_codes), 0)
+        )
+        offering_issues.extend(required_issues)
+        required_set = set(required_codes)
+        model_codes = {item.courseCode for item in items}
+        for code in required_codes:
+            if code not in model_codes:
+                items.append(
+                    PlanItem(
+                        courseCode=code,
+                        teacherKey=required_teachers.get(code),
+                        classId=None,
+                    )
+                )
         # The reply is kept short (context_policy max_recommended_courses). Extra model
         # picks are trimmed from the end of the model's own order and reported, never
-        # silently. Student pins are not trimmed and do not count against the limit.
-        limit = self._harness.context.max_recommended_courses
-        free_slots = max(limit - len(pinned_codes), 0)
+        # silently. Student pins and placed required courses are not trimmed.
+        free_slots = max(limit - len(pinned_codes) - len(required_set), 0)
         kept: list[PlanItem] = []
         trimmed: list[str] = []
         for item in items:
-            if item.courseCode in pinned_codes:
+            if item.courseCode in pinned_codes or item.courseCode in required_set:
                 kept.append(item)
             elif free_slots > 0:
                 kept.append(item)
@@ -264,7 +280,10 @@ class PlanningRunner:
             offering_issues.append(
                 Issue(
                     code="RECOMMENDATION_LIMIT_TRIMMED",
-                    message=f"推荐课程超过 {limit} 门，只保留前 {limit} 门（学生指定课程不裁剪）",
+                    message=(
+                        f"推荐课程超过 {limit} 门，只保留前 {limit} 门"
+                        "（学生指定课程和已排入的专业必修课不裁剪）"
+                    ),
                     field="items",
                     retryable=False,
                 )
@@ -288,8 +307,17 @@ class PlanningRunner:
                     )
                 )
                 selected.add(constraint.courseCode)
-        # Pinned courses first, then the model's picks in their own order (stable sort).
-        items.sort(key=lambda item: item.courseCode not in pinned_codes)
+        # Pinned courses first, then placed required courses, then the model's picks in
+        # their own order (stable sort).
+        items.sort(
+            key=lambda item: (
+                0
+                if item.courseCode in pinned_codes
+                else 1
+                if item.courseCode in required_set
+                else 2
+            )
+        )
         if len(items) > 30:
             raise ModelInvalidOutput("推荐课程和学生所选课程合计超过 30 门")
         items, facts, section_issues = self._assign_sections(
@@ -378,7 +406,13 @@ class PlanningRunner:
             rationale = provided_rationales.get(item.courseCode)
             # A course Java says is not offered this term gets the fact text, whatever
             # the model wrote: the model never saw it as a candidate.
-            from_model = rationale is not None and fact.offered_this_term is not False
+            # A required course's wording is fixed by the facts: the reason must say
+            # 专业必修课, which a model reply may not.
+            from_model = (
+                rationale is not None
+                and fact.offered_this_term is not False
+                and fact.requirement_nature != "必修"
+            )
             if not from_model:
                 rationale = CourseRationale(
                     courseCode=item.courseCode,
@@ -540,28 +574,22 @@ class PlanningRunner:
             and school_result_matches_curriculum
             else None
         )
-        report_gaps = (
-            school_gap_categories(report_snapshot.nodes, {c.category for c in courses})
-            if report_snapshot is not None
-            else frozenset()
-        )
-        report_taken = (
-            school_taken_codes(report_snapshot.courses)
-            if report_snapshot is not None
-            else frozenset()
-        )
-        course_codes = eligible_course_codes(
+        # Taken status comes from the school report even when its record id differs from
+        # this request: a course the student is taking is never a candidate.
+        scope = build_course_scope(
             courses,
             record.completedCourses,
-            pinned,
-            gap_categories=report_gaps,
-            school_taken_codes=report_taken,
+            school_taken=(
+                school_taken_codes(school_result.snapshot.courses)
+                if school_result is not None
+                else ()
+            ),
+            school_nodes=report_snapshot.nodes if report_snapshot is not None else (),
+            school_courses=report_snapshot.courses if report_snapshot is not None else (),
+            explicitly_selected=pinned,
         )
-        taken_course_codes = {
-            course.courseCode
-            for course in record.completedCourses
-            if course.outcome in {"PASSED", "IN_PROGRESS"}
-        } | set(report_taken)
+        course_codes = scope.eligible
+        taken_course_codes = set(scope.taken)
         uncertain_course_codes = sorted(
             {course.courseCode for course in record.completedCourses if course.outcome == "UNKNOWN"}
         )
@@ -590,9 +618,8 @@ class PlanningRunner:
                 ],
                 # 学校报告中仍有剩余学分的类别（只按类别名精确匹配目录类别）。
                 "gapCategories": [
-                    {"category": node.name, "remainingCredits": str(node.remainingCredits)}
-                    for node in snapshot.nodes
-                    if node.name in report_gaps
+                    {"category": leaf.name, "remainingCredits": leaf.remaining_credits}
+                    for leaf in scope.gap_leaves
                 ],
             }
         options = cast(
@@ -621,12 +648,13 @@ class PlanningRunner:
         interest_text = (request.promptText + " " + " ".join(request.intent.interestTags)).lower()
         grams = {interest_text[i : i + 2] for i in range(len(interest_text) - 1)}
 
-        def course_order(course: Course) -> tuple[int, int, int, str]:
+        def course_order(course: Course) -> tuple[int, int, int, int, str]:
             name = course.name.lower()
             relevance = sum(1 for gram in grams if gram.strip() and gram in name)
             return (
                 0 if course.courseCode in pinned else 1,
-                0 if course.category in report_gaps else 1,
+                0 if course.courseCode in scope.required else 1,
+                0 if scope.gap_leaf_for(course.courseCode) is not None else 1,
                 -relevance,
                 course.courseCode,
             )
@@ -649,15 +677,7 @@ class PlanningRunner:
             )
         offered_codes = frozenset(offering.offered) if offering is not None else frozenset()
         section_rows = offering.rows_by_course if offering is not None else {}
-        gap_credits = (
-            {
-                node.name: str(node.remainingCredits)
-                for node in report_snapshot.nodes
-                if node.name in report_gaps and node.remainingCredits is not None
-            }
-            if report_snapshot is not None
-            else {}
-        )
+        gap_credits = {code: leaf.remaining_credits for code, leaf in scope.gap_by_code.items()}
 
         def offered_flag(code: str) -> bool | None:
             if offering is None:
@@ -689,7 +709,7 @@ class PlanningRunner:
                     )
                 ),
                 requirement_nature=requirement_nature(course.category),
-                school_gap_credits=gap_credits.get(course.category),
+                school_gap_credits=gap_credits.get(course.courseCode),
             )
             for course in ordered_courses
             if offering is None or course.courseCode in offered_codes or course.courseCode in pinned
@@ -718,6 +738,7 @@ class PlanningRunner:
                 reviews_queried_for=frozenset(reviews_queried_for),
                 offering_checked=offering is not None,
                 offered_course_codes=offered_codes,
+                required_course_codes=scope.required,
             ),
             {
                 "availability": (
@@ -1113,11 +1134,104 @@ class PlanningRunner:
         return issues
 
     @staticmethod
+    def _required_courses(
+        request: PlanningRequest,
+        facts: KnownFacts,
+        offering: OfferingCheck | None,
+        pinned_codes: frozenset[str],
+        *,
+        limit: int,
+    ) -> tuple[list[str], list[Issue]]:
+        """Professional required courses to place first, in fact order, plus why others are not.
+
+        A required course is placed only when Java says it is offered this term and at
+        least one of its sections is free of the student's hard time constraints (the
+        same selection rule as section assignment). Pinned courses are handled by the
+        runner's pin logic and are not repeated here. Without an offering snapshot the
+        offered status is unknown, so nothing is placed.
+        """
+        required = facts.required_course_codes - pinned_codes
+        if not required:
+            return [], []
+        if offering is None:
+            return [], [
+                Issue(
+                    code="REQUIRED_OFFERING_UNCHECKED",
+                    message="本轮没有开课快照，未能确认专业必修课是否本学期开设，未自动放入方案",
+                    field=None,
+                    retryable=False,
+                )
+            ]
+        blocks = hard_blocks(request.intent.hardConstraints)
+        placed: list[str] = []
+        issues: list[Issue] = []
+        not_offered = sorted(required & offering.not_offered)
+        if not_offered:
+            issues.append(
+                Issue(
+                    code="REQUIRED_NOT_OFFERED",
+                    message=(
+                        f"专业必修课 {len(not_offered)} 门本学期没有开设，未纳入方案："
+                        + "、".join(not_offered)
+                    ),
+                    field="courseCode",
+                    retryable=False,
+                )
+            )
+        for fact in facts.course_facts:
+            code = fact.course_code
+            if code not in required or code not in offering.offered:
+                continue
+            options = course_options(
+                CourseNeed(
+                    course_code=code,
+                    item_teacher_key=None,
+                    must_teacher_key=None,
+                    prefer_teacher_key=None,
+                ),
+                offering.rows_by_course.get(code, ()),
+                blocks,
+                (),
+                {},
+            )
+            if not options.options:
+                issues.append(
+                    Issue(
+                        code="REQUIRED_NOT_PLACED",
+                        message=f"专业必修课 {code}：{options.reason}，未纳入方案",
+                        field="courseCode",
+                        retryable=False,
+                    )
+                )
+                continue
+            placed.append(code)
+        if len(placed) > limit:
+            overflow = placed[limit:]
+            placed = placed[:limit]
+            issues.append(
+                Issue(
+                    code="RECOMMENDATION_LIMIT_TRIMMED",
+                    message=(
+                        f"专业必修课超过推荐上限，未放入：{'、'.join(overflow)}"
+                        "（可在下一轮规划中指定）"
+                    ),
+                    field="items",
+                    retryable=False,
+                )
+            )
+        return placed, issues
+
+    @staticmethod
     def _fallback_reason(fact: CourseFact) -> str:
         """Reason text built from Java facts only. Nature comes from the category, so a
         学科基础课 is never described as elective here."""
         credit_text = f"{fact.credits} 学分" if fact.credits is not None else "学分未注明"
-        nature = f"（{fact.requirement_nature}性质）" if fact.requirement_nature else ""
+        if fact.requirement_nature == "必修":
+            nature = "（专业必修课）"
+        elif fact.requirement_nature:
+            nature = f"（{fact.requirement_nature}性质）"
+        else:
+            nature = ""
         parts = [
             f"课程目录列示为「{fact.name}」，{credit_text}，类别为「{fact.category}」{nature}。"
         ]

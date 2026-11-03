@@ -195,9 +195,10 @@ def test_school_progress_facts_send_counts_and_gaps_not_the_full_tree() -> None:
     assert "nodes" not in progress and "courses" not in progress
     assert "nodeId" not in json.dumps(progress, ensure_ascii=False)
     assert set(progress["outcomeCounts"]) >= {"PASSED", "NOT_TAKEN"}
-    # Gap categories reach the model once, via schoolReportGaps, and only with credits left.
+    # Gap leaves reach the model via schoolReportGaps, bounded. The synthetic leaves hold
+    # school rows that are not in the catalog, so none has a course to offer and none is reported.
     gaps = facts["schoolReportGaps"]
-    assert gaps and len(gaps) <= 45
+    assert len(gaps) <= 45
     assert all(float(item["remainingCredits"]) > 0 for item in gaps)
 
 

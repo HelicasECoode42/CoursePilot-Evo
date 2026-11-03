@@ -488,7 +488,7 @@ def test_fallback_reason_never_calls_a_required_course_elective() -> None:
         school_gap_credits="3",
     )
     text = PlanningRunner._fallback_reason(fact)
-    assert "（必修性质）" in text
+    assert "（专业必修课）" in text
     assert "选修" not in text
     assert "本学期没有开设这门课" in text
     assert "学校报告中「学科基础课」仍差 3 学分" in text
@@ -519,3 +519,247 @@ def test_rationale_for_a_dropped_pick_does_not_fail_the_run(
     recommendation = answer.recommendations[0]
     assert [item.courseCode for item in recommendation.items] == ["CS101"]
     assert [r.courseCode for r in recommendation.courseRationales] == ["CS101"]
+
+
+# --- docs/38 planner rules: required first, leaf gaps, taken status (fake Java) ---
+
+
+def _catalog_course(code: str, name: str, category: str):
+    from decimal import Decimal
+
+    from agent_runtime.api.schemas import Course
+
+    return Course(
+        courseCode=code,
+        name=name,
+        credits=Decimal("3"),
+        category=category,
+        sourceRefIds=["source:fake-w2"],
+    )
+
+
+class _CatalogTools(_OfferingTools):
+    """Adds catalog courses and, optionally, a school report built from fixture rows."""
+
+    def __init__(
+        self,
+        offerings: list[CourseOffering],
+        *,
+        extra_courses=(),
+        school_nodes=None,
+        school_courses=None,
+        school_record_id: str | None = None,
+    ) -> None:
+        super().__init__(offerings)
+        self._extra_courses = list(extra_courses)
+        self._school_nodes = school_nodes
+        self._school_courses = school_courses or []
+        self._school_record_id = school_record_id
+
+    def call(self, tool, dto, context, *, params=None, idempotency_key=None):
+        if tool == "listCourses":
+            base = super().call(tool, dto, context, params=params)
+            return [*base, *self._extra_courses]
+        if tool == "getSchoolProgress" and self._school_nodes is not None:
+            return _school_result(
+                self._school_nodes,
+                self._school_courses,
+                record_id=self._school_record_id,
+                record=super().call(
+                    "getAcademicRecord", None, context, params={"recordId": "record:demo"}
+                ),
+            )
+        return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
+
+
+def _json_number(value):
+    """Credits as Java writes them: 1 for "1", not 1.0."""
+    if value is None:
+        return None
+    number = float(value)
+    return int(number) if number.is_integer() else number
+
+
+def _school_result(nodes, courses, *, record_id, record):
+    from agent_runtime.api.schemas import SchoolProgressImportResult
+
+    now = datetime.now(UTC).isoformat()
+    node_rows = [
+        {
+            "nodeId": node_id,
+            "parentId": parent,
+            "schoolNodeId": None,
+            "leaf": leaf,
+            "name": name,
+            "requiredCredits": None,
+            "earnedCredits": None,
+            "remainingCredits": _json_number(remaining),
+        }
+        for node_id, parent, name, remaining, leaf in nodes
+    ]
+    course_rows = [
+        {
+            "nodeId": node_id,
+            "courseCode": code,
+            "name": code,
+            "credits": 3,
+            "outcome": outcome,
+            "completedYear": None,
+            "completedTerm": None,
+            "grade": None,
+            "makeup": None,
+            "retake": None,
+            "suggestedYear": None,
+            "suggestedTerm": None,
+        }
+        for node_id, code, outcome in courses
+    ]
+    record_dump = record.model_dump(mode="json")
+    if record_id is not None:
+        record_dump["academicRecordId"] = record_id
+    return SchoolProgressImportResult.model_validate(
+        {
+            "receipt": {
+                "schoolProgressId": "school:demo",
+                "contentHash": "d" * 64,
+                "importedAt": now,
+                "reused": True,
+            },
+            "snapshot": {
+                "format": "coursepilot-shu-academic-progress",
+                "version": 1,
+                "capturedAt": now,
+                "source": "browser adapter",
+                "nodes": node_rows,
+                "courses": course_rows,
+            },
+            "academicRecord": record_dump,
+        }
+    )
+
+
+def test_offered_required_course_goes_first_with_professional_reason(
+    planning_request: PlanningRequest,
+) -> None:
+    tools = _CatalogTools(
+        [
+            _row("DB201", "class:db-a", meetings=[_meeting(1, 1, 2)]),
+            _row("CS101", "class:cs101-a", meetings=[_meeting(2, 3, 4)]),
+        ],
+        extra_courses=[_catalog_course("DB201", "数据库原理", "学科基础课")],
+    )
+    model = _CapturingModel([PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
+    answer = _run_with_model(_request(planning_request), tools, model)
+
+    plan = answer.recommendations[0]
+    assert [item.courseCode for item in plan.items] == ["DB201", "CS101"]
+    assert _class_by_course(answer) == {"DB201": "class:db-a", "CS101": "class:cs101-a"}
+    rationale = {item.courseCode: item for item in plan.courseRationales}
+    assert "专业必修课" in rationale["DB201"].reason
+    assert rationale["DB201"].rationaleSource == "COURSE_FACTS"
+
+
+def test_required_course_blocked_by_hard_time_constraint_is_not_placed(
+    planning_request: PlanningRequest,
+) -> None:
+    tools = _CatalogTools(
+        [
+            _row("DB201", "class:db-a", meetings=[_meeting(1, 1, 2)]),
+            _row("CS101", "class:cs101-a", meetings=[_meeting(2, 3, 4)]),
+        ],
+        extra_courses=[_catalog_course("DB201", "数据库原理", "学科基础课")],
+    )
+    request = _request(planning_request)
+    request.intent.hardConstraints = [
+        Constraint(
+            kind="BLOCK_DAY",
+            courseCode=None,
+            teacherKey=None,
+            dayOfWeek=1,
+            section=None,
+            value=None,
+            sourceText="周一不排课",
+        )
+    ]
+    answer = _run_with_model(
+        request,
+        tools,
+        _CapturingModel([PlanItem(courseCode="CS101", teacherKey=None, classId=None)]),
+    )
+
+    assert [item.courseCode for item in answer.recommendations[0].items] == ["CS101"]
+    codes = [issue.code for issue in answer.unknowns]
+    assert "REQUIRED_NOT_PLACED" in codes
+    message = next(i.message for i in answer.unknowns if i.code == "REQUIRED_NOT_PLACED")
+    assert "DB201" in message
+
+
+def test_required_course_not_offered_is_named_and_not_placed(
+    planning_request: PlanningRequest,
+) -> None:
+    tools = _CatalogTools(
+        [_row("CS101", "class:cs101-a", meetings=[_meeting(2, 3, 4)])],
+        extra_courses=[_catalog_course("DB201", "数据库原理", "学科基础课")],
+    )
+    model = _CapturingModel([PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
+    answer = _run_with_model(_request(planning_request), tools, model)
+
+    assert [item.courseCode for item in answer.recommendations[0].items] == ["CS101"]
+    message = next(i.message for i in answer.unknowns if i.code == "REQUIRED_NOT_OFFERED")
+    assert "DB201" in message
+
+
+def test_school_in_progress_course_is_not_a_candidate_when_record_differs(
+    planning_request: PlanningRequest,
+) -> None:
+    tools = _CatalogTools(
+        [
+            _row("ALG", "class:alg-a", meetings=[_meeting(1, 1, 2)]),
+            _row("MINE", "class:mine-a", meetings=[_meeting(2, 3, 4)]),
+        ],
+        extra_courses=[
+            _catalog_course("ALG", "算法设计与分析A", "专业选修课"),
+            _catalog_course("MINE", "数据挖掘导论", "专业选修课"),
+        ],
+        school_nodes=[("n:root", None, "专业选修课", None, True)],
+        school_courses=[("n:root", "ALG", "IN_PROGRESS")],
+        school_record_id="record:school-other",
+    )
+    model = _CapturingModel([PlanItem(courseCode="MINE", teacherKey=None, classId=None)])
+    _run_with_model(_request(planning_request), tools, model)
+
+    assert model.facts is not None
+    assert "ALG" not in model.facts["courseCodes"]
+    assert "MINE" in model.facts["courseCodes"]
+
+
+def test_school_gap_targets_leaf_sub_category_only(planning_request: PlanningRequest) -> None:
+    tools = _CatalogTools(
+        [
+            _row("MOR101", "class:mor-a", meetings=[_meeting(1, 1, 2)]),
+            _row("MATH101", "class:math-a", meetings=[_meeting(2, 3, 4)]),
+            _row("CS101", "class:cs101-a", meetings=[_meeting(3, 5, 6)]),
+        ],
+        extra_courses=[
+            _catalog_course("MOR101", "思想道德与法治", "公共基础课"),
+            _catalog_course("MATH101", "高等数学", "公共基础课"),
+        ],
+        school_nodes=[
+            ("n:pub", None, "公共基础课", "1", False),
+            ("n:ideo", "n:pub", "思想政治必修课", "1", True),
+            ("n:sport", "n:pub", "体育", "0", True),
+        ],
+        school_courses=[("n:ideo", "MOR101", "NOT_TAKEN"), ("n:sport", "MATH101", "PASSED")],
+        school_record_id=None,
+    )
+    model = _CapturingModel([PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
+    _run_with_model(_request(planning_request), tools, model)
+
+    assert model.facts is not None
+    assert model.facts["schoolReportGaps"] == [
+        {"category": "思想政治必修课", "remainingCredits": "1"}
+    ]
+    assert "MOR101" in model.facts["courseCodes"]
+    assert "MATH101" not in model.facts["courseCodes"]
+    course = next(c for c in model.facts["courses"] if c["courseCode"] == "MOR101")
+    assert course["schoolGapRemainingCredits"] == "1"

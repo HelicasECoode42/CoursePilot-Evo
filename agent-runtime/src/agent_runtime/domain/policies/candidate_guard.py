@@ -72,6 +72,9 @@ class KnownFacts:
     # courses are kept by the runner and reported separately).
     offering_checked: bool = False
     offered_course_codes: frozenset[str] = frozenset()
+    # Eligible courses the curriculum states as required (学科基础课). Placed first in a
+    # plan when offered this term; see runner._required_courses.
+    required_course_codes: frozenset[str] = frozenset()
 
     @property
     def visible_course_facts(self) -> tuple[CourseFact, ...]:
