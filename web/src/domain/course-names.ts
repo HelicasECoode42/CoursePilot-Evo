@@ -8,6 +8,7 @@
  */
 
 import type { Course } from "../contracts";
+import { usableName } from "./school-categories";
 
 export type CourseNameLookup = (courseCode: string) => string | null;
 
@@ -66,4 +67,47 @@ export function limitCourseCodes(
     shown: courseCodes.slice(0, limit),
     hiddenCount: courseCodes.length - limit,
   };
+}
+
+/** 一门课的名字与学分。名字为空时不构成事实，见 buildCourseFactIndex。 */
+export type CourseFact = { name: string; credits: number | null };
+
+export type CourseFactLookup = (courseCode: string) => CourseFact | null;
+
+export type CourseFactSource = {
+  courseCode: string;
+  name: string | null | undefined;
+  credits?: number | null;
+};
+
+/**
+ * 合并多个来源的课程事实。来源按优先级排列，同一课程号取第一个有可用名字的来源，
+ * 名字与学分一起取自同一来源，不混用两边的数据。
+ */
+export function buildCourseFactIndex(
+  sources: ReadonlyArray<readonly CourseFactSource[]>,
+): Map<string, CourseFact> {
+  const facts = new Map<string, CourseFact>();
+  for (const source of sources) {
+    for (const item of source) {
+      if (facts.has(item.courseCode)) continue;
+      const name = usableName(item.name);
+      if (!name) continue;
+      facts.set(item.courseCode, { name, credits: item.credits ?? null });
+    }
+  }
+  return facts;
+}
+
+/**
+ * 已选、优先考虑等列表里的课程标签，形如「课程名（课程号）· 3 学分」。
+ * 查不到名字时只写「课程号 08305092（名称未加载）」，绝不把课程号写两遍。
+ */
+export function describeSelectedCourse(
+  courseCode: string,
+  fact: CourseFact | null,
+): string {
+  if (!fact) return `课程号 ${courseCode}（名称未加载）`;
+  const credits = fact.credits === null ? "学分未知" : `${fact.credits} 学分`;
+  return `${fact.name}（${courseCode}）· ${credits}`;
 }

@@ -138,4 +138,61 @@ describe("advice chat suggestions", () => {
       expect(send).not.toHaveBeenCalled();
     });
   });
+
+  describe("已选课程列表", () => {
+    beforeEach(() => {
+      setActivePinia(createPinia());
+    });
+
+    it("对话里出现过的课程：显示课程名、课程号只出现一次", () => {
+      const store = usePlanningStore();
+      store.$patch({
+        adviceMessages: [{ role: "assistant", text: answer.reply, answer }],
+        draft: { ...emptyPlanningDraft(), selectedCourseCodes: ["08306099"] },
+      });
+      const wrapper = mount(AdviceChat);
+      const text = wrapper.get("[aria-label='已加入待选课程']").text();
+      expect(text).toContain("Java程序设计(实践)（08306099）· 4 学分");
+      expect(text.split("08306099")).toHaveLength(2);
+      expect(text).not.toContain("08306099 08306099");
+    });
+
+    it("对话里没有、但页面目录里有的课程：用目录里的名字", () => {
+      const store = usePlanningStore();
+      store.$patch({
+        adviceMessages: [],
+        draft: {
+          ...emptyPlanningDraft(),
+          preferredCourseCodes: ["08305092"],
+        },
+      });
+      const wrapper = mount(AdviceChat, {
+        props: {
+          lookupCourse: (code: string) =>
+            code === "08305092" ? { name: "数据结构", credits: 3 } : null,
+        },
+      });
+      const text = wrapper.get("[aria-label='优先考虑课程']").text();
+      expect(text).toContain("数据结构（08305092）· 3 学分 · 优先考虑");
+      expect(text.split("08305092")).toHaveLength(2);
+    });
+
+    it("名字都查不到时写「课程号（名称未加载）」，不把课程号写两遍", () => {
+      const store = usePlanningStore();
+      store.$patch({
+        adviceMessages: [],
+        draft: {
+          ...emptyPlanningDraft(),
+          selectedCourseCodes: ["08305092"],
+        },
+      });
+      const wrapper = mount(AdviceChat);
+      const text = wrapper.get("[aria-label='已加入待选课程']").text();
+      expect(text).toContain("课程号 08305092（名称未加载）");
+      expect(text.split("08305092")).toHaveLength(2);
+      expect(wrapper.find("[aria-label='取消选择 08305092']").exists()).toBe(
+        true,
+      );
+    });
+  });
 });

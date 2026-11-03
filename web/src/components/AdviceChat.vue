@@ -3,6 +3,18 @@ import { nextTick, onMounted, ref, watch } from "vue";
 import { usePlanningStore } from "../stores/planning";
 import ReviewSummary from "./ReviewSummary.vue";
 import type { AdviceChatAnswer, AdviceChatSuggestion } from "../contracts";
+import {
+  describeSelectedCourse,
+  type CourseFact,
+  type CourseFactLookup,
+} from "../domain/course-names";
+import { usableName } from "../domain/school-categories";
+
+/**
+ * lookupCourse 由页面提供（课程目录、学校报告）。对话卡片里的课程优先，
+ * 没有时才查它；都查不到就只显示课程号，不编名字。
+ */
+const props = defineProps<{ lookupCourse?: CourseFactLookup }>();
 
 const store = usePlanningStore();
 const message = ref(store.adviceFailure?.text ?? "");
@@ -97,11 +109,18 @@ function isSelected(code: string) {
 function isPreferred(code: string) {
   return store.draft.preferredCourseCodes.includes(code);
 }
-function courseDisplay(code: string) {
-  const course = store.adviceMessages
+function courseFact(code: string): CourseFact | null {
+  const answered = store.adviceMessages
     .flatMap((item) => item.answer?.courses ?? [])
     .find((item) => item.courseCode === code);
-  return course?.name || code;
+  const answeredName = usableName(answered?.name);
+  if (answered && answeredName) {
+    return { name: answeredName, credits: answered.credits };
+  }
+  return props.lookupCourse?.(code) ?? null;
+}
+function courseChip(code: string): string {
+  return describeSelectedCourse(code, courseFact(code));
 }
 function capturedAtLabel(value: string) {
   const timestamp = Date.parse(value);
@@ -283,8 +302,7 @@ function capturedAtLabel(value: string) {
       aria-label="已加入待选课程"
     >
       <li v-for="code in store.draft.selectedCourseCodes" :key="code">
-        {{ courseDisplay(code) }} <span class="microcopy">{{ code }}</span> ·
-        已选入
+        {{ courseChip(code) }} · 已选入
         <button
           type="button"
           class="linkbtn"
@@ -301,8 +319,7 @@ function capturedAtLabel(value: string) {
       aria-label="优先考虑课程"
     >
       <li v-for="code in store.draft.preferredCourseCodes" :key="code">
-        {{ courseDisplay(code) }} <span class="microcopy">{{ code }}</span> ·
-        优先考虑
+        {{ courseChip(code) }} · 优先考虑
         <button
           type="button"
           class="linkbtn"

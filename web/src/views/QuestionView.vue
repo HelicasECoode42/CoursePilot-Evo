@@ -27,6 +27,10 @@ import {
   type ScheduleAction,
   type ScheduleStrength,
 } from "../domain/schedule-grid";
+import {
+  buildCourseFactIndex,
+  describeSelectedCourse,
+} from "../domain/course-names";
 import { usePlanningStore } from "../stores/planning";
 
 const store = usePlanningStore();
@@ -257,11 +261,14 @@ function curriculumOptionLabel(item: SnapshotSummary, index: number): string {
  * 画像里的课程只显示编号时，学生认不出是哪门。名字来自本会话里对话返回的课程
  * 卡片；没有对应卡片时只能退回编号，不能编造名字。
  */
+const courseFactIndex = computed(() =>
+  buildCourseFactIndex([
+    store.adviceMessages.flatMap((item) => item.answer?.courses ?? []),
+    store.schoolProgress?.snapshot.courses ?? [],
+  ]),
+);
 function courseLabel(code: string): string {
-  const named = store.adviceMessages
-    .flatMap((item) => item.answer?.courses ?? [])
-    .find((course) => course.courseCode === code);
-  return named ? `${named.name}（${code}）` : code;
+  return describeSelectedCourse(code, courseFactIndex.value.get(code) ?? null);
 }
 
 function scheduleSummary(keys: readonly string[]): string {

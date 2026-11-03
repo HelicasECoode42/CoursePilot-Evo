@@ -28,6 +28,10 @@ import {
 } from "../domain/academic-record";
 import { isCurriculumUsableForMode } from "../domain/planning-request";
 import { groupLearnedCourses, usableName } from "../domain/school-categories";
+import {
+  buildCourseFactIndex,
+  type CourseFactLookup,
+} from "../domain/course-names";
 import { usePlanningStore } from "../stores/planning";
 
 const store = usePlanningStore();
@@ -135,6 +139,15 @@ const courseNameIndex = computed(() => {
 });
 const lookupCourseName = (courseCode: string): string | null =>
   courseNameIndex.value.get(courseCode) ?? null;
+/** 课程名加学分，给对话里的已选、优先考虑列表用。课程目录优先，学校报告补充。 */
+const courseFactIndex = computed(() =>
+  buildCourseFactIndex([
+    courses.value,
+    store.schoolProgress?.snapshot.courses ?? [],
+  ]),
+);
+const lookupCourseFact: CourseFactLookup = (courseCode) =>
+  courseFactIndex.value.get(courseCode) ?? null;
 
 /** 「我学了什么」：按学校类别分组；学校报告没有归属的课程放「其他」。 */
 const learnedGroups = computed(() =>
@@ -769,7 +782,7 @@ onUnmounted(() => controller?.abort());
             可以先讨论课程与方向；确认采用的兴趣或课程会进入本次规划草稿。完整引导仍会逐步确认目标、偏好和时间。
           </p>
         </div>
-        <AdviceChat />
+        <AdviceChat :lookup-course="lookupCourseFact" />
         <div class="plan-start__actions">
           <RouterLink class="button button--primary" to="/plan/questions/goals"
             >继续完整需求引导 →</RouterLink
