@@ -25,7 +25,8 @@ public class CurriculumSnapshot {
     public enum State { PUBLISHED, REJECTED }
 
     /** contracts: SnapshotSummary.sourceKind */
-    public enum SourceKind { CURRICULUM_FILE, BROWSER_SNAPSHOT, SYNTHETIC }
+    /** OFFICIAL_DOCUMENT：官方公开文件（如教务课表 PDF）转换所得，仍需人工抽样核验后才能 VERIFIED。 */
+    public enum SourceKind { CURRICULUM_FILE, BROWSER_SNAPSHOT, OFFICIAL_DOCUMENT, SYNTHETIC }
 
     /** contracts: SnapshotSummary.sourceValidation */
     public enum SourceValidation { VERIFIED, UNVERIFIED, SYNTHETIC }
@@ -58,6 +59,11 @@ public class CurriculumSnapshot {
     @Column(nullable = false)
     private Instant createdAt;
 
+    /** 以下三项只对 OFFERING 快照有值：抓取时间与日历形状（契约 OfferingImport）。 */
+    private Instant capturedAt;
+    private Integer calendarWeeks;
+    private Integer sectionsPerDay;
+
     public CurriculumSnapshot() {}
 
     public CurriculumSnapshot(String snapshotId, Kind kind, State state, SourceKind sourceKind,
@@ -78,4 +84,25 @@ public class CurriculumSnapshot {
     public SourceValidation getSourceValidation() { return sourceValidation; }
     public String getTermId() { return termId; }
     public Instant getCreatedAt() { return createdAt; }
+    public Instant getCapturedAt() { return capturedAt; }
+    public Integer getCalendarWeeks() { return calendarWeeks; }
+    public Integer getSectionsPerDay() { return sectionsPerDay; }
+
+    /** 记录开课快照的抓取时间与日历形状。只在导入发布时调用一次。 */
+    public void recordOfferingFacts(Instant capturedAt, int calendarWeeks, int sectionsPerDay) {
+        this.capturedAt = capturedAt;
+        this.calendarWeeks = calendarWeeks;
+        this.sectionsPerDay = sectionsPerDay;
+    }
+
+    /**
+     * 人工核验结论的落地：VERIFIED 或 REJECTED。只由 OfferingVerificationService 调用。
+     * 以最近一次核验为准：通过则 VERIFIED，否则回到 UNVERIFIED。SYNTHETIC 快照不接受核验。
+     */
+    public void applyVerification(boolean passed) {
+        if (this.sourceValidation == SourceValidation.SYNTHETIC) {
+            throw new IllegalStateException("SYNTHETIC 快照不可核验");
+        }
+        this.sourceValidation = passed ? SourceValidation.VERIFIED : SourceValidation.UNVERIFIED;
+    }
 }

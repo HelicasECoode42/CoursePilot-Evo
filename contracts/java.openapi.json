@@ -1588,9 +1588,10 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 100,
+              "maximum": 1000,
               "default": 20
-            }
+            },
+            "description": "未指定 courseCode 时默认 20、上限 100。指定 courseCode 时默认返回该课全部班次、上限 1000，没有游标；返回条数恰为 1000 时可能不完整。"
           },
           {
             "name": "X-Request-Id",
@@ -2378,6 +2379,118 @@
             "adminKey": []
           }
         ]
+      },
+      "delete": {
+        "operationId": "retireImportedReviews",
+        "summary": "管理员删除已导入评价（按 reviewNoteId，最多 200 条；不存在的 ID 忽略）",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "X-Subject-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "schemaVersion": {
+                    "type": "string",
+                    "const": "1.0"
+                  },
+                  "reviewNoteIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+                      "maxLength": 120
+                    }
+                  }
+                },
+                "required": [
+                  "schemaVersion",
+                  "reviewNoteIds"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；data.deletedCount 为实际删除条数",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "deletedCount": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 200
+                            }
+                          },
+                          "required": [
+                            "deletedCount"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "认证失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/career-directions": {
@@ -3197,6 +3310,152 @@
           }
         },
         "description": "同一主体和幂等键的相同请求摘要复用；同键不同请求返回409。学校快照自然去重包含培养方案和节点课程内容，不包含capturedAt。"
+      }
+    },
+    "/api/v1/offering-snapshots/{snapshotId}/verification": {
+      "post": {
+        "operationId": "verifyOfferingSnapshot",
+        "summary": "记录人工抽样核验结果（不得由上传者自核）",
+        "description": "管理员对开课快照做人工抽样核验。verifierName 与 uploaderName（忽略大小写与首尾空白）相同时拒绝；sampleSize 不少于 30；errorCount/sampleSize 不超过 2% 记为 VERIFIED，否则记为 REJECTED。SYNTHETIC 快照不可核验。每次调用都写入一条核验审计记录。",
+        "parameters": [
+          {
+            "name": "snapshotId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "X-Subject-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "X-Admin-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "./schemas/domain.schema.json#/$defs/OfferingVerificationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "记录完成；outcome 为 VERIFIED 或 REJECTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "./schemas/domain.schema.json#/$defs/OfferingVerificationResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构/Schema 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "管理员密钥缺失或错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "快照不存在或不是开课快照",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "语义不合法：核验人与上传人相同、样本过小、错误数超过样本数、SYNTHETIC 快照",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "管理员密钥未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "./schemas/domain.schema.json#/$defs/Envelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "serviceKey": [],
+            "adminKey": []
+          }
+        ]
       }
     }
   },

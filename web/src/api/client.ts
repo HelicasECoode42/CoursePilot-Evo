@@ -12,12 +12,15 @@ import type {
   CareerDirection,
   Course,
   Envelope,
+  Issue,
   PlanningAnswer,
   PlanningRequest,
   ReviewNote,
   RunReport,
+  MustAvoidCheck,
   SessionOfferingList,
   SessionPlanReplaceInput,
+  SessionPlanCourseAddInput,
   SessionPlanEditInput,
   SessionPlanEditResult,
   SessionPlanReplacement,
@@ -88,6 +91,21 @@ export type ReviewNoteSearch = {
   items: ReviewNote[];
   status: BusinessStatus;
 };
+/**
+ * 某开课快照里一门课的班次数。sectionCount 为 0 表示该快照下确认没有这门课的班次；
+ * 课程列在 unknownCourseCodes 里时是无法确认，不能当作未开。
+ */
+export type CourseSectionSummary = {
+  courseCode: string;
+  sectionCount: number;
+  teacherTexts: string[];
+};
+
+export type OfferingSummarySearch = {
+  items: CourseSectionSummary[];
+  unknownCourseCodes: string[];
+  status: BusinessStatus;
+};
 
 export interface CoursePilotApiClient {
   readonly mode: "http" | "fixture" | "simulation";
@@ -153,6 +171,15 @@ export interface CoursePilotApiClient {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<SessionPlanEditResult>;
+  /**
+   * 把一门课加入已保存方案，classId 缺省时只加课、不选班次。服务端对整份新方案重新核验，判决原样返回。
+   * 422 的错误码（COURSE_ALREADY_IN_PLAN 等）经 ApiFailure.code 交给页面翻译成人话。
+   */
+  addSessionPlanCourse(
+    body: SessionPlanCourseAddInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult>;
   saveSchoolProgress(
     body: SchoolProgressImportRequest,
     idempotencyKey: string,
@@ -178,6 +205,16 @@ export interface CoursePilotApiClient {
     query?: string | null,
   ): Promise<TeacherCourseOptionSearch>;
   /**
+   * 所选开课快照里一批课程（最多 10 门）的班次数，只数班次，不做时间计算。
+   * POST /api/v1/offering-summary；某门课查询失败时进 unknownCourseCodes，不计为 0。
+   */
+  summarizeOfferings(
+    curriculumSnapshotId: string,
+    offeringSnapshotId: string,
+    courseCodes: string[],
+    signal?: AbortSignal,
+  ): Promise<OfferingSummarySearch>;
+  /**
    * E4：检索课程（可选教师）的评价证据。teacherKey 传 null 表示不按教师过滤。
    * status 为 UNKNOWN 时评价资料无法确认，空数组不代表没有找到评价。
    */
@@ -194,11 +231,19 @@ export interface CoursePilotApiClient {
   /** E4：受限的老师运行报告。服务端还要求管理密钥，浏览器端拿不到时会得到 403，页面需要照实说明。 */
   getRunReport(runId: string, signal?: AbortSignal): Promise<RunReport>;
   clearSession(): void;
+  /**
+   * 页面刷新后恢复会话：只接收 sessionStorage 里保存的令牌，不做网络请求；
+   * 是否仍有效由调用方用一次只读查询确认（401 即已过期）。
+   */
+  restoreSession(sessionToken: string): void;
+  /** 当前会话令牌，仅供存入本标签页的 sessionStorage；没有会话时为 null。 */
+  currentSessionToken(): string | null;
   fixtureAcademicRecordId(): string | null;
 }
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 addFormats(ajv);
+
 ajv.addSchema(domainSchema, "coursepilot-domain-v1");
 const validateEnvelope = ajv.getSchema("coursepilot-domain-v1#/$defs/Envelope");
 const validateSession = ajv.getSchema(
@@ -222,6 +267,29 @@ const validateAdviceChatRequest = ajv.getSchema(
 const validateAdviceChatAnswer = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/AdviceChatAnswer",
 );
+function isMustAvoidCheck(value: unknown): value is MustAvoidCheck {
+  return (
+    isObject(value) &&
+    typeof value.classId === "string" &&
+    (value.verdict === "CONFLICT" ||
+      value.verdict === "CLEAR_UNVERIFIED" ||
+      value.verdict === "CLEAR" ||
+      value.verdict === "UNKNOWN")
+  );
+}
+
+function isCourseSectionSummary(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    typeof value.courseCode === "string" &&
+    typeof value.sectionCount === "number" &&
+    Number.isInteger(value.sectionCount) &&
+    value.sectionCount >= 0 &&
+    Array.isArray(value.teacherTexts) &&
+    value.teacherTexts.every((text) => typeof text === "string")
+  );
+}
+
 const validateCourseOffering = ajv.getSchema(
   "coursepilot-domain-v1#/$defs/CourseOffering",
 );
@@ -250,18 +318,47 @@ const validateRunReport = ajv.getSchema(
  * 按 issue code 给出照实的说明。
  *
  * 2026-10-29 实测：真实模型两次规划都失败，页面只说「服务没有完成请求，请稍后
- * 重试」。真实原因是输出被 2000 token 的输出预算截断（finish_reason=length），
- * 重试多少次都一样。这类失败必须说清楚，不能用「稍后重试」糊过去。
+ * 重试」。真实原因是回复超过输出上限（finish_reason=length），重试多少次都一样。
+ * 这类失败必须说清楚，不能用「稍后重试」糊过去；学生看到的是可操作的说明，
+ * 不出现预算、token 等程序术语。
  */
 const EXPLAINED_ISSUE_CODES: Record<string, string> = {
   MODEL_OUTPUT_TRUNCATED:
-    "模型的回复被输出预算截断了，没写完所以用不了。重试不会有帮助——" +
-    "需要调高输出预算，或者减少一次要规划的课程数量。",
+    "这次的方案内容太长，没有写完，所以没有生成。" +
+    "请减少一次要规划的课程，或缩短补充说明后再试；原样重试还会超长。",
   MODEL_INVALID_OUTPUT:
     "模型这次返回的内容不符合接口约定，已经被拦下，没有写入任何方案。",
   MODEL_RATE_LIMITED: "模型服务正在限流，请过一会儿再试。",
   RATE_LIMITED: "操作太频繁了，请过几分钟再试。",
 };
+
+/**
+ * 服务端错误码 → 学生可读的一句话。码本身已能说明原因时优先用它，
+ * 不依赖服务端 message 的措辞。
+ */
+const SERVER_CODE_SENTENCES: Record<string, string> = {
+  VERIFICATION_REUSED: "核验结果重复使用，已拒绝这次操作，请重试。",
+};
+
+/** 班次与已选课程的时间冲突。码名可能是 TIME_CONFLICT / SLOT_CONFLICT 等，统一按冲突说明。 */
+const TIME_CONFLICT_CODE = /(^|_)(TIME|SLOT|CLASS|OFFERING)_CONFLICT$/;
+
+/** 含中文字符即视为服务端写给人看的句子；纯英文原文（多半是技术细节）不直接展示。 */
+const HAS_CJK = /[\u4e00-\u9fff]/;
+
+/**
+ * 服务端给出的、可直接展示的句子。没有可用句子时返回 null，由调用方决定兜底文案。
+ * 错误码与服务端 message 都来自错误信封（issues[0]），与 docs/04 的 Issue 字段一致。
+ */
+function serverSentence(issue: Issue | undefined): string | null {
+  if (!issue) return null;
+  const byCode = SERVER_CODE_SENTENCES[issue.code];
+  if (byCode !== undefined) return byCode;
+  if (TIME_CONFLICT_CODE.test(issue.code))
+    return "这个班次和已选课程时间冲突。";
+  const message = issue.message.trim();
+  return HAS_CJK.test(message) ? message : null;
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -324,26 +421,33 @@ function errorForResponse(
   }
   if (status === 404) {
     return new ApiFailure(
-      "需要的资料暂不可用，请返回后重试。",
+      serverSentence(issue) ?? "需要的资料暂不可用，请返回后重试。",
       "http",
       status,
       issue?.code ?? "NOT_FOUND",
     );
   }
+  // 会话额度用完：服务端已标 retryable=false，重试只会得到同样的结果，不能因为 503 而当成可重试。
   const retryable =
-    issue?.retryable === true ||
-    status === 408 ||
-    status === 429 ||
-    status === 503 ||
-    status === 504;
+    issue?.code === "BUDGET_EXCEEDED"
+      ? false
+      : issue?.retryable === true ||
+        status === 408 ||
+        status === 429 ||
+        status === 503 ||
+        status === 504;
   // 有些失败「请稍后重试」是错的建议：重试一定还是同样的结果。
   // 这几条要照实说清楚，否则学生只会一直点重试。
   const explained = EXPLAINED_ISSUE_CODES[issue?.code ?? ""];
+  // 兜底文案带上错误码，学生截图或反馈时能让人定位；没有错误码就只说「没有完成」。
+  const codeSuffix = issue?.code ? `（错误码 ${issue.code}）` : "";
+  // 可重试的失败沿用「稍后重试」；不可重试时才说服务端的原句，原句缺失就带错误码兜底。
   const fallback =
     explained ??
     (retryable
       ? "服务暂时不可用，请稍后重试。"
-      : "服务没有完成请求，请稍后重试。");
+      : (serverSentence(issue) ??
+        `服务没有完成请求${codeSuffix}，请稍后重试。`));
   return new ApiFailure(
     fallback,
     "http",
@@ -400,6 +504,14 @@ export class HttpApiClient implements CoursePilotApiClient {
 
   clearSession(): void {
     this.sessionToken = null;
+  }
+
+  restoreSession(sessionToken: string): void {
+    this.sessionToken = sessionToken;
+  }
+
+  currentSessionToken(): string | null {
+    return this.sessionToken;
   }
 
   async createSession(signal?: AbortSignal): Promise<SessionView> {
@@ -750,7 +862,9 @@ export class HttpApiClient implements CoursePilotApiClient {
       data.previousPlanId !== previousPlanId ||
       data.courseCode !== courseCode ||
       !Array.isArray(data.items) ||
-      !everyValid(data.items, validateCourseOffering)
+      !everyValid(data.items, validateCourseOffering) ||
+      !Array.isArray(data.mustAvoidChecks) ||
+      !data.mustAvoidChecks.every(isMustAvoidCheck)
     ) {
       throw new ApiFailure(
         "服务返回的开课班次不符合当前接口约定。",
@@ -807,16 +921,44 @@ export class HttpApiClient implements CoursePilotApiClient {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<SessionPlanEditResult> {
-    const { response, envelope } = await this.request(
+    return this.editSessionPlan(
       "/api/v1/session-plans/remove-course",
-      {
-        method: "POST",
-        sessionToken: this.requireSession(),
-        signal,
-        body,
-        idempotencyKey,
-      },
+      body,
+      idempotencyKey,
+      signal,
     );
+  }
+
+  /**
+   * 把一门课加入已保存方案。服务端对整份新方案重新核验，判决原样返回。
+   * 未指定班次时该课 classId 为 null，verification 仍是 Java 的判决，不能视为已选班次。
+   */
+  async addSessionPlanCourse(
+    body: SessionPlanCourseAddInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult> {
+    return this.editSessionPlan(
+      "/api/v1/session-plans/add-course",
+      body,
+      idempotencyKey,
+      signal,
+    );
+  }
+
+  private async editSessionPlan(
+    path: string,
+    body: SessionPlanEditInput | SessionPlanCourseAddInput,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult> {
+    const { response, envelope } = await this.request(path, {
+      method: "POST",
+      sessionToken: this.requireSession(),
+      signal,
+      body,
+      idempotencyKey,
+    });
     if (!isSuccessEnvelope(envelope))
       throw errorForResponse(response.status, envelope);
     const data = envelope.data;
@@ -884,12 +1026,21 @@ export class HttpApiClient implements CoursePilotApiClient {
   async getSchoolProgress(
     signal?: AbortSignal,
   ): Promise<SchoolProgressImportResult | null> {
-    const { response, envelope } = await this.request(
-      "/api/v1/school-progress",
-      { method: "GET", sessionToken: this.requireSession(), signal },
-    );
+    let response: Response;
+    let envelope: Envelope<unknown>;
+    try {
+      ({ response, envelope } = await this.request("/api/v1/school-progress", {
+        method: "GET",
+        sessionToken: this.requireSession(),
+        signal,
+      }));
+    } catch (error) {
+      // 本会话还没有导入学校进度时服务返回 404：这是「未导入」，不是错误。
+      // request() 对非 2xx 直接抛出，所以 404 在这里接住，不让页面当成失败。
+      if (error instanceof ApiFailure && error.status === 404) return null;
+      throw error;
+    }
     if (!isSuccessEnvelope(envelope)) {
-      if (response.status === 404) return null;
       throw errorForResponse(response.status, envelope);
     }
     if (
@@ -939,6 +1090,45 @@ export class HttpApiClient implements CoursePilotApiClient {
     }
     return {
       items: data.items as TeacherCourseOption[],
+      status: businessStatus(envelope),
+    };
+  }
+
+  async summarizeOfferings(
+    curriculumSnapshotId: string,
+    offeringSnapshotId: string,
+    courseCodes: string[],
+    signal?: AbortSignal,
+  ): Promise<OfferingSummarySearch> {
+    const { response, envelope } = await this.request(
+      "/api/v1/offering-summary",
+      {
+        method: "POST",
+        sessionToken: this.requireSession(),
+        signal,
+        body: { curriculumSnapshotId, offeringSnapshotId, courseCodes },
+      },
+    );
+    if (!isSuccessEnvelope(envelope)) {
+      throw errorForResponse(response.status, envelope);
+    }
+    const data = envelope.data;
+    if (
+      !isObject(data) ||
+      !Array.isArray(data.items) ||
+      !Array.isArray(data.unknownCourseCodes) ||
+      !data.items.every(isCourseSectionSummary) ||
+      !data.unknownCourseCodes.every((code) => typeof code === "string")
+    ) {
+      throw new ApiFailure(
+        "服务返回的班次统计不符合当前接口约定。",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return {
+      items: data.items as CourseSectionSummary[],
+      unknownCourseCodes: data.unknownCourseCodes as string[],
       status: businessStatus(envelope),
     };
   }

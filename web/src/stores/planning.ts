@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, onScopeDispose, ref } from "vue";
+import { computed, onScopeDispose, ref, watch } from "vue";
 import { ApiFailure, type CoursePilotApiClient } from "../api/client";
 import { api } from "../api";
 import type {
@@ -40,10 +40,24 @@ import {
   isCurriculumUsableForMode,
 } from "../domain/planning-request";
 import {
+  defaultOfferingSnapshotId,
+  isOfferingUsable,
+  planningModeFor,
+} from "../domain/offering-selection";
+import {
   applyScheduleAction,
   type ScheduleAction,
   type ScheduleStrength,
 } from "../domain/schedule-grid";
+import {
+  clearSavedSession,
+  defaultSessionStorage,
+  isStillValidUntil,
+  readSavedSession,
+  writeSavedSession,
+  type KeyValueStorage,
+  type SavedPlanningSession,
+} from "../domain/session-restore";
 
 export type SessionStatus = "idle" | "loading" | "ready" | "error" | "expired";
 export type SubmitStatus = "idle" | "submitting" | "ready" | "error";
@@ -65,7 +79,14 @@ function newIdempotencyKey(): string {
   return `web-${crypto.randomUUID().replaceAll("-", "")}`;
 }
 
-export function createPlanningStore(client: CoursePilotApiClient = api) {
+/**
+ * storage 为空时不做任何持久化（测试与演示用）。页面入口传入本标签页的 sessionStorage，
+ * 刷新后才能恢复会话、草稿与当前方案。
+ */
+export function createPlanningStore(
+  client: CoursePilotApiClient = api,
+  storage: KeyValueStorage | null = null,
+) {
   return defineStore("coursepilot-planning", () => {
     const sessionStatus = ref<SessionStatus>("idle");
     const sessionId = ref<string | null>(null);
@@ -240,12 +261,16 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     function adviceFailureDetails(error: unknown) {
       const code = error instanceof ApiFailure ? error.code : null;
       if (code === "BUDGET_EXCEEDED") {
-        // 会话累计额度已满：服务端明确不可重试。原先这里落到「重新生成回答」，
-        // 学生会一直点一个注定失败的按钮，而且看不到「请新建会话」的原因。
+        // 额度用完：服务端明确不可重试。原先这里落到「重新生成回答」，学生会一直点一个
+        // 注定失败的按钮。服务端 message 会说明是会话额度还是今日全站额度、新建会话是否重置，
+        // 优先展示它；没有可用 message 时才用固定兜底句。
+        const serverMessage =
+          error instanceof ApiFailure ? error.message.trim() : "";
         return {
           retryMode: "none" as const,
           message:
-            "本会话的对话额度已用完，无法再生成回答。请刷新页面重新开始；刷新后草稿会清空。",
+            serverMessage ||
+            "本会话的对话额度已用完，无法再生成回答。请重新开始会话后再试。",
         };
       }
       if (code === "MODEL_INVALID_OUTPUT") {
@@ -610,11 +635,17 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       expireSessionWhenDue();
     }
 
-    // 契约里的规划模式只有 REAL / SIMULATION，而客户端有三种（http / fixture /
-    // simulation）。这里是唯一的映射点：分散着写会漂移——fixture 模式下
-    // 「=== "simulation" ? ... 」和「=== "http" ? ...」给出的结论正好相反。
+    // 契约里的规划模式只有 REAL / SIMULATION。模式由所选开课快照推导（SYNTHETIC →
+    // SIMULATION，其余 → REAL）；fixture 客户端是纯演示，固定为 SIMULATION。
+    // 唯一的映射规则在 domain/offering-selection.ts 的 planningModeFor。
+    const selectedOfferingSnapshot = computed<SnapshotSummary | null>(
+      () =>
+        offeringSnapshots.value.find(
+          (item) => item.snapshotId === selectedOfferingSnapshotId.value,
+        ) ?? null,
+    );
     const planningMode = computed<PlanningMode>(() =>
-      client.mode === "http" ? "REAL" : "SIMULATION",
+      planningModeFor(client.mode, selectedOfferingSnapshot.value),
     );
     const currentQuestion = computed<QuestionId>(() =>
       firstIncompleteQuestion({
@@ -636,10 +667,10 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
           (item) => item.snapshotId === selectedCurriculumId.value,
         ) ?? null,
     );
-    // 能用于当前模式的开课快照。规则与培养方案共用 isCurriculumUsableForMode，不另写。
+    // 能用于当前客户端的开课快照。只看快照自身与客户端，不依赖所选模式，避免循环。
     const usableOfferingSnapshots = computed(() =>
       offeringSnapshots.value.filter((item) =>
-        isCurriculumUsableForMode(item, planningMode.value),
+        isOfferingUsable(item, client.mode),
       ),
     );
     const mode = computed(() => client.mode);
@@ -656,7 +687,12 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
     }
 
     async function startSession(): Promise<void> {
-      if (sessionStatus.value === "loading") return;
+      if (sessionStatus.value === "loading") {
+        // 页面刷新后恢复会话还在进行中：等它完成，而不是直接返回一个仍是 loading 的状态，
+        // 否则调用方会把「还没好」误判为「建立会话失败」。
+        if (restoreTask !== null) await restoreTask;
+        return;
+      }
       if (
         sessionId.value &&
         (!expiresAt.value ||
@@ -705,20 +741,25 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
           ...offeringResult.unknownMessages,
         ];
         offeringSnapshots.value = offeringResult.items;
-        // 恰好一个可用时自动选中；多个让用户在培养方案那一步选；一个都没有就留空，
-        // 课表会说明「没有班次快照」，不替用户编一个。
-        const offeringUsable = offeringResult.items.filter((item) =>
-          isCurriculumUsableForMode(item, planningMode.value),
+        // 默认班次来源：VERIFIED > 学校公布课表(待核验) > 演示数据（仅模拟/演示）。
+        // 同级取最新。用户仍可在问答页改选；没有可用项就留空，课表说明原因，不编班次。
+        selectedOfferingSnapshotId.value = defaultOfferingSnapshotId(
+          offeringResult.items,
+          client.mode,
         );
-        selectedOfferingSnapshotId.value =
-          offeringUsable.length === 1 ? offeringUsable[0].snapshotId : null;
+        // 模式依赖刚选出的开课快照，必须在这之后再筛培养方案。
         // 只自动选能用于当前模式的方案。不加这个判断，一个 UNVERIFIED、既无课程也无
         // 类别要求的快照会因为「只有一个」被直接选中，用户走完 8 步才知道它不能用。
         const usable = result.items.filter((item) =>
           isCurriculumUsableForMode(item, planningMode.value),
         );
+        // 已选的方案仍可用时保留（例如刷新后重新确认会话），否则只有唯一可用项才自动选。
+        const kept = usable.find(
+          (item) => item.snapshotId === selectedCurriculumId.value,
+        );
         selectedCurriculumId.value =
-          usable.length === 1 ? usable[0].snapshotId : null;
+          kept?.snapshotId ??
+          (usable.length === 1 ? usable[0].snapshotId : null);
         sessionStatus.value = "ready";
         if (result.items.length === 0) {
           errorMessage.value =
@@ -748,6 +789,89 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         errorMessage.value = visibleError(error);
       } finally {
         if (activeController === controller) activeController = null;
+      }
+    }
+
+    /**
+     * 刷新后恢复 sessionStorage 里的会话与草稿。先同步还原（页面不闪空），
+     * 再用两个只读查询确认令牌仍有效：401 说明会话已过期或服务已重启，清空并提示；
+     * 其他错误保留令牌，状态记为 error，学生可以重试。
+     */
+    let restoreTask: Promise<void> | null = null;
+
+    function restoreSavedSession(): Promise<void> {
+      if (restoreTask === null) restoreTask = restoreOnce();
+      return restoreTask;
+    }
+
+    async function restoreOnce(): Promise<void> {
+      if (storage === null || client.mode === "fixture") return;
+      if (sessionId.value !== null) return;
+      const saved = readSavedSession(storage);
+      if (saved === null) return;
+      if (!isStillValidUntil(saved.expiresAt, Date.now())) {
+        clearSavedSession(storage);
+        return;
+      }
+      client.restoreSession(saved.sessionToken);
+      sessionId.value = saved.sessionId;
+      expiresAt.value = saved.expiresAt;
+      draft.value = saved.draft;
+      selectedCurriculumId.value = saved.selectedCurriculumId;
+      selectedOfferingSnapshotId.value = saved.selectedOfferingSnapshotId;
+      selectedRecordId.value = saved.selectedRecordId;
+      planningResult.value = saved.planningResult;
+      editedPlans.value = saved.editedPlans;
+      teacherPickDisplayNames.value = saved.teacherPickDisplayNames;
+      scheduleSessionExpiry();
+
+      const version = ++sessionVersion.value;
+      sessionStatus.value = "loading";
+      errorMessage.value = "";
+      try {
+        const list = await client.listCurricula();
+        if (version !== sessionVersion.value) return;
+        const offering = await client.listOfferingSnapshots();
+        if (version !== sessionVersion.value) return;
+        curricula.value = list.items;
+        offeringSnapshots.value = offering.items;
+        unknownMessages.value = [
+          ...list.unknownMessages,
+          ...offering.unknownMessages,
+        ];
+        if (
+          !offering.items.some(
+            (item) => item.snapshotId === saved.selectedOfferingSnapshotId,
+          )
+        ) {
+          selectedOfferingSnapshotId.value = defaultOfferingSnapshotId(
+            offering.items,
+            client.mode,
+          );
+        }
+        if (
+          !list.items.some(
+            (item) => item.snapshotId === saved.selectedCurriculumId,
+          )
+        ) {
+          selectedCurriculumId.value = null;
+        }
+        sessionStatus.value = "ready";
+        // 记录列表不保存在浏览器里，恢复后重新读取，否则规划页会误以为还没有学业记录。
+        void loadRecords();
+      } catch (error) {
+        if (version !== sessionVersion.value) return;
+        if (error instanceof ApiFailure && error.kind === "aborted") return;
+        if (error instanceof ApiFailure && error.status === 401) {
+          // 服务端已不认这个令牌（过期，或本地服务重启后内存会话已丢失）：
+          // 清空草稿，明确提示，由学生自己重新开始。
+          draft.value = emptyPlanningDraft();
+          selectedRecordId.value = null;
+          invalidateSession("会话已过期，请重新开始。");
+          return;
+        }
+        sessionStatus.value = "error";
+        errorMessage.value = visibleError(error);
       }
     }
 
@@ -1063,7 +1187,17 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
         const list = await client.listSessionRecords(signal);
         if (!isCurrentRecordRequest(version)) return;
         records.value = list.items;
-        setSelectedRecord(list.items[0]?.academicRecordId ?? null);
+        // 刷新恢复时保留原先选中的记录；不在列表里才退回第一条。
+        // 只有真的换了记录才调用 setSelectedRecord：它会清空当前方案结果，
+        // 恢复或重新读取列表时不能把刚恢复的方案抹掉。
+        const kept = list.items.find(
+          (item) => item.academicRecordId === selectedRecordId.value,
+        );
+        const nextRecordId =
+          kept?.academicRecordId ?? list.items[0]?.academicRecordId ?? null;
+        if (nextRecordId !== selectedRecordId.value) {
+          setSelectedRecord(nextRecordId);
+        }
         recordsStatus.value = "ready";
       } catch (error) {
         if (!isCurrentRecordRequest(version)) return;
@@ -1297,6 +1431,41 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       }
     }
 
+    /** 本标签页要保存的内容；没有会话时为 null，表示应清除保存。 */
+    function savedSnapshot(): SavedPlanningSession | null {
+      if (!sessionId.value || !expiresAt.value) return null;
+      let token: string | null = null;
+      try {
+        token = client.currentSessionToken();
+      } catch {
+        token = null;
+      }
+      if (token === null) return null;
+      return {
+        sessionId: sessionId.value,
+        sessionToken: token,
+        expiresAt: expiresAt.value,
+        selectedCurriculumId: selectedCurriculumId.value,
+        selectedOfferingSnapshotId: selectedOfferingSnapshotId.value,
+        selectedRecordId: selectedRecordId.value,
+        draft: draft.value,
+        planningResult: planningResult.value,
+        editedPlans: editedPlans.value,
+        teacherPickDisplayNames: teacherPickDisplayNames.value,
+      };
+    }
+
+    if (storage !== null && client.mode !== "fixture") {
+      watch(
+        savedSnapshot,
+        (snapshot) => {
+          if (snapshot === null) clearSavedSession(storage);
+          else writeSavedSession(storage, snapshot);
+        },
+        { deep: true },
+      );
+    }
+
     onScopeDispose(() => {
       clearExpiryTimer();
       discardSubmission();
@@ -1331,6 +1500,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       selectedCurriculum,
       offeringSnapshots,
       selectedOfferingSnapshotId,
+      selectedOfferingSnapshot,
       usableOfferingSnapshots,
       unknownMessages,
       errorMessage,
@@ -1371,6 +1541,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
       currentQuestion,
       questions,
       startSession,
+      restoreSavedSession,
       invalidateSession,
       chooseCurriculum,
       chooseOfferingSnapshot,
@@ -1397,4 +1568,7 @@ export function createPlanningStore(client: CoursePilotApiClient = api) {
   });
 }
 
-export const usePlanningStore = createPlanningStore();
+export const usePlanningStore = createPlanningStore(
+  api,
+  defaultSessionStorage(),
+);

@@ -8,21 +8,59 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request
 
+from agent_runtime.adapters.tool_client import (
+    ToolClient,
+    ToolContractViolation,
+    ToolRejected,
+    ToolUnavailable,
+)
 from agent_runtime.api.deps import (
     get_idempotency,
     get_runner,
     get_spend_ledger,
+    get_tool_client,
     require_subject,
 )
 from agent_runtime.api.errors import envelope
 from agent_runtime.api.idempotency import IdempotencyStore
-from agent_runtime.api.schemas import PlanningRequest
+from agent_runtime.api.schemas import PlanningContext, PlanningRequest
 from agent_runtime.application.budget import SessionSpendLedger
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.ids import digest
 from agent_runtime.application.runner import PlanningRunner
 
 router = APIRouter()
+
+
+def _planning_context(
+    tool_client: ToolClient,
+    context: ExecutionContext,
+    offering_snapshot_id: str | None,
+) -> PlanningContext:
+    """Label the plan: it is for next term, checked against the snapshot's own term.
+
+    The term and validation come from Java's offering snapshot list. When that list
+    is unavailable or lacks the snapshot, those fields are null and the page must
+    say the term is unknown. They are never guessed from the snapshot id.
+    """
+    if offering_snapshot_id is None:
+        return PlanningContext(
+            targetTerm="NEXT_SEMESTER",
+            timetableReferenceSnapshotId=None,
+            timetableReferenceTermId=None,
+            timetableSourceValidation=None,
+        )
+    try:
+        snapshots = tool_client.call("listOfferingSnapshots", None, context)
+    except (ToolUnavailable, ToolRejected, ToolContractViolation):
+        snapshots = []
+    match = next((item for item in snapshots if item.snapshotId == offering_snapshot_id), None)
+    return PlanningContext(
+        targetTerm="NEXT_SEMESTER",
+        timetableReferenceSnapshotId=offering_snapshot_id,
+        timetableReferenceTermId=match.termId if match is not None else None,
+        timetableSourceValidation=match.sourceValidation if match is not None else None,
+    )
 
 
 @router.post("/api/v1/planning")
@@ -35,6 +73,7 @@ def plan(
     runner: Annotated[PlanningRunner, Depends(get_runner)],
     idempotency: Annotated[IdempotencyStore, Depends(get_idempotency)],
     spend_ledger: Annotated[SessionSpendLedger, Depends(get_spend_ledger)],
+    tool_client: Annotated[ToolClient, Depends(get_tool_client)],
 ) -> dict:
     body_digest = digest(
         json.dumps(body.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
@@ -60,14 +99,25 @@ def plan(
             subject_id, settings.max_input_tokens, settings.max_output_tokens
         )
         try:
-            answer = runner.run(body, context)
-        except Exception as exc:
-            # 失败也可能已经花过 token：异常上带了实际用量就按实际结算，否则整笔释放。
-            reservation.settle(
-                getattr(exc, "input_tokens", None), getattr(exc, "output_tokens", None)
+            try:
+                answer = runner.run(body, context)
+            except Exception as exc:
+                # 失败也可能已经花过 token：异常上带了实际用量就按实际结算，否则整笔释放。
+                reservation.settle(
+                    getattr(exc, "input_tokens", None), getattr(exc, "output_tokens", None)
+                )
+                raise
+            reservation.settle(answer.usage.inputTokens, answer.usage.outputTokens)
+            answer = answer.model_copy(
+                update={
+                    "planningContext": _planning_context(
+                        tool_client, context, body.offeringSnapshotId
+                    )
+                }
             )
-            raise
-        reservation.settle(answer.usage.inputTokens, answer.usage.outputTokens)
+        finally:
+            # 已结算时是空操作；取消等其它 BaseException 也不会留下占用的预留。
+            reservation.release()
         return envelope(x_request_id, "OK", answer).model_dump(mode="json")
 
     return idempotency.run(subject_id, "planning", idempotency_key, body_digest, produce)

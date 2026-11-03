@@ -22,6 +22,20 @@ class Budget:
     max_tool_calls: int = 6
     max_model_calls: int = 3
     deadline_ms: int = 45000
+    # listOfferings lookups for the run (offered-this-term precheck plus section
+    # assignment). Counted apart from max_tool_calls: the 6-call run budget is already
+    # used by audit, school progress, courses, teacher options, reviews and validation.
+    # RunManifest has no field for this yet, so the cap is not recorded there.
+    max_offering_calls: int = 16
+    # Part of max_offering_calls the offered-this-term precheck may spend (its unfiltered
+    # scan included). The rest is kept for section assignment of the courses the model
+    # picked. Must not exceed max_offering_calls.
+    max_offering_precheck_calls: int = 10
+    # searchReviews lookups, one per course (Java takes a single courseCode per call).
+    # Counted apart from max_tool_calls so that a review lookup can never use up the
+    # calls needed for validation. Eight covers a typical recommendation list; the
+    # per-tool cap in harness/tool_policy.yaml (searchReviews) must not exceed it.
+    max_review_calls: int = 8
 
 
 class BudgetExceeded(RuntimeError):
@@ -35,8 +49,40 @@ class BudgetTracker:
     output_tokens: int | None = None
     tool_calls: int = 0
     model_calls: int = 0
+    offering_calls: int = 0
+    review_calls: int = 0
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     _per_tool: dict[str, int] = field(default_factory=dict)
+
+    def record_offering_call(self, tool_caps: dict[str, int] | None = None) -> None:
+        """Count one listOfferings lookup against maxOfferingCalls and the tool cap.
+
+        Does not touch ``tool_calls``: offering lookups have their own cap (see
+        ``Budget.max_offering_calls``). The per-tool cap still applies.
+        """
+        name = "listOfferings"
+        if self.offering_calls >= self.budget.max_offering_calls:
+            raise BudgetExceeded("maxOfferingCalls exceeded")
+        if tool_caps is not None:
+            if name not in tool_caps or self._per_tool.get(name, 0) >= tool_caps[name]:
+                raise BudgetExceeded(f"tool_policy 不允许再调用 {name}")
+            self._per_tool[name] = self._per_tool.get(name, 0) + 1
+        self.offering_calls += 1
+
+    def record_review_call(self, tool_caps: dict[str, int] | None = None) -> None:
+        """Count one searchReviews lookup against maxReviewCalls and the tool cap.
+
+        Like ``record_offering_call``, this does not touch ``tool_calls``: review
+        lookups have their own cap so they cannot starve validation.
+        """
+        name = "searchReviews"
+        if self.review_calls >= self.budget.max_review_calls:
+            raise BudgetExceeded("maxReviewCalls exceeded")
+        if tool_caps is not None:
+            if name not in tool_caps or self._per_tool.get(name, 0) >= tool_caps[name]:
+                raise BudgetExceeded(f"tool_policy 不允许再调用 {name}")
+            self._per_tool[name] = self._per_tool.get(name, 0) + 1
+        self.review_calls += 1
 
     def record_tool_call(
         self,
@@ -93,9 +139,10 @@ class SessionSpendCap:
       挡住「多开会话」绕过每会话上限的情况。
 
     这里的类默认值只在直接构造 SessionSpendCap 时生效。应用实际使用的是 Settings：
-    CP_SESSION_MAX_OUTPUT_TOKENS 默认 10000（不是这里的 20000），CP_SESSION_MAX_INPUT_TOKENS
-    默认 40000（单次运行输入预算 8000 的 5 倍），CP_MODEL_DAILY_TOKEN_CAP 默认 1000000。
-    和 Budget 一样属于部署设置，不是 harness 文件，演化器改不到。
+    CP_SESSION_MAX_INPUT_TOKENS 默认 100000、CP_SESSION_MAX_OUTPUT_TOKENS 默认 40000、
+    CP_MODEL_DAILY_TOKEN_CAP 默认 1000000。会话默认值够一个正常会话跑 10 轮对话加 3 次规划
+    （见 tests/test_advice_chat_budget.py）。和 Budget 一样属于部署设置，不是 harness 文件，
+    演化器改不到。
     """
 
     max_input_tokens: int = 40000
@@ -105,7 +152,12 @@ class SessionSpendCap:
 
 
 class SpendReservation:
-    """一笔尚未结算的预留。settle / release 只生效一次，重复调用无害。"""
+    """一笔尚未结算的预留。settle / release 只生效一次，重复调用无害。
+
+    用法：``with ledger.reserve(...) as r:``，块内成功或失败都要调用 ``r.settle``；
+    退出块时若仍未结算，``__exit__`` 整笔释放。这样取消、其它 BaseException 或漏写
+    settle 的分支都不会留下永久占用的预留。
+    """
 
     def __init__(
         self,
@@ -134,8 +186,14 @@ class SpendReservation:
         )
 
     def release(self) -> None:
-        """调用失败且没有实际用量时整笔释放。"""
+        """调用失败且没有实际用量时整笔释放。已结算后再调用无效。"""
         self.settle(None, None)
+
+    def __enter__(self) -> SpendReservation:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.release()
 
 
 class SessionSpendLedger:
@@ -175,14 +233,25 @@ class SessionSpendLedger:
             spent_in, spent_out = self._spent.get(session_id, (0, 0))
             fly_in, fly_out = self._inflight.get(session_id, (0, 0))
             if spent_in + fly_in + input_tokens > self._cap.max_input_tokens:
-                raise BudgetExceeded("本会话累计 input token 已达上限，请新建会话")
+                raise BudgetExceeded(
+                    "本会话额度已用完（会话累计输入 token 已达上限）。"
+                    "请新建会话后再试；新建会话只重置本会话额度，今日全站额度不变。"
+                )
             if spent_out + fly_out + output_tokens > self._cap.max_output_tokens:
-                raise BudgetExceeded("本会话累计 output token 已达上限，请新建会话")
+                raise BudgetExceeded(
+                    "本会话额度已用完（会话累计输出 token 已达上限）。"
+                    "请新建会话后再试；新建会话只重置本会话额度，今日全站额度不变。"
+                )
             if session_id not in self._spent and len(self._spent) >= self._cap.max_tracked_sessions:
-                raise BudgetExceeded("在跟踪的会话数已达上限，暂不接受新会话的规划请求")
+                raise BudgetExceeded(
+                    "服务当前跟踪的会话数已满，暂不接受新会话的模型请求，请稍后再试。这不是会话额度用完。"
+                )
             total = input_tokens + output_tokens
             if self._daily_used + self._daily_inflight + total > self._cap.max_daily_tokens:
-                raise BudgetExceeded("今日模型用量已达全局上限，请明天再试")
+                raise BudgetExceeded(
+                    "今日全站模型额度已用完（所有会话合计达到每日上限）。"
+                    "新建会话不会重置，请明天（UTC 0 点后）再试。"
+                )
             self._spent.setdefault(session_id, (0, 0))
             self._inflight[session_id] = (fly_in + input_tokens, fly_out + output_tokens)
             self._daily_inflight += total

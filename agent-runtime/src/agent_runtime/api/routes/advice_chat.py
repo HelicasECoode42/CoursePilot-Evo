@@ -56,14 +56,18 @@ def advice_chat(
             subject_id, settings.max_input_tokens, settings.max_output_tokens
         )
         try:
-            answer = service.run(body, context)
-        except Exception as exc:
-            # ModelInvalidOutput 等异常上带着模型已返回的实际用量，按它结算；否则整笔释放。
-            reservation.settle(
-                getattr(exc, "input_tokens", None), getattr(exc, "output_tokens", None)
-            )
-            raise
-        reservation.settle(answer.usage.inputTokens, answer.usage.outputTokens)
+            try:
+                answer = service.run(body, context)
+            except Exception as exc:
+                # ModelInvalidOutput 等异常上带着模型已返回的实际用量，按它结算；否则整笔释放。
+                reservation.settle(
+                    getattr(exc, "input_tokens", None), getattr(exc, "output_tokens", None)
+                )
+                raise
+            reservation.settle(answer.usage.inputTokens, answer.usage.outputTokens)
+        finally:
+            # 已结算时是空操作；取消等其它 BaseException 也不会留下占用的预留。
+            reservation.release()
         return envelope(x_request_id, "OK", answer).model_dump(mode="json")
 
     return idempotency.run(

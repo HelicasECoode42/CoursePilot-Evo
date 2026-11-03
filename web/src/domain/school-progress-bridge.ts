@@ -43,6 +43,22 @@ function messageType(data: unknown): string | null {
   return typeof type === "string" ? type : null;
 }
 
+/**
+ * 保存失败时给学生看的话。会话过期（HTTP 401，常见于服务重启后）单独说清楚，
+ * 免得学生以为是文件或网络的问题，而不知道要重新开始。
+ */
+export function schoolImportErrorMessage(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { status?: unknown }).status === 401
+  )
+    return "会话已过期，请重新开始后再导入。";
+  return error instanceof Error && error.message
+    ? error.message
+    : "未能保存学校学业进度，请重试。";
+}
+
 export function createSchoolProgressBridge(
   deps: BridgeDeps,
 ): SchoolProgressBridge {
@@ -103,10 +119,7 @@ export function createSchoolProgressBridge(
           deps.post({ type: "CP_IMPORT_ACCEPTED", requestId, ok: false });
           return {
             kind: "failed",
-            message:
-              error instanceof Error && error.message
-                ? error.message
-                : "未能保存学校学业进度，请重试。",
+            message: schoolImportErrorMessage(error),
           };
         }
       })();

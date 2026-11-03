@@ -22,7 +22,7 @@ public class TimeParser {
     public static final int MAX_MEETINGS = 40;
 
     /**
-     * 一个完整的排课段：星期 + 节次 + 周次块。
+     * 一个完整的排课段：星期 + 节次（可多段）+ 周次块。
      *
      * 用一个整体正则逐段匹配，而不是分别 find 星期/节次/周次。原先的写法
      * 对每种各取第一个匹配，遇到「星期一第1-2节{1-16周},星期三第3-4节{1-16周}」
@@ -33,7 +33,7 @@ public class TimeParser {
      * 真实快照写「星期三」，演示种子写「周三」，两种都要认。日/天 都表示周日。
      */
     private static final Pattern BLOCK = Pattern.compile(
-        "(?:星期|周)([一二三四五六日天])第(\\d+)(?:-(\\d+))?节\\{([^{}]*)\\}");
+        "(?:星期|周)([一二三四五六日天])第((?:\\d+(?:-\\d+)?)(?:[,，](?:\\d+(?:-\\d+)?))*)节\\{([^{}]*)\\}");
 
     private static final Map<String, Integer> DAY_MAP = Map.of(
         "一", 1, "二", 2, "三", 3, "四", 4, "五", 5, "六", 6, "日", 7, "天", 7
@@ -61,39 +61,43 @@ public class TimeParser {
             cursor = matcher.end();
 
             int day = DAY_MAP.get(matcher.group(1));
-            int start;
-            int end;
+
+            // 一个周次块可以对应多段节次，例如「星期四第3-4,7-8节{9-12周}」= 两段同周次的课。
+            List<int[]> ranges;
             try {
-                start = Integer.parseInt(matcher.group(2));
-                end = matcher.group(3) == null ? start : Integer.parseInt(matcher.group(3));
+                ranges = parseSectionRanges(matcher.group(2));
             } catch (NumberFormatException e) {
                 // 正则只保证是数字串，不保证能放进 int。这段文本来自调用方，不能让它逃成 500。
                 return ParseOutcome.unknown("节次数字过大无法识别：" + raw);
             }
-            if (start > end) {
-                return ParseOutcome.unknown("节次起始大于结束：" + raw);
-            }
-            if (start < 1 || end > MAX_SECTION) {
-                return ParseOutcome.outOfContract("节次超出契约上限 1-" + MAX_SECTION + "：" + raw);
-            }
-            if (meetings.size() >= MAX_MEETINGS) {
-                return ParseOutcome.outOfContract("段数超出契约上限 " + MAX_MEETINGS + "：" + raw);
+            for (int[] range : ranges) {
+                if (range[0] > range[1]) {
+                    return ParseOutcome.unknown("节次起始大于结束：" + raw);
+                }
+                if (range[0] < 1 || range[1] > MAX_SECTION) {
+                    return ParseOutcome.outOfContract("节次超出契约上限 1-" + MAX_SECTION + "：" + raw);
+                }
             }
 
             Set<Integer> weeks;
             try {
-                weeks = parseWeeks(matcher.group(4));
+                weeks = parseWeeks(matcher.group(3));
             } catch (OutOfContractException e) {
                 return ParseOutcome.outOfContract(e.getMessage() + "：" + raw);
             } catch (RuntimeException e) {
-                return ParseOutcome.unknown("周次格式无法识别：" + matcher.group(4));
+                return ParseOutcome.unknown("周次格式无法识别：" + matcher.group(3));
             }
             // 单双周过滤后可能为空（例如 {2-2周(单)}）。这时不能说「这段没课」。
             if (weeks.isEmpty()) {
                 return ParseOutcome.unknown("周次为空：" + raw);
             }
 
-            meetings.add(new MeetingTime(day, start, end, weeks));
+            for (int[] range : ranges) {
+                if (meetings.size() >= MAX_MEETINGS) {
+                    return ParseOutcome.outOfContract("段数超出契约上限 " + MAX_MEETINGS + "：" + raw);
+                }
+                meetings.add(new MeetingTime(day, range[0], range[1], new TreeSet<>(weeks)));
+            }
         }
         residue.append(text.substring(cursor));
 
@@ -109,6 +113,18 @@ public class TimeParser {
         }
 
         return ParseOutcome.ok(List.copyOf(meetings));
+    }
+
+    /** 把「3-4,7-8」拆成 [3,4]、[7,8]；单个节次记为 [n,n]。正则已保证格式，只可能因数字过大抛 NumberFormatException。 */
+    private static List<int[]> parseSectionRanges(String sections) {
+        List<int[]> ranges = new ArrayList<>();
+        for (String part : sections.split("[,，]")) {
+            String[] se = part.split("-");
+            int start = Integer.parseInt(se[0]);
+            int end = se.length == 2 ? Integer.parseInt(se[1]) : start;
+            ranges.add(new int[] {start, end});
+        }
+        return ranges;
     }
 
     private Set<Integer> parseWeeks(String block) {

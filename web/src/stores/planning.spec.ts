@@ -48,9 +48,24 @@ function fakeClient(
       items: [],
       unknownMessages: [],
     })),
+    summarizeOfferings: vi.fn(async () => ({
+      items: [],
+      unknownCourseCodes: [],
+      status: "OK" as const,
+    })),
     clearSession: vi.fn(),
+    restoreSession: vi.fn(),
+    currentSessionToken: vi.fn(() => null),
     fixtureAcademicRecordId: vi.fn(() => null),
     listSessionRecords: vi.fn(async () => ({ items: [] })),
+    addSessionPlanCourse: vi.fn(async (body) => ({
+      previousPlanId: body.previousPlanId,
+      planId: "plan-added",
+      items: [],
+      hardConstraints: [],
+      verification: null,
+      empty: true,
+    })),
     removeSessionPlanCourse: vi.fn(async (body) => ({
       previousPlanId: body.previousPlanId,
       planId: "plan-empty",
@@ -244,26 +259,34 @@ describe("planning session store", () => {
     );
   });
 
-  it("tells the student the session advice budget is spent and offers no retry that cannot succeed", async () => {
+  it("shows the server's budget message verbatim and offers no retry that cannot succeed", async () => {
+    const serverText =
+      "今日全站模型额度已用完（所有会话合计达到每日上限）。新建会话不会重置，请明天（UTC 0 点后）再试。";
     const adviceChat = vi
       .fn()
       .mockRejectedValue(
-        new ApiFailure(
-          "本会话累计 output token 已达上限，请新建会话",
-          "http",
-          503,
-          "BUDGET_EXCEEDED",
-        ),
+        new ApiFailure(serverText, "http", 503, "BUDGET_EXCEEDED"),
       );
     const store = createPlanningStore(fakeClient({ adviceChat }))();
     await store.startSession();
     expect(await store.sendAdviceMessage("再问一个问题")).toBe(false);
     expect(store.adviceFailure?.retryMode).toBe("none");
-    expect(store.adviceError).toContain("对话额度已用完");
+    expect(store.adviceError).toBe(serverText);
     expect(store.adviceError).not.toContain("重新生成");
     expect(await store.retryAdviceMessage()).toBe(false);
     expect(await store.regenerateAdviceMessage()).toBe(false);
     expect(adviceChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the generic budget sentence only when the server sent no message", async () => {
+    const adviceChat = vi
+      .fn()
+      .mockRejectedValue(new ApiFailure("", "http", 503, "BUDGET_EXCEEDED"));
+    const store = createPlanningStore(fakeClient({ adviceChat }))();
+    await store.startSession();
+    expect(await store.sendAdviceMessage("再问一个问题")).toBe(false);
+    expect(store.adviceFailure?.retryMode).toBe("none");
+    expect(store.adviceError).toContain("对话额度已用完");
   });
 
   it("uses a new explicit key to regenerate terminal model failures and preserves adopted preferences", async () => {
@@ -2024,18 +2047,34 @@ describe("offering snapshot selection", () => {
     expect(store.usableOfferingSnapshots).toEqual([]);
   });
 
-  it("lets the user choose when several offerings are usable", async () => {
-    const first = offering("offer-a", "BROWSER_SNAPSHOT", "VERIFIED");
-    const second = offering("offer-b", "BROWSER_SNAPSHOT", "VERIFIED");
-    const { store, start } = startWith([first, second]);
+  it("defaults to the newest verified offering but still lets the user change it", async () => {
+    const older = offering("offer-a", "BROWSER_SNAPSHOT", "VERIFIED");
+    older.createdAt = "2025-08-01T00:00:00Z";
+    const newer = offering("offer-b", "BROWSER_SNAPSHOT", "VERIFIED");
+    newer.createdAt = "2025-09-01T00:00:00Z";
+    const { store, start } = startWith([older, newer]);
 
     await start();
 
-    expect(store.selectedOfferingSnapshotId).toBeNull();
-    store.chooseOfferingSnapshot("offer-unknown");
-    expect(store.selectedOfferingSnapshotId).toBeNull();
-    store.chooseOfferingSnapshot("offer-b");
     expect(store.selectedOfferingSnapshotId).toBe("offer-b");
+    store.chooseOfferingSnapshot("offer-unknown");
+    expect(store.selectedOfferingSnapshotId).toBe("offer-b");
+    store.chooseOfferingSnapshot("offer-a");
+    expect(store.selectedOfferingSnapshotId).toBe("offer-a");
+  });
+
+  it("defaults to the official timetable when nothing is verified", async () => {
+    const { store, start } = startWith([
+      offering("offer-official", "OFFICIAL_DOCUMENT", "UNVERIFIED"),
+    ]);
+
+    await start();
+
+    expect(store.selectedOfferingSnapshotId).toBe("offer-official");
+    expect(store.planningMode).toBe("REAL");
+    expect(store.selectedOfferingSnapshot?.sourceKind).toBe(
+      "OFFICIAL_DOCUMENT",
+    );
   });
 
   it("leaves the selection empty when there are no offerings at all", async () => {

@@ -336,7 +336,8 @@ describe("个人控制台", () => {
     await flushPromises();
     const text = wrapper.text();
     expect(text).not.toContain("已确认教过这门课的教师");
-    expect(text).not.toContain("未绑定教师");
+    // 名字只能作为「来源标注、未核实」出现，不能写成这位教师教过这门课。
+    expect(text).toContain("来源标注：未绑定教师（未核实）");
     // 但要把这件事说出来，不能静悄悄吞掉。
     expect(text).toContain("没有确认这位教师教过这门课");
   });
@@ -607,5 +608,205 @@ describe("个人控制台", () => {
   it("说明确认采用的聊天内容会进入本次规划草稿", async () => {
     const { wrapper } = await mountDashboard();
     expect(wrapper.text()).toContain("确认采用的兴趣或课程会进入本次规划草稿");
+  });
+});
+
+describe("个人控制台 · 学业记录来源", () => {
+  it("手动补录的学业记录在 /me 显示为「手动补录」，不再只藏在记录页里", async () => {
+    const { wrapper, store } = await mountDashboard(false);
+    store.$patch({
+      records: [
+        {
+          academicRecordId: "rec-manual",
+          curriculumSnapshotId: "curr-real",
+          completedCourses: [],
+          transcriptComplete: false,
+          sourceKind: "USER_IMPORT",
+          createdAt: "2026-10-30T00:00:00Z",
+        } as never,
+      ],
+    });
+    await flushPromises();
+    const list = wrapper.get('[aria-label="学业记录来源"]');
+    expect(list.text()).toContain("手动补录");
+    expect(list.text()).toContain("尚未确认填全");
+    expect(wrapper.get(".dash-record-list li").attributes("data-source")).toBe(
+      "USER_IMPORT",
+    );
+  });
+});
+
+describe("个人控制台 · 学校类别与核对摘要", () => {
+  it("我学了什么按学校类别分组，名字读不出来时用课程目录补", async () => {
+    const { wrapper, store } = await mountDashboard(true, true);
+    store.$patch({
+      records: [
+        {
+          academicRecordId: "rec-1",
+          revision: 1,
+          curriculumSnapshotId: "curr-real",
+          completedCourses: [
+            {
+              courseCode: "C-WITH-REVIEWS",
+              earnedCredits: 4,
+              outcome: "PASSED",
+              completedTerm: null,
+            },
+            {
+              courseCode: "X-LOOSE",
+              earnedCredits: null,
+              outcome: "IN_PROGRESS",
+              completedTerm: null,
+            },
+          ],
+          transcriptComplete: false,
+          sourceKind: "USER_IMPORT",
+          createdAt: "2026-10-30T00:00:00Z",
+        } as never,
+      ],
+      schoolProgress: {
+        receipt: {
+          schoolProgressId: "progress-1",
+          contentHash: "hash-1",
+          importedAt: "2026-10-30T00:00:00Z",
+          reused: true,
+        },
+        snapshot: {
+          nodes: [
+            {
+              nodeId: "g",
+              parentId: null,
+              schoolNodeId: null,
+              leaf: true,
+              name: "",
+              requiredCredits: 4,
+              earnedCredits: 4,
+              remainingCredits: 0,
+            },
+          ],
+          courses: [
+            {
+              nodeId: "g",
+              courseCode: "C-WITH-REVIEWS",
+              name: "",
+              credits: 4,
+              outcome: "PASSED",
+              completedYear: null,
+              completedTerm: null,
+              grade: null,
+              makeup: null,
+              retake: null,
+              suggestedYear: null,
+              suggestedTerm: null,
+            },
+          ],
+        },
+        academicRecord: {},
+      } as never,
+    });
+    await flushPromises();
+    wrapper
+      .findAll("button")
+      .find((button) => button.text() === "我学了什么")!
+      .trigger("click");
+    await flushPromises();
+    expect(
+      wrapper.findAll(".learned-group > summary").map((el) => el.text()),
+    ).toEqual(["类别名未读出 · 1 门课程", "其他 · 1 门课程"]);
+    expect(wrapper.get(".learned-group").text()).toContain("有评价的课");
+    expect(wrapper.get(".learned-group").text()).toContain("C-WITH-REVIEWS");
+    expect(wrapper.get(".learned-group").text()).toContain("4 学分");
+    expect(wrapper.get(".learned-group").text()).toContain("已修");
+    expect(wrapper.text()).not.toContain("· C-WITH-REVIEWS ·");
+  });
+
+  it("学校导入已读全时不给去勾选记录已完整的入口，并标出来源与在读学分", async () => {
+    const { wrapper, store } = await mountDashboard(true, true);
+    store.$patch({
+      schoolProgress: {
+        receipt: { importedAt: "2026-10-30T00:00:00Z" },
+        snapshot: { nodes: [], courses: [] },
+        academicRecord: {},
+      } as never,
+    });
+    // 直接赋值而不用 $patch：$patch 会合并进共享的 audit 夹具对象，污染其他用例。
+    store.audit = {
+      curriculumSnapshotId: "curr-fake",
+      academicRecordId: "rec-fake",
+      recordRevision: 2,
+      transcriptComplete: true,
+      transcriptCompleteSource: "SCHOOL_IMPORT_FULL",
+      requirements: [
+        {
+          requirementId: "req-gap",
+          category: "学科基础课",
+          courseCodes: [],
+          requiredCredits: 40,
+          earnedCredits: 6,
+          gapCredits: 34,
+          state: "UNSATISFIED",
+          sourceRefIds: ["ref-b"],
+          source: "SCHOOL_REPORT",
+          inProgressCredits: 0,
+        },
+      ],
+      suggestedCourseCodes: [],
+      unknowns: [],
+    };
+    await flushPromises();
+    const details = wrapper.get(".dashboard-panel > .record-help");
+    expect(details.text()).toContain("学校导入已读全，按完整记录核对");
+    expect(wrapper.find('a[href="/records?focus=complete"]').exists()).toBe(
+      false,
+    );
+  });
+
+  it("没有学校导入时，类别行标出按学校报告/本地核对与在读学分", async () => {
+    const { wrapper, store } = await mountDashboard(true, false);
+    store.audit = {
+      ...audit,
+      requirements: [
+        {
+          ...audit.requirements[1]!,
+          source: "LOCAL",
+          inProgressCredits: 3,
+        },
+      ],
+    };
+    await flushPromises();
+    const text = wrapper.get(".dash-audit").text();
+    expect(text).toContain("还差 13 学分");
+    expect(text).toContain("（本地核对）");
+    expect(text).toContain("另有 3 学分在读");
+  });
+
+  it("本地核对默认收起成一段摘要，并给出去勾选记录已完整的入口", async () => {
+    const { wrapper, store } = await mountDashboard(true, true);
+    store.$patch({
+      schoolProgress: {
+        receipt: { importedAt: "2026-10-30T00:00:00Z" },
+        snapshot: { nodes: [], courses: [] },
+        academicRecord: {},
+      } as never,
+      audit: {
+        ...audit,
+        unknowns: [
+          {
+            code: "COURSE_NOT_IN_CATALOG",
+            message: "课程 Z1 不在课程库中，无法归类",
+            field: "completedCourses",
+            retryable: false,
+          },
+        ],
+      },
+    });
+    await flushPromises();
+    const details = wrapper.get(".dashboard-panel > .record-help");
+    expect(details.attributes("open")).toBeUndefined();
+    expect(details.text()).toContain("本地核对暂无法给出结论");
+    expect(details.text()).toContain("1 门课无法归入本专业培养要求");
+    expect(wrapper.find('a[href="/records?focus=complete"]').exists()).toBe(
+      true,
+    );
   });
 });

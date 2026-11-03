@@ -69,6 +69,29 @@ python -m uvicorn agent_runtime.api.app:app --port 8000
 
 ## 当前限制（如实）
 
+- 班次选定（`application/section_assignment.py`，docs/36）：规划给出课程后，Runner 按
+  `offeringSnapshotId` 对每门课调用一次 `listOfferings`（Java 只接受单个 `courseCode`，没有游标），
+  再在 Java 返回的结构化 `meetings` 上做确定性选班：MUST 教师硬过滤、PREFER 教师和必避/偏好时段
+  排序、评价覆盖次数次之、`classId` 稳定排序。时间冲突只按 Java 返回的 `meetings` 判断，不解析
+  `meetingTextRaw`，最终判决仍以 `validatePlan` 为准。`UNPARSED`/`INVALID` 班次不会被自动选中。
+  无无冲突组合时只留出最少的课程不选班次，并在 `unknowns` 里给出 `SECTION_NOT_ASSIGNED` 与原因。
+- 本学期开课核对（`application/offering_check.py`）：给定 `offeringSnapshotId` 时，只有在该快照中
+  有班次的课程才会进入模型候选和推荐。先用一次不带 `courseCode` 的 `listOfferings`（limit 100）
+  取整页：不满 100 行即为整个快照，直接判定全部候选；满页时只能确认页内出现的课程开课，其余候选
+  逐门查询，直到找到 `max_course_facts` 门开课课程或用完 `Budget.max_offering_precheck_calls`（10）。
+  学生选定的课程（PIN_COURSE）总是先核对；未开课的选定课程保留在方案中，并给出
+  `SECTION_NOT_ASSIGNED`「本学期没有开设这门课」。模型选出未核实开课的课程会被丢弃（`NOT_OFFERED_DROPPED`
+  或 `UNVERIFIED_OFFERING_DROPPED`）。核对次数不足时在 `unknowns` 写明 `OFFERING_NOT_CHECKED`，
+  不把「没查」说成「没开」。
+- 班次查询单独计数：`Budget.max_offering_calls`（默认 16，`harness/tool_policy.yaml` 中 listOfferings
+  同为 16）不占用 `maxToolCalls=6`；其中开课核对最多用 `max_offering_precheck_calls`（10），其余留给
+  已选班次的课程。RunManifest 契约中尚无该字段，运行报告不记录这一上限；`usage.toolCalls` 也不含班次
+  查询次数。超过上限的课程不选班次，并说明原因。
+- 评价查询同样单独计数：`Budget.max_review_calls`（默认 8，`harness/tool_policy.yaml` 中
+  searchReviews 同为 8）。Java 的 `searchReviews` 每次只接受一个课程代码，因此按课程逐次查询，
+  仅限模型可见的前 `max_course_facts` 门候选课程。超出额度的课程状态为 `NOT_QUERIED`，
+  页面应写「本次规划未查询评价」，不能写成「没有评价」。
+- 模型已给出 `classId` 的条目保持原样，不参与本次选班的冲突计算，仍由 `validatePlan` 核验。
 - `FakeModelAdapter` 只从工具返回的课程 id 里挑候选，不是真实模型；只要走到假模型，
   `PlanningAnswer.unknowns` 就有 `FAKE_MODEL`。核验器假工具固定 `UNKNOWN` + `COURSE_ONLY`，
   不能当成无冲突课表。工具课程集为空时返回 `UNABLE_TO_VERIFY`，不报模型输出非法。

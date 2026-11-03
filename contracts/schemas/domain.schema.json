@@ -818,6 +818,7 @@
           "type": "string",
           "enum": [
             "BROWSER_SNAPSHOT",
+            "OFFICIAL_DOCUMENT",
             "SYNTHETIC"
           ]
         },
@@ -851,7 +852,7 @@
             "$ref": "#/$defs/CourseOffering"
           },
           "minItems": 1,
-          "maxItems": 2000
+          "maxItems": 7000
         }
       },
       "required": [
@@ -861,6 +862,111 @@
         "capturedAt",
         "calendar",
         "offerings"
+      ]
+    },
+    "OfferingVerificationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "1.0"
+        },
+        "verifierName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "uploaderName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "sampleSize": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 100000
+        },
+        "errorCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "sampleFileSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "verifierName",
+        "uploaderName",
+        "sampleSize",
+        "errorCount",
+        "sampleFileSha256"
+      ]
+    },
+    "OfferingVerificationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "snapshotId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "verificationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "VERIFIED",
+            "REJECTED"
+          ]
+        },
+        "sourceValidation": {
+          "type": "string",
+          "enum": [
+            "VERIFIED",
+            "UNVERIFIED"
+          ]
+        },
+        "sampleSize": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 100000
+        },
+        "errorCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "verifiedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "snapshotId",
+        "verificationId",
+        "outcome",
+        "sourceValidation",
+        "sampleSize",
+        "errorCount",
+        "verifiedAt"
       ]
     },
     "AuditRequest": {
@@ -974,6 +1080,28 @@
           },
           "minItems": 1,
           "maxItems": 20
+        },
+        "source": {
+          "description": "LOCAL：按本地课程折算；SCHOOL_REPORT：学分直接取自学校报告的同名类别（按学校报告，非本地核对）。缺省视为 LOCAL。",
+          "type": "string",
+          "enum": [
+            "LOCAL",
+            "SCHOOL_REPORT"
+          ]
+        },
+        "inProgressCredits": {
+          "description": "在读课程的学分，不计入 earnedCredits；学分未知时为 null。缺省表示未提供。",
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "multipleOf": 0.01
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1007,6 +1135,21 @@
         },
         "transcriptComplete": {
           "type": "boolean"
+        },
+        "transcriptCompleteSource": {
+          "description": "transcriptComplete 为 true 时的依据：SCHOOL_IMPORT_FULL 为学校导入读全，MANUAL 为手动声明；为 false 时为 null。",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "SCHOOL_IMPORT_FULL",
+                "MANUAL"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "requirements": {
           "type": "array",
@@ -1103,6 +1246,115 @@
       "required": [
         "previousPlanId",
         "courseCode"
+      ]
+    },
+    "SessionPlanCourseAddRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "previousPlanId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "courseCode": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "classId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "previousPlanId",
+        "courseCode"
+      ]
+    },
+    "PlanningContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "targetTerm": {
+          "const": "NEXT_SEMESTER"
+        },
+        "timetableReferenceSnapshotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timetableReferenceTermId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timetableSourceValidation": {
+          "anyOf": [
+            {
+              "enum": [
+                "VERIFIED",
+                "UNVERIFIED",
+                "SYNTHETIC"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "targetTerm",
+        "timetableReferenceSnapshotId",
+        "timetableReferenceTermId",
+        "timetableSourceValidation"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "timetableReferenceSnapshotId": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "timetableReferenceSnapshotId"
+            ]
+          },
+          "then": {
+            "properties": {
+              "timetableReferenceTermId": {
+                "type": "null"
+              },
+              "timetableSourceValidation": {
+                "type": "null"
+              }
+            }
+          }
+        }
       ]
     },
     "SessionPlanEditResult": {
@@ -1348,6 +1600,14 @@
           },
           "minItems": 0,
           "maxItems": 200
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanSection"
+          },
+          "minItems": 2,
+          "maxItems": 2
         }
       },
       "required": [
@@ -1360,7 +1620,8 @@
         "violations",
         "unknownChecks",
         "performedChecks",
-        "sourceRefIds"
+        "sourceRefIds",
+        "sections"
       ],
       "allOf": [
         {
@@ -1397,6 +1658,81 @@
             "properties": {
               "offeringSnapshotId": {
                 "$ref": "#/$defs/PlanValidation/properties/curriculumSnapshotId"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "VALID"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sections": {
+                "items": {
+                  "properties": {
+                    "verdict": {
+                      "const": "VALID"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "INVALID"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sections": {
+                "contains": {
+                  "properties": {
+                    "verdict": {
+                      "const": "INVALID"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "UNKNOWN"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sections": {
+                "contains": {
+                  "properties": {
+                    "verdict": {
+                      "const": "UNKNOWN"
+                    }
+                  }
+                },
+                "items": {
+                  "properties": {
+                    "verdict": {
+                      "not": {
+                        "const": "INVALID"
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -1875,6 +2211,16 @@
             "outputTokens",
             "toolCalls",
             "elapsedMs"
+          ]
+        },
+        "planningContext": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanningContext"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -2367,6 +2713,7 @@
           "enum": [
             "CURRICULUM_FILE",
             "BROWSER_SNAPSHOT",
+            "OFFICIAL_DOCUMENT",
             "SYNTHETIC"
           ]
         },
@@ -2457,6 +2804,33 @@
           },
           "minItems": 0,
           "maxItems": 200
+        },
+        "courseName": {
+          "description": "课程名称（培养方案快照中的课程名）；无法对应时为 null。",
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "sectionCount": {
+          "description": "本学期开课表中该课程 + 教师的班次数（OFFERING_SNAPSHOT 时必填）；classIds 可能被截断到 200，以本字段为准。",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "offeringSnapshotId": {
+          "description": "提供开课事实的开课快照编号（OFFERING_SNAPSHOT 时必填）。",
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$",
+          "maxLength": 120
+        },
+        "offeringSourceValidation": {
+          "description": "所引用开课快照的 sourceValidation。只有 VERIFIED 时 availability 才可能为 CURRENT_VERIFIED；OFFERING_SNAPSHOT 时必填。",
+          "type": ["string", "null"],
+          "enum": ["VERIFIED", "UNVERIFIED", "SYNTHETIC", null]
+        },
+        "factSource": {
+          "description": "这一对的事实来源：TEACHER_BINDING 为培养快照登记的教师绑定；OFFERING_SNAPSHOT 为开课快照中的本学期班次（未核验前 availability 为 UNKNOWN）。",
+          "type": ["string", "null"],
+          "enum": ["TEACHER_BINDING", "OFFERING_SNAPSHOT", null]
         }
       },
       "required": [
@@ -2466,7 +2840,21 @@
         "availability",
         "reviewNoteIds",
         "classIds"
-      ]
+      ],
+      "if": {
+        "properties": {
+          "factSource": { "const": "OFFERING_SNAPSHOT" }
+        },
+        "required": ["factSource"]
+      },
+      "then": {
+        "properties": {
+          "sectionCount": { "type": "integer", "minimum": 1 },
+          "offeringSnapshotId": { "type": "string" },
+          "offeringSourceValidation": { "type": "string", "enum": ["VERIFIED", "UNVERIFIED", "SYNTHETIC"] }
+        },
+        "required": ["sectionCount", "offeringSnapshotId", "offeringSourceValidation"]
+      }
     },
     "CareerDirection": {
       "type": "object",
@@ -3604,6 +3992,70 @@
           "$ref": "#/$defs/Usage"
         }
       }
+    },
+    "PlanSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "type": "string",
+          "enum": [
+            "TIMETABLE",
+            "CURRICULUM"
+          ]
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "VALID",
+            "INVALID",
+            "UNKNOWN"
+          ]
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        },
+        "unknownChecks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Issue"
+          },
+          "minItems": 0,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "scope",
+        "verdict",
+        "violations",
+        "unknownChecks"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "VALID"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "violations": {
+                "maxItems": 0
+              },
+              "unknownChecks": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

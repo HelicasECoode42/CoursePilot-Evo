@@ -73,6 +73,29 @@ class Recommendation(DomainModel):
     explorationDirections: list[ExplorationDirection] = Field(default_factory=list, max_length=3)
 
 
+class PlanningContext(DomainModel):
+    """Which term the plan is for, and which timetable it was checked against.
+
+    ``targetTerm`` is always NEXT_SEMESTER: the plan is for the coming term. The
+    timetable reference is the offering snapshot the plan used, labelled by its
+    term. When that snapshot is unknown, both reference fields are null, and so
+    is the source validation.
+    """
+
+    targetTerm: Literal["NEXT_SEMESTER"]
+    timetableReferenceSnapshotId: Id | None
+    timetableReferenceTermId: Id | None
+    timetableSourceValidation: Literal["VERIFIED", "UNVERIFIED", "SYNTHETIC"] | None
+
+    @model_validator(mode="after")
+    def _unknown_snapshot_has_no_term(self) -> PlanningContext:
+        if self.timetableReferenceSnapshotId is None and (
+            self.timetableReferenceTermId is not None or self.timetableSourceValidation is not None
+        ):
+            raise ValueError("a null timetable snapshot carries no term or validation")
+        return self
+
+
 class PlanningAnswer(DomainModel):
     taskId: Id
     traceId: Id
@@ -82,6 +105,7 @@ class PlanningAnswer(DomainModel):
     clarification: Question | None
     unknowns: list[Issue] = Field(max_length=200)
     usage: Usage
+    planningContext: PlanningContext | None = None
 
     @model_validator(mode="after")
     def _clarify_shape(self) -> PlanningAnswer:

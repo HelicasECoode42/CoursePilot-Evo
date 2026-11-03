@@ -1,0 +1,23 @@
+{
+  "curriculumSnapshotId": "synthetic-plan-2025",
+  "academicRecordId": "synthetic-student-01",
+  "recordRevision": 1,
+  "transcriptComplete": false,
+  "transcriptCompleteSource": null,
+  "requirements": [
+    {
+      "requirementId": "req-201",
+      "category": "体育",
+      "courseCodes": [],
+      "requiredCredits": 6,
+      "earnedCredits": 6,
+      "gapCredits": 0,
+      "state": "SATISFIED",
+      "sourceRefIds": ["curriculum:synthetic-plan-2025"],
+      "source": "PLAN_TEXT",
+      "inProgressCredits": 0
+    }
+  ],
+  "suggestedCourseCodes": [],
+  "unknowns": []
+}

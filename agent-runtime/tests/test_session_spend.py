@@ -50,7 +50,7 @@ def test_settle_replaces_the_reservation_with_actual_usage() -> None:
 def test_refused_reservation_leaves_nothing_behind() -> None:
     led = _ledger()
     led.record("session:a", 50, 0)
-    with pytest.raises(BudgetExceeded, match="input"):
+    with pytest.raises(BudgetExceeded, match="会话累计输入"):
         led.reserve("session:a", 60, 0)
     # 被拒的预留不能占额度：同样的会话，刚好够的请求仍然放行。
     led.reserve("session:a", 50, 0).release()
@@ -59,7 +59,7 @@ def test_refused_reservation_leaves_nothing_behind() -> None:
 def test_output_cap_refuses_at_reservation_time() -> None:
     led = _ledger()
     led.record("session:a", 0, 40)
-    with pytest.raises(BudgetExceeded, match="output"):
+    with pytest.raises(BudgetExceeded, match="会话累计输出"):
         led.reserve("session:a", 0, 20)
 
 
@@ -67,7 +67,7 @@ def test_in_flight_reservation_counts_against_a_concurrent_request() -> None:
     """第一个请求还没结算时，同一会话的第二个请求必须看到它占着的额度。"""
     led = _ledger()
     first = led.reserve("session:a", 60, 0)
-    with pytest.raises(BudgetExceeded, match="input"):
+    with pytest.raises(BudgetExceeded, match="会话累计输入"):
         led.reserve("session:a", 60, 0)
     first.settle(10, 0)
     led.reserve("session:a", 60, 0).release()
@@ -149,7 +149,7 @@ def test_daily_cap_is_shared_across_sessions() -> None:
     led = _ledger(max_daily_tokens=100)
     led.reserve("session:a", 60, 0).settle(60, 0)
     led.reserve("session:b", 30, 0).settle(30, 0)
-    with pytest.raises(BudgetExceeded, match="全局上限"):
+    with pytest.raises(BudgetExceeded, match="今日全站"):
         led.reserve("session:c", 20, 0)
     assert led.daily_used() == 90
 
@@ -157,7 +157,7 @@ def test_daily_cap_is_shared_across_sessions() -> None:
 def test_in_flight_reservations_count_against_the_daily_cap() -> None:
     led = _ledger(max_daily_tokens=100)
     held = led.reserve("session:a", 100, 0)
-    with pytest.raises(BudgetExceeded, match="全局上限"):
+    with pytest.raises(BudgetExceeded, match="今日全站"):
         led.reserve("session:b", 1, 0)
     held.release()
     led.reserve("session:b", 1, 0).release()
@@ -167,7 +167,7 @@ def test_daily_cap_resets_on_the_next_utc_day() -> None:
     today = [DAY]
     led = _ledger(today=lambda: today[0], max_daily_tokens=100)
     led.reserve("session:a", 100, 0).settle(100, 0)
-    with pytest.raises(BudgetExceeded, match="全局上限"):
+    with pytest.raises(BudgetExceeded, match="今日全站"):
         led.reserve("session:b", 1, 0)
     today[0] = date(2026, 10, 31)
     led.reserve("session:b", 100, 0).settle(100, 0)

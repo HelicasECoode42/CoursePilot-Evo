@@ -215,21 +215,38 @@ class PlanValidationEndpointTest {
     }
 
     @Test
-    @DisplayName("无法验的时间约束 -> 进 unknownChecks，verdict 不是 VALID（REAL 下）")
-    void unverifiableConstraintIsNotSilentlyValid() throws Exception {
+    @DisplayName("未核验来源下约束未命中 -> CONSTRAINT_CLEAR_UNVERIFIED_SOURCE 进 unknownChecks，verdict 仍是 UNKNOWN（REAL 下）")
+    void unverifiedSourceMissIsPreviewClearButStillUnknown() throws Exception {
         JsonNode d = data(validate(body("REAL", OWNER, ITEM_CS201, block("BLOCK_DAY", 3, null, "周三不排课"))));
-        assertNotEquals("VALID", d.get("verdict").asText());
         assertEquals("UNKNOWN", d.get("verdict").asText());
-        boolean fieldOk = false;
-        boolean found = false;
+        assertEquals(0, d.get("violations").size());
+        assertTrue(hasCode(d.get("unknownChecks"), "CONSTRAINT_CLEAR_UNVERIFIED_SOURCE"));
+        assertFalse(hasCode(d.get("unknownChecks"), "CONSTRAINT_UNVERIFIABLE"));
+        JsonNode clear = null;
         for (JsonNode n : d.get("unknownChecks")) {
-            if ("CONSTRAINT_UNVERIFIABLE".equals(n.get("code").asText())) {
-                found = true;
-                fieldOk = "hardConstraints[0]".equals(n.get("field").asText());
-            }
+            if ("CONSTRAINT_CLEAR_UNVERIFIED_SOURCE".equals(n.get("code").asText())) clear = n;
         }
-        assertTrue(found, "约束无法核验必须进 unknownChecks");
-        assertTrue(fieldOk, "未知项应指向 hardConstraints[0]");
+        assertNotNull(clear);
+        assertEquals("hardConstraints[0]", clear.get("field").asText());
+    }
+
+    @Test
+    @DisplayName("未核验来源下约束命中班次时间 -> CONSTRAINT_HIT_UNVERIFIED_SOURCE，不进 violations，verdict 仍是 UNKNOWN")
+    void unverifiedSourceHitIsPreviewHitButStillUnknown() throws Exception {
+        JsonNode d = data(validate(body("REAL", OWNER, ITEM_CS201, block("BLOCK_DAY", 5, null, "周五不排课"))));
+        assertEquals("UNKNOWN", d.get("verdict").asText());
+        assertEquals(0, d.get("violations").size());
+        assertTrue(hasCode(d.get("unknownChecks"), "CONSTRAINT_HIT_UNVERIFIED_SOURCE"));
+        assertFalse(hasCode(d.get("unknownChecks"), "CONSTRAINT_CLEAR_UNVERIFIED_SOURCE"));
+    }
+
+    @Test
+    @DisplayName("未核验来源下班次时间无法解析 -> CONSTRAINT_UNVERIFIABLE，仍是 UNKNOWN")
+    void unverifiedSourceUnparseableStaysUnverifiable() throws Exception {
+        JsonNode d = data(validate(body("REAL", OWNER, ITEM_CS103, block("BLOCK_DAY", 3, null, "周三不排课"))));
+        assertEquals("UNKNOWN", d.get("verdict").asText());
+        assertTrue(hasCode(d.get("unknownChecks"), "CONSTRAINT_UNVERIFIABLE"));
+        assertFalse(hasCode(d.get("unknownChecks"), "CONSTRAINT_CLEAR_UNVERIFIED_SOURCE"));
     }
 
     @Test
@@ -294,6 +311,51 @@ class PlanValidationEndpointTest {
         JsonNode d = data(validate(body("SIMULATION", OWNER, ITEM_CS103, c)));
         assertEquals("UNKNOWN", d.get("verdict").asText());
         assertTrue(hasCode(d.get("unknownChecks"), "CREDITS_UNKNOWN"));
+    }
+
+    // ------------------------------------------------------------- sections (timetable / curriculum)
+
+    private static JsonNode section(JsonNode d, String scope) {
+        for (JsonNode s : d.get("sections")) {
+            if (scope.equals(s.get("scope").asText())) return s;
+        }
+        throw new AssertionError("缺少分项 " + scope);
+    }
+
+    @Test
+    @DisplayName("分项：时间冲突只归 TIMETABLE，学分超限只归 CURRICULUM；总判决取两者最差")
+    void overallIsWorstSectionAndSectionsStaySeparate() throws Exception {
+        Transcript record = new Transcript("S812");
+        record.revise("TEST_CURR_MAX", true, Transcript.SourceKind.SYNTHETIC,
+            Instant.parse("2026-01-01T00:00:00Z"), java.util.List.of());
+        transcripts.save(record);
+        // CS101 + CS201 时间不冲突；上限 1 学分而两门合计 2 学分 -> 只有学分分项不通过。
+        String over = "{\"kind\":\"MAX_CREDITS\",\"courseCode\":null,\"teacherKey\":null,\"dayOfWeek\":null,\"section\":null,\"value\":1,\"sourceText\":\"最多1学分\"}";
+        String b = body("SIMULATION", "S812", ITEM_CS101 + "," + ITEM_CS201, over)
+            .replace("PLAN_CS_2025", "TEST_CURR_MAX");
+        JsonNode d = data(validateAs(b, "S812"));
+        assertEquals("INVALID", d.get("verdict").asText());
+        assertEquals(2, d.get("sections").size());
+        JsonNode timetable = section(d, "TIMETABLE");
+        assertEquals("VALID", timetable.get("verdict").asText());
+        assertEquals(0, timetable.get("violations").size());
+        assertEquals(0, timetable.get("unknownChecks").size());
+        JsonNode curriculum = section(d, "CURRICULUM");
+        assertEquals("INVALID", curriculum.get("verdict").asText());
+        assertTrue(hasCode(curriculum.get("violations"), "MAX_CREDITS_EXCEEDED"));
+        assertTrue(hasCode(d.get("violations"), "MAX_CREDITS_EXCEEDED"), "顶层 violations 仍是合并结果");
+    }
+
+    @Test
+    @DisplayName("分项：方案课未指定班次 -> TIMETABLE UNKNOWN(SECTION_UNASSIGNED)，CURRICULUM 不受影响")
+    void unassignedSectionMakesOnlyTimetableUnknown() throws Exception {
+        String item = "{\"courseCode\":\"CS201\",\"teacherKey\":null,\"classId\":null}";
+        JsonNode d = data(validate(body("SIMULATION", OWNER, item, "")));
+        assertEquals("UNKNOWN", d.get("verdict").asText());
+        JsonNode timetable = section(d, "TIMETABLE");
+        assertEquals("UNKNOWN", timetable.get("verdict").asText());
+        assertTrue(hasCode(timetable.get("unknownChecks"), "SECTION_UNASSIGNED"));
+        assertEquals("VALID", section(d, "CURRICULUM").get("verdict").asText());
     }
 
     // ------------------------------------------------------------- authorization and shape

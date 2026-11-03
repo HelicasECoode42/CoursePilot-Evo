@@ -38,9 +38,10 @@ class TeacherReviewEndpointTest {
     private static final String REVIEWS = "/api/v1/reviews/search";
     private static final String SNAPSHOT = "PLAN_CS_2025";
 
-    /** 契约 TeacherCourseOption 的字段集合，与 domain.schema.json 必填项一致（additionalProperties=false）。 */
+    /** 契约 TeacherCourseOption 的字段集合（additionalProperties=false）；键始终输出，无值为 null。 */
     private static final Set<String> OPTION_FIELDS = Set.of(
-        "courseCode", "teacherKey", "teacherDisplayName", "availability", "reviewNoteIds", "classIds");
+        "courseCode", "teacherKey", "teacherDisplayName", "availability", "reviewNoteIds", "classIds",
+        "courseName", "sectionCount", "offeringSnapshotId", "offeringSourceValidation", "factSource");
     /** 契约 ReviewNote 的字段集合（additionalProperties=false）。 */
     private static final Set<String> REVIEW_FIELDS = Set.of(
         "reviewNoteId", "courseCode", "teacherKey", "termId", "sourceKind", "publishedAt",

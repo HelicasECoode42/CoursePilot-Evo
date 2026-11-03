@@ -34,6 +34,26 @@ class PlanValidationRequest(DomainModel):
     hardConstraints: list[Constraint] = Field(max_length=30)
 
 
+PlanSectionScope = Literal["TIMETABLE", "CURRICULUM"]
+
+
+class PlanSection(DomainModel):
+    """contracts: PlanSection。
+    TIMETABLE 本学期课表 / CURRICULUM 毕业要求；verdict 只由本分项的列表推出。
+    """
+
+    scope: PlanSectionScope
+    verdict: Verdict
+    violations: list[Issue] = Field(max_length=200)
+    unknownChecks: list[Issue] = Field(max_length=200)
+
+    @model_validator(mode="after")
+    def _valid_implies_no_open_checks(self) -> PlanSection:
+        if self.verdict == "VALID" and (self.violations or self.unknownChecks):
+            raise ValueError("section verdict=VALID requires empty violations and unknownChecks")
+        return self
+
+
 class PlanValidation(DomainModel):
     verifierResultId: Id
     verdict: Verdict
@@ -43,6 +63,9 @@ class PlanValidation(DomainModel):
     recordRevision: int
     violations: list[Issue] = Field(max_length=200)
     unknownChecks: list[Issue] = Field(max_length=200)
+    # contracts 要求 Java 返回两项（TIMETABLE / CURRICULUM）。Python 侧暂缺省为空列表，
+    # 以免既有构造这一对象的 fake/测试数据失效；出现分项时按下方规则逐项约束。
+    sections: list[PlanSection] = Field(default_factory=list, max_length=2)
     performedChecks: list[Annotated[str, StringConstraints(min_length=1, max_length=80)]] = Field(
         max_length=40
     )
@@ -55,6 +78,18 @@ class PlanValidation(DomainModel):
         return self
 
     @model_validator(mode="after")
+    def _verdict_is_worst_section(self) -> PlanValidation:
+        if not self.sections:
+            return self
+        verdicts = {section.verdict for section in self.sections}
+        worst = (
+            "INVALID" if "INVALID" in verdicts else "UNKNOWN" if "UNKNOWN" in verdicts else "VALID"
+        )
+        if self.verdict != worst:
+            raise ValueError(f"verdict must equal the worst section verdict ({worst})")
+        return self
+
+    @model_validator(mode="after")
     def _time_scope_requires_offering(self) -> PlanValidation:
         if self.scope in ("REAL_TIMETABLE", "SIMULATION") and self.offeringSnapshotId is None:
             raise ValueError("scope REAL_TIMETABLE/SIMULATION requires offeringSnapshotId")
@@ -64,6 +99,12 @@ class PlanValidation(DomainModel):
 class SessionPlanCourseRemovalRequest(DomainModel):
     previousPlanId: Id
     courseCode: Id
+
+
+class SessionPlanCourseAddRequest(DomainModel):
+    previousPlanId: Id
+    courseCode: Id
+    classId: Id | None = None
 
 
 class SessionPlanEditResult(DomainModel):

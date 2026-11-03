@@ -49,7 +49,9 @@ class CatalogEnvelopeTest {
     @Test
     @DisplayName("GET /offerings：data 为 {items}，映射 classId/teacherText/parseStatus/meetings，无实体残留字段")
     void offeringsEnvelope() throws Exception {
-        mvc.perform(get("/api/v1/offerings").param("courseCode", "CS101").header("X-Service-Key", "test-key"))
+        mvc.perform(get("/api/v1/offerings").param("curriculumSnapshotId", "PLAN_CS_2025")
+                .param("offeringSnapshotId", "OFFER_2025_FALL").param("courseCode", "CS101")
+                .header("X-Service-Key", "test-key").header("X-Subject-Id", "S001"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data").isMap())
             .andExpect(jsonPath("$.data.items").isArray())
@@ -70,7 +72,9 @@ class CatalogEnvelopeTest {
     @Test
     @DisplayName("GET /offerings：时间待定的班次为 UNPARSED 且 meetings 为空")
     void unparsedOfferingIsMarked() throws Exception {
-        mvc.perform(get("/api/v1/offerings").param("courseCode", "CS103").header("X-Service-Key", "test-key"))
+        mvc.perform(get("/api/v1/offerings").param("curriculumSnapshotId", "PLAN_CS_2025")
+                .param("offeringSnapshotId", "OFFER_2025_FALL").param("courseCode", "CS103")
+                .header("X-Service-Key", "test-key").header("X-Subject-Id", "S001"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.items[0].classId").value("O_CS103_01"))
             .andExpect(jsonPath("$.data.items[0].parseStatus").value("UNPARSED"))

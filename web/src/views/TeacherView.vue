@@ -75,6 +75,8 @@ const coursesWithoutTeacher = computed(() =>
 );
 /** 教师资料是 UNKNOWN（快照缺失或非当前）：空列表不能说成「没有可比较的教师」。 */
 const optionsUnconfirmed = ref(false);
+/** 结果来自未核验的本学期开课表：只说明，不算错误。 */
+const offeringUnverified = ref(false);
 const expandedKey = ref<string | null>(null);
 const reviewStates = ref<Record<string, ReviewState>>({});
 /**
@@ -202,9 +204,18 @@ function failureMessage(error: unknown): string {
 }
 
 function classCountText(option: TeacherCourseOption): string {
-  return option.classIds.length > 0
-    ? `${option.classIds.length} 个班次`
-    : "暂无班次资料";
+  const count = option.sectionCount ?? option.classIds.length;
+  return count > 0 ? `${count} 个班次` : "暂无班次资料";
+}
+
+/**
+ * 开课表未核验时，本学期的开课情况是「未核验的本学期开课表」，而不是「未知」。
+ * 列表级 UNKNOWN 在这种情况下只是说明未核验，不当作错误。
+ */
+function availabilityText(option: TeacherCourseOption): string {
+  if (option.offeringSourceValidation === "UNVERIFIED")
+    return "本学期开课表（未核验）";
+  return AVAILABILITY_LABEL[option.availability];
 }
 
 async function searchOptions() {
@@ -237,6 +248,10 @@ async function searchOptions() {
       matchedCourses.push(...page.items);
       cursor = page.nextCursor;
     } while (cursor);
+    // TODO(开课快照)：契约 teacher-course-options（java.openapi.json 与 planning.openapi.json）
+    // 目前没有 offeringSnapshotId 或学期参数，这里无法把所选开课快照传过去。
+    // 契约支持后，应把 store.selectedOfferingSnapshot 的 snapshotId 一并传入，
+    // 当期是否开课才按同一份快照判断。
     const [byTeacher, byCourse] = await Promise.all([
       api.listTeacherCourseOptions(
         store.selectedCurriculumId,
@@ -281,15 +296,25 @@ async function searchOptions() {
     }
     options.value = [...merged.values()];
     courses.value = matchedCourses;
+    const allOptions = [
+      ...byTeacher.items,
+      ...byCourse.flatMap((result) => result.items),
+    ];
+    // 开课表未核验时列表状态为 UNKNOWN 是预期的，改用说明，不显示「无法确认」警告。
+    offeringUnverified.value = allOptions.some(
+      (option) => option.offeringSourceValidation === "UNVERIFIED",
+    );
     optionsUnconfirmed.value =
-      byTeacher.status === "UNKNOWN" ||
-      byCourse.some((result) => result.status === "UNKNOWN");
+      !offeringUnverified.value &&
+      (byTeacher.status === "UNKNOWN" ||
+        byCourse.some((result) => result.status === "UNKNOWN"));
     searchStatus.value = "ready";
   } catch (error) {
     if (seq !== searchSeq) return;
     options.value = [];
     courses.value = [];
     optionsUnconfirmed.value = false;
+    offeringUnverified.value = false;
     searchError.value = failureMessage(error);
     searchStatus.value = "error";
   }
@@ -360,6 +385,7 @@ async function loadReviews(option: TeacherCourseOption) {
     );
     if (reviewSeq.get(key) !== seq) return;
     // 只保留这门课、且是这位老师或未指明老师的评价，不混入别的老师。
+    // 未指明老师的记录带「依据有限」标记，不当作这位老师的评价。
     const own = result.items.filter(
       (note) =>
         note.courseCode === option.courseCode &&
@@ -548,6 +574,9 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
       </p>
 
       <template v-else-if="searchStatus === 'ready'">
+        <p v-if="offeringUnverified" class="notice" role="note">
+          本学期开课表尚未核验，下面的班次与教师仅供参考，不代表已确认开课。
+        </p>
         <p v-if="optionsUnconfirmed" class="notice notice--warning" role="note">
           下面的教师资料无法确认（快照缺失或不是当前版本），列表可能不完整。
         </p>
@@ -629,6 +658,7 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                 "
               >
                 <ReviewSummary
+                  title="课程整体评价（未绑定老师）"
                   :course-code="course.courseCode"
                   :notes="reviewStates[courseReviewKey(course)]!.notes"
                   :unconfirmed="
@@ -663,7 +693,7 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                 · {{ option.teacherDisplayName }}
               </strong>
               <small>
-                {{ AVAILABILITY_LABEL[option.availability] }} ·
+                {{ availabilityText(option) }} ·
                 {{ classCountText(option) }}
               </small>
             </span>
@@ -799,6 +829,7 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                     </p>
                   </div>
                   <ReviewSummary
+                    :title="`${option.teacherDisplayName} 的教师评价`"
                     :course-code="option.courseCode"
                     :notes="reviewStateOf(option)!.notes"
                     :unconfirmed="reviewStateOf(option)!.unconfirmed"

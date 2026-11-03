@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSchoolProgressBridge } from "./school-progress-bridge";
+import {
+  createSchoolProgressBridge,
+  schoolImportErrorMessage,
+} from "./school-progress-bridge";
 
 function bridge(save = vi.fn(async () => {})) {
   const posted: unknown[] = [];
@@ -84,6 +87,35 @@ describe("学业进度接收", () => {
       requestId: id,
       ok: false,
     });
+  });
+
+  it("会话过期（401）时明确告诉学生重新开始，并仍回执 ok:false 不让扩展干等", async () => {
+    const save = vi.fn(async () => {
+      throw Object.assign(new Error("本次会话已失效，请重新开始。"), {
+        status: 401,
+      });
+    });
+    const { b, posted } = bridge(save);
+    const id = b.requestImport();
+    const outcome = await b.handle(deliver(id));
+    expect(outcome).toEqual({
+      kind: "failed",
+      message: "会话已过期，请重新开始后再导入。",
+    });
+    expect(posted.at(-1)).toEqual({
+      type: "CP_IMPORT_ACCEPTED",
+      requestId: id,
+      ok: false,
+    });
+  });
+
+  it("未知错误且没有文字时给通用提示", () => {
+    expect(schoolImportErrorMessage(new Error(""))).toBe(
+      "未能保存学校学业进度，请重试。",
+    );
+    expect(schoolImportErrorMessage(null)).toBe(
+      "未能保存学校学业进度，请重试。",
+    );
   });
 
   it("requestId 对不上不处理也不回执，免得抢别的标签页的回执", async () => {

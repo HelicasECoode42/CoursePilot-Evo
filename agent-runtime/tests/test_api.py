@@ -634,3 +634,45 @@ def test_admin_key_comparison_rejects_non_ascii_without_crashing() -> None:
     }
     response = client.get("/api/v1/reports/runs/run:demo", headers=headers)
     assert response.status_code == 403
+
+
+def test_gateway_course_name_query_is_forwarded_and_blank_means_no_filter() -> None:
+    seen: list[object] = []
+
+    class QueryFake(FakeToolClient):
+        def call_page(self, tool, dto, context, *, params=None):
+            assert tool == "listCourses"
+            seen.append(params["query"])
+            return ToolPage([], None)
+
+    client = TestClient(create_app(tool_client=QueryFake()))
+    headers = {"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:name-q"}
+    name = client.get(
+        "/api/v1/courses",
+        params={"curriculumSnapshotId": "curr:demo", "query": "算法设计"},
+        headers=headers,
+    )
+    blank = client.get(
+        "/api/v1/courses",
+        params={"curriculumSnapshotId": "curr:demo", "query": "   "},
+        headers=headers,
+    )
+    assert name.status_code == blank.status_code == 200
+    assert seen == ["算法设计", None]
+
+
+def test_gateway_rejects_overlong_course_query_before_java() -> None:
+    class MustNotCall(FakeToolClient):
+        def call_page(self, tool, dto, context, *, params=None):
+            raise AssertionError("Java must not be called for an invalid query")
+
+    client = TestClient(create_app(tool_client=MustNotCall()))
+    response = client.get(
+        "/api/v1/courses",
+        params={"curriculumSnapshotId": "curr:demo", "query": "算" * 201},
+        headers={"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:long-q"},
+    )
+    assert response.status_code == 400
+    issue = response.json()["issues"][0]
+    assert issue["code"] == "INVALID_QUERY"
+    assert issue["field"] == "query"

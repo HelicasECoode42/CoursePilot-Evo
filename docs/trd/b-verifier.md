@@ -92,9 +92,9 @@ Repository 只保存/查询，Domain 不依赖 Controller/JPA；transaction 由 
 | --- | --- | --- |
 | requirements/audit | recordId + curriculumSnapshotId | AuditResult，缺口/建议/未知分开 |
 | courses | 发布快照 + query/limit/cursor | Course[]，SourceRef |
-| teacher-course-options | course/query | historical/current/unknown，不能用旧评价证明当期 |
+| teacher-course-options | 培养快照 + courseCode/query（课程号、课程名、教师名子串） | 绑定登记（TEACHER_BINDING）与本学期开课表（OFFERING_SNAPSHOT，取 VERIFIED 优先、OFFICIAL_DOCUMENT 次之的非 SYNTHETIC 快照）合并；开课事实未核验前 availability 为 UNKNOWN，historical/current/unknown 不能用旧评价证明当期 |
 | reviews/search | courseCode、teacherKey?、term?、limit≤10 | 有维度与来源的 ReviewNote[] |
-| offerings | 双快照、courseCode | 原文/Meeting/parseStatus；不跨学期 |
+| offerings | 双快照、courseCode、limit（无游标；无 courseCode 时≤100、默认20；有 courseCode 时≤1000、默认返回该课全部班次，恰为1000条视为可能不完整） | 原文/Meeting/parseStatus；不跨学期 |
 | plans/validate | items≤30、硬条件、记录、mode/双快照 | verdict/scope/violations/unknownChecks |
 | preferences/score | verifierResultId + 偏好 | 可计算 metrics 和 unknownMetrics |
 
@@ -173,3 +173,46 @@ sequenceDiagram
 课程目录中的 `Course` 只作为跨版本的课程编号身份；名称、学分、类别存于 `CurriculumCourse` 的快照关联，来源元数据单独存于 `SourceReference`，目录响应携带 `sourceRefIds` 和完整的 `provenance`。课程查询、学业核对及 `MAX_CREDITS` 均按请求的培养快照读取关联属性。合成种子只写入新建的合成培养快照，不依据旧 `Course` 行或旧关联推导版本属性/来源。
 
 升级到该模型后，旧快照关联的新增字段保持空值，不会被全局课程信息自动补齐。课程查询遇到缺属性或缺来源的关联返回 `SNAPSHOT_COURSE_FACTS_UNKNOWN`（HTTP 409）；学业核对和方案学分上限保留 UNKNOWN。该行为需要后续导入流程提供来源和快照字段后才能恢复确定核验。目前仓库没有真实授权培养计划数据，本实现和测试均为 synthetic；不构成真实课程来源或真实规则验收。属性和来源实体已可持久化，导入发布事务仍未接入。
+
+### 开课快照人工核验与多段时间（2026-11-02）
+
+- `OFFICIAL_DOCUMENT` 来源导入后恒为 UNVERIFIED。`POST /api/v1/offering-snapshots/{snapshotId}/verification` 写入抽样核验审计（核验人、上传人、样本数、错误数、样本 SHA-256、结论）。错误率 ≤ 2% 为 VERIFIED，否则 REJECTED；以最近一次结论为准。核验人与上传人（忽略大小写与空白）相同拒绝；SYNTHETIC 快照不可核验。
+- 方案核验：mode=REAL 且快照 VERIFIED、带学期、方案项都在该快照内，scope 为 REAL_TIMETABLE，时间检查照常执行，不再产生 TIMETABLE_UNVERIFIED。仍缺任一条件则保持 COURSE_ONLY 与未知项。
+- TimeParser 支持一个周次块对应多段节次（`星期四第3-4,7-8节{9-12周}` 拆为两段）。截断或残缺片段仍整体未知。
+- 尚未实现：核验过期机制（快照没有有效期字段，REAL 只检查学期非空）；SnapshotSummary 不展示核验人与时间。
+
+### 方案核验分项：本学期课表 / 毕业要求（2026-11-03）
+
+`POST /api/v1/plans/validate` 的结果新增 `sections`，把两类结论拆开，避免演示时整份方案都显示为“未知”：
+
+| 分项 scope | 含义 | 归入的 violations / unknownChecks |
+| --- | --- | --- |
+| TIMETABLE | 本学期课表：班次归属、时间冲突、时间类硬约束、班次来源核验、钉选课 | CLASS_COURSE_MISMATCH、TIME_CONFLICT、CONSTRAINT_*、TIMETABLE_UNVERIFIED、TIME_UNPARSEABLE、CLASS_NOT_FOUND、SECTION_UNASSIGNED、CONSTRAINT_UNVERIFIABLE、PIN_* |
+| CURRICULUM | 毕业要求：学分上限、未建模培养规则 | MAX_CREDITS_EXCEEDED、CREDITS_UNKNOWN、COURSE_FACTS_UNKNOWN、CREDITS_SCOPE_UNSUPPORTED、UNMODELED_CURRICULUM_RULES |
+
+- 分项判决与总判决同口径：有 violation 为 INVALID，无 violation 但有 unknown 为 UNKNOWN，否则 VALID；总判决 = 两个分项中最差的一个。
+- TIMETABLE 判 VALID 的条件：每个方案项都有班次且时间可解析、班次快照已核验（REAL 需 VERIFIED 且同学期），且无冲突、无违规。方案项未指定班次时记 SECTION_UNASSIGNED，不通过。
+- 只有 `UNMODELED` 规则进入 CURRICULUM 的 UNKNOWN；`INFORMATIONAL`（任意选修说明、课程标记图例）不计入。`EXCLUDED` 不参与。
+- 学分缺口、转读完整性 (TRANSCRIPT_COMPLETENESS_UNKNOWN) 与 PENDING_COURSE 仍只在 `/requirements/audit` 中判定；方案核验的 CURRICULUM 分项目前只覆盖 MAX_CREDITS 与未建模规则，不声称已核对全部毕业要求。
+- 测试：`PlanValidationEndpointTest` 覆盖分项拆分、总判决取最差、SECTION_UNASSIGNED；`OfferingVerificationEndpointTest` 覆盖（a）已核验无冲突 → TIMETABLE VALID 而 CURRICULUM UNKNOWN（未建模规则）；（b）OFFICIAL_DOCUMENT 未核验 → TIMETABLE UNKNOWN(TIMETABLE_UNVERIFIED)；（c）BLOCK_DAY 命中 → TIMETABLE INVALID、总判决 INVALID；`A1WorkbookImporterTest` 覆盖 INFORMATIONAL 分类。
+- 已知限制：Python 网关的 `PlanValidation.sections` 暂缺省为空列表（既有 fake/测试数据未带分项），页面尚未展示分项；这两处需在 UI 与 fixture 任务中补齐。
+- 已知限制：`INFORMATIONAL` 是新的处置值。`spring.jpa.hibernate.ddl-auto=update` 不会修改已存在表上的枚举检查约束，已有本地库需用新导入重建（或手工放宽约束）后才能写入此处置值；未重新导入前，现存库中的 `UNMODELED` 行保持原样，仍会作为未知出现。
+
+### 学校报告与学业核对同步（2026-11-03）
+
+owner 决定：本地学业核对必须与导入的学校报告同步（替代此前「学校报告与 Java 核对分开」的设计，`docs/27` 中相应描述以此为准）。实现位于 `AuditResultAssembler`、`AcademicLedger`、`SchoolReport`（读取 `SchoolProgressService` 保存的最近一次导入）。
+
+- **在读不计学分、不致 UNKNOWN**：IN_PROGRESS 课程不计 `earnedCredits`，缺口 = 要求 − 已通过学分；在读学分单独放在 `AuditItem.inProgressCredits`。只有 UNKNOWN 结果的课程仍记为待定。
+- **学校同名类别优先**：类别按名称精确匹配学校节点（同名时取唯一顶层节点；有歧义则不映射）。匹配且学分已读全时，直接采用学校的 required/earned/remaining，`remaining` 为 0 即 SATISFIED，`AuditItem.source = SCHOOL_REPORT`，与课程是否在课程库无关。未匹配的类别仍走本地折算，`source = LOCAL`。
+- **课程归类**：不在课程库中、但学校报告把它挂在某类别下的课程，归入该学校类别，不再报「课程 X 不在课程库中，无法归类」。无任何类别链接的课程仍是未归类，照常记 `COURSE_NOT_IN_CATALOG`。
+- **学业记录读全**：学校导入时若每门课状态已知（无 UNKNOWN）且每个节点的 required/earned/remaining 都已读到，学业记录按完整处理（`transcriptComplete = true`），`AcademicResult.transcriptCompleteSource = SCHOOL_IMPORT_FULL`；否则保持手动声明，依据为 `MANUAL`。
+- **未建模规则**仍以 UNKNOWN 项列出，但不改变学校报告已判定的类别。
+- 契约变更：`AuditItem` 增加可选 `source`、`inProgressCredits`；`AuditResult` 增加可选 `transcriptCompleteSource`。Python `audit.py` 同步；Web `contracts.ts` 仅增加类型。
+- 测试：`SchoolReportAuditTest`（同名类别采用学校口径且课程不在库、学校剩余学分与在读学分、课程按学校链接归类、读全自动完整、未读全保持手动、无同名回退 LOCAL）；`AuditResultAssemblerTest` 的在读用例改为「不致 UNKNOWN」；`SchoolProgressEndpointTest.fullyReadImportIsSavedAsCompleteTranscript`。
+- 限制：学校报告按主体取最近一次导入，未与培养快照版本做逐项比对（学业记录的快照不一致仍由 `SnapshotMismatch` 拦截）；同名但不同层级且都未读全的节点不映射。
+
+### 必避时段预览：未核验来源也按解析时间判断（2026-11-03）
+
+- 来源未核验（COURSE_ONLY，或 mode=REAL 但快照未核验）时，时间类硬约束仍用 TimeParser 解析出的班次时间判断命中，只作预览结论，整份方案判决仍是 UNKNOWN。
+- 新增 unknownChecks 代码：`CONSTRAINT_HIT_UNVERIFIED_SOURCE`（命中）、`CONSTRAINT_CLEAR_UNVERIFIED_SOURCE`（适用班次都能解析且未命中）。`CONSTRAINT_UNVERIFIABLE` 只保留给教师未知、班次缺失或时间无法解析的情况。
+- 换班与加课的候选班次预览（Python `mustAvoidChecks`）据此给出 `CONFLICT`、`CLEAR_UNVERIFIED`、`CLEAR` 或 `UNKNOWN`。此前官方快照未核验时，所有受约束班次都被记为 `CONSTRAINT_UNVERIFIABLE`，网页只能显示“无法确认是否与必避时段冲突”。

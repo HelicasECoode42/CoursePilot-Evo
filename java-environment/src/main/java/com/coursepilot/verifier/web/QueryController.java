@@ -1,5 +1,6 @@
 package com.coursepilot.verifier.web;
 
+import com.coursepilot.verifier.persistence.entity.CourseOffering;
 import com.coursepilot.verifier.persistence.entity.CurriculumCourse;
 import com.coursepilot.verifier.persistence.entity.CurriculumSnapshot;
 import com.coursepilot.verifier.persistence.repo.CourseOfferingRepository;
@@ -8,6 +9,8 @@ import com.coursepilot.verifier.persistence.repo.CurriculumSnapshotRepository;
 import com.coursepilot.verifier.persistence.repo.OffsetPageRequest;
 import com.coursepilot.verifier.web.dto.CatalogDtos;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -21,6 +24,13 @@ public class QueryController {
     private static final Pattern OFFSET_CURSOR = Pattern.compile("^[0-9]{1,9}$");
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 200;
+    /** 契约 listOfferings 未指定 courseCode 时的 limit 上限为 100。 */
+    private static final int MAX_OFFERING_LIMIT = 100;
+    /**
+     * 指定单门 courseCode 时的上限：一门课的全部班次都要能取到（真实快照中单门课可达 186 个班次）。
+     * 没有游标，因此这个上限是硬顶；调用方若恰好拿满该数量，须视为可能不完整。
+     */
+    static final int MAX_COURSE_OFFERING_LIMIT = 1000;
 
     private final CurriculumSnapshotRepository snapshotRepo;
     private final CurriculumCourseRepository curriculumCourseRepo;
@@ -82,14 +92,46 @@ public class QueryController {
         return Envelope.ok(requestId, new CatalogDtos.CourseList(items, nextCursor)).withProvenance(provenance);
     }
 
-    /** 契约 listOfferings：data = { items: CourseOffering[] }。时间由 Java 重新解析 meetingTextRaw。 */
+    /**
+     * 契约 listOfferings：data = { items: CourseOffering[] }。
+     * 只返回属于 offeringSnapshotId 的班次；快照必须是已发布的 OFFERING，且 curriculumSnapshotId
+     * 必须是已发布的 CURRICULUM。时间由 Java 从 meetingTextRaw 重新解析。
+     */
     @GetMapping("/offerings")
     public Envelope<CatalogDtos.OfferingList> offerings(
         @RequestHeader(value = "X-Request-Id", required = false) String requestId,
-        @RequestParam String courseCode) {
-        List<CatalogDtos.CourseOffering> items = offeringRepo.findByCourseCode(courseCode)
-            .stream().map(catalog::toOffering).toList();
+        @RequestHeader(value = "X-Subject-Id", required = false) String subjectId,
+        @RequestParam String curriculumSnapshotId,
+        @RequestParam String offeringSnapshotId,
+        @RequestParam(required = false) String courseCode,
+        @RequestParam(required = false) Integer limit) {
+        subjects.require(subjectId);
+        requireId("curriculumSnapshotId", curriculumSnapshotId);
+        requireId("offeringSnapshotId", offeringSnapshotId);
+        if (courseCode != null) requireId("courseCode", courseCode);
+        // 单门课：默认返回该课全部班次（上限 MAX_COURSE_OFFERING_LIMIT）；未指定课程：沿用默认 20、上限 100。
+        int maxLimit = courseCode == null ? MAX_OFFERING_LIMIT : MAX_COURSE_OFFERING_LIMIT;
+        int size = limit == null ? (courseCode == null ? DEFAULT_LIMIT : MAX_COURSE_OFFERING_LIMIT) : limit;
+        if (size < 1 || size > maxLimit) {
+            throw new InvalidQuery("limit", "limit 须在 1 到 " + maxLimit + " 之间");
+        }
+        requirePublished(curriculumSnapshotId, CurriculumSnapshot.Kind.CURRICULUM);
+        requirePublished(offeringSnapshotId, CurriculumSnapshot.Kind.OFFERING);
+
+        PageRequest page = PageRequest.of(0, size, Sort.by("offeringId"));
+        List<CourseOffering> rows = courseCode == null
+            ? offeringRepo.findBySnapshotId(offeringSnapshotId, page)
+            : offeringRepo.findBySnapshotIdAndCourseCode(offeringSnapshotId, courseCode, page);
+        List<CatalogDtos.CourseOffering> items = rows.stream().map(catalog::toOffering).toList();
         return Envelope.ok(requestId, new CatalogDtos.OfferingList(items));
+    }
+
+    private void requirePublished(String snapshotId, CurriculumSnapshot.Kind kind) {
+        CurriculumSnapshot snapshot = snapshotRepo.findById(snapshotId)
+            .orElseThrow(() -> new UnknownSnapshot(snapshotId));
+        if (snapshot.getKind() != kind || snapshot.getState() != CurriculumSnapshot.State.PUBLISHED) {
+            throw new UnknownSnapshot(snapshotId);
+        }
     }
 
     private static void requireId(String field, String value) {

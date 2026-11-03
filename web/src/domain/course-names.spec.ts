@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Course } from "../contracts";
 import {
+  buildCourseFactIndex,
   buildCourseNameIndex,
   describeCourse,
+  describeSelectedCourse,
   limitCourseCodes,
 } from "./course-names";
 
@@ -73,5 +75,56 @@ describe("长列表折叠", () => {
       shown: ["A", "B"],
       hiddenCount: 0,
     });
+  });
+});
+
+describe("已选课程标签", () => {
+  it("有名字时写成「课程名（课程号）· 学分」，课程号只出现一次", () => {
+    const label = describeSelectedCourse("08305092", {
+      name: "Java程序设计",
+      credits: 3,
+    });
+    expect(label).toBe("Java程序设计（08305092）· 3 学分");
+    expect(label.split("08305092")).toHaveLength(2);
+  });
+
+  it("学分未知时照实写「学分未知」", () => {
+    expect(
+      describeSelectedCourse("08305092", {
+        name: "Java程序设计",
+        credits: null,
+      }),
+    ).toBe("Java程序设计（08305092）· 学分未知");
+  });
+
+  it("查不到名字时只给课程号并注明名称未加载，不重复课程号", () => {
+    const label = describeSelectedCourse("08305092", null);
+    expect(label).toBe("课程号 08305092（名称未加载）");
+    expect(label.split("08305092")).toHaveLength(2);
+  });
+});
+
+describe("课程事实合并", () => {
+  it("先来的来源优先，名字与学分取自同一来源", () => {
+    const index = buildCourseFactIndex([
+      [{ courseCode: "A1", name: "目录名", credits: 2 }],
+      [{ courseCode: "A1", name: "学校名", credits: 5 }],
+    ]);
+    expect(index.get("A1")).toEqual({ name: "目录名", credits: 2 });
+  });
+
+  it("空白名字不算名字，会落到后面的来源", () => {
+    const index = buildCourseFactIndex([
+      [{ courseCode: "A2", name: "   ", credits: 1 }],
+      [{ courseCode: "A2", name: "学校名", credits: null }],
+    ]);
+    expect(index.get("A2")).toEqual({ name: "学校名", credits: null });
+  });
+
+  it("所有来源都没有名字时不给事实", () => {
+    const index = buildCourseFactIndex([
+      [{ courseCode: "A3", name: null, credits: 2 }],
+    ]);
+    expect(index.has("A3")).toBe(false);
   });
 });

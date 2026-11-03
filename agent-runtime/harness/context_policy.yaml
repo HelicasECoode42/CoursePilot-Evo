@@ -4,4 +4,9 @@
 max_course_facts: 20
 max_review_notes: 10
 max_offerings: 20
+# Planning reply size. The per-run output cap (4000 tokens, docs/04 section 3) is frozen,
+# so the reply is kept short instead: at most this many recommended courses (pinned
+# courses included), and a short reason for each. 2026-11-03: 127-course real run hit
+# finish_reason=length with up to 30 courses and 500-char reasons.
+max_recommended_courses: 8
 include_unknowns: true

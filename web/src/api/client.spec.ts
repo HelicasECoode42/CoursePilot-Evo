@@ -769,6 +769,17 @@ const planConstraint = {
 };
 
 function planVerification(verdict: "VALID" | "UNKNOWN") {
+  const unknownChecks =
+    verdict === "UNKNOWN"
+      ? [
+          {
+            code: "CLASS_NOT_SELECTED",
+            message: "CS103 尚未选定班次（测试数据）",
+            field: null,
+            retryable: false,
+          },
+        ]
+      : [];
   return {
     verifierResultId: "verifier-test",
     verdict,
@@ -777,19 +788,18 @@ function planVerification(verdict: "VALID" | "UNKNOWN") {
     offeringSnapshotId: "offering-2026",
     recordRevision: 1,
     violations: [],
-    unknownChecks:
-      verdict === "UNKNOWN"
-        ? [
-            {
-              code: "CLASS_NOT_SELECTED",
-              message: "CS103 尚未选定班次（测试数据）",
-              field: null,
-              retryable: false,
-            },
-          ]
-        : [],
+    unknownChecks,
     performedChecks: ["PLAN_TIME_OVERLAP"],
     sourceRefIds: [],
+    sections: [
+      { scope: "TIMETABLE", verdict, violations: [], unknownChecks },
+      {
+        scope: "CURRICULUM",
+        verdict: "VALID",
+        violations: [],
+        unknownChecks: [],
+      },
+    ],
   };
 }
 
@@ -822,6 +832,9 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
             previousPlanId: "plan-1",
             courseCode: "CS103",
             items: [offering],
+            mustAvoidChecks: [
+              { classId: offering.classId, verdict: "CONFLICT" },
+            ],
           }),
         ),
       );
@@ -833,6 +846,7 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
       previousPlanId: "plan-1",
       courseCode: "CS103",
       items: [offering],
+      mustAvoidChecks: [{ classId: offering.classId, verdict: "CONFLICT" }],
       status: "OK",
     });
     const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
@@ -856,6 +870,7 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
             previousPlanId: "plan-1",
             courseCode: "CS103",
             items: [],
+            mustAvoidChecks: [],
           }),
         ),
       );
@@ -864,6 +879,28 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     const result = await client.searchSessionOfferings("plan-1", "CS103");
     expect(result.items).toEqual([]);
     expect(result.status).toBe("UNKNOWN");
+  });
+
+  it("rejects an offering search that omits or malforms mustAvoidChecks", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          200,
+          envelope("OK", {
+            previousPlanId: "plan-1",
+            courseCode: "CS103",
+            items: [offering],
+            mustAvoidChecks: [{ classId: offering.classId, verdict: "MAYBE" }],
+          }),
+        ),
+      );
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.searchSessionOfferings("plan-1", "CS103"),
+    ).rejects.toThrow(/不符合当前接口约定/);
   });
 
   it("posts the replacement with an Idempotency-Key and returns the server verdict unchanged", async () => {
@@ -938,6 +975,103 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     });
   });
 
+  it("posts add-course with an optional class and returns the revalidated plan", async () => {
+    const edit = {
+      previousPlanId: "plan-before",
+      planId: "plan-added",
+      items: [
+        { courseCode: "MATH201", teacherKey: null, classId: null },
+        { courseCode: "CS101", teacherKey: null, classId: null },
+      ],
+      hardConstraints: [],
+      verification: {
+        verifierResultId: "verify-added",
+        verdict: "UNKNOWN",
+        scope: "COURSE_ONLY",
+        curriculumSnapshotId: "curriculum-2026",
+        offeringSnapshotId: null,
+        recordRevision: 1,
+        violations: [],
+        unknownChecks: [
+          {
+            code: "SECTION_UNASSIGNED",
+            message: "未指定班次，不能声称无冲突",
+            field: "items",
+            retryable: false,
+          },
+        ],
+        performedChecks: ["COURSE_EXISTS"],
+        sourceRefIds: ["source-demo"],
+        sections: [
+          {
+            scope: "TIMETABLE",
+            verdict: "UNKNOWN",
+            violations: [],
+            unknownChecks: [
+              {
+                code: "SECTION_UNASSIGNED",
+                message: "未指定班次，不能声称无冲突",
+                field: "items",
+                retryable: false,
+              },
+            ],
+          },
+          {
+            scope: "CURRICULUM",
+            verdict: "VALID",
+            violations: [],
+            unknownChecks: [],
+          },
+        ],
+      },
+      empty: false,
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(200, envelope("OK", edit)));
+    const client = await authedClient(fetcher);
+    await expect(
+      client.addSessionPlanCourse(
+        { previousPlanId: "plan-before", courseCode: "CS101" },
+        "key-add-1",
+      ),
+    ).resolves.toEqual(edit);
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/session-plans/add-course");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body as string)).toEqual({
+      previousPlanId: "plan-before",
+      courseCode: "CS101",
+    });
+  });
+
+  it("rejects an add-course answer whose empty flag contradicts its items", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          200,
+          envelope("OK", {
+            previousPlanId: "plan-before",
+            planId: "plan-added",
+            items: [{ courseCode: "CS101", teacherKey: null, classId: null }],
+            hardConstraints: [],
+            verification: null,
+            empty: true,
+          }),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    await expect(
+      client.addSessionPlanCourse(
+        { previousPlanId: "plan-before", courseCode: "CS101" },
+        "key-add-2",
+      ),
+    ).rejects.toMatchObject({ kind: "invalid_response" });
+  });
+
   it("lists teacher options by snapshot and leaves courseCode out of the query when it is null", async () => {
     const fetcher = vi
       .fn()
@@ -959,6 +1093,105 @@ describe("HTTP API client · E4 offerings, replacement, teachers, reviews and re
     );
     expect(url).not.toContain("null");
     expect(options.method).toBe("GET");
+  });
+
+  it("summarizes section counts for a batch of courses with one POST", async () => {
+    const data = {
+      curriculumSnapshotId: "curriculum-2026",
+      offeringSnapshotId: "offering-2026",
+      items: [
+        { courseCode: "CS103", sectionCount: 2, teacherTexts: ["张伟"] },
+        { courseCode: "MA201", sectionCount: 0, teacherTexts: [] },
+      ],
+      unknownCourseCodes: [],
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(200, envelope("OK", data)));
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.summarizeOfferings("curriculum-2026", "offering-2026", [
+        "CS103",
+        "MA201",
+      ]),
+    ).resolves.toEqual({
+      items: data.items,
+      unknownCourseCodes: [],
+      status: "OK",
+    });
+    const [url, options] = fetcher.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/offering-summary");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body as string)).toEqual({
+      curriculumSnapshotId: "curriculum-2026",
+      offeringSnapshotId: "offering-2026",
+      courseCodes: ["CS103", "MA201"],
+    });
+  });
+
+  it("keeps unknown courses as unknown and does not turn them into zero sections", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          200,
+          envelope("UNKNOWN", {
+            curriculumSnapshotId: "curriculum-2026",
+            offeringSnapshotId: "offering-2026",
+            items: [{ courseCode: "CS103", sectionCount: 1, teacherTexts: [] }],
+            unknownCourseCodes: ["MA201"],
+          }),
+        ),
+      );
+    const client = await authedClient(fetcher);
+
+    const result = await client.summarizeOfferings(
+      "curriculum-2026",
+      "offering-2026",
+      ["CS103", "MA201"],
+    );
+    expect(result.status).toBe("UNKNOWN");
+    expect(result.unknownCourseCodes).toEqual(["MA201"]);
+    expect(result.items.map((item) => item.courseCode)).toEqual(["CS103"]);
+  });
+
+  it("rejects a summary whose item shape breaks the contract", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          200,
+          envelope("OK", {
+            curriculumSnapshotId: "curriculum-2026",
+            offeringSnapshotId: "offering-2026",
+            items: [
+              { courseCode: "CS103", sectionCount: -1, teacherTexts: [] },
+            ],
+            unknownCourseCodes: [],
+          }),
+        ),
+      );
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.summarizeOfferings("curriculum-2026", "offering-2026", ["CS103"]),
+    ).rejects.toBeInstanceOf(ApiFailure);
+  });
+
+  it("reports a missing gateway route as an error instead of an empty summary", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(response(404, { detail: "Not Found" }));
+    const client = await authedClient(fetcher);
+
+    await expect(
+      client.summarizeOfferings("curriculum-2026", "offering-2026", ["CS103"]),
+    ).rejects.toBeInstanceOf(ApiFailure);
   });
 
   it("lists curriculum courses with a cursor for the next page", async () => {
@@ -1221,18 +1454,252 @@ describe("HTTP API client · 失败说明", () => {
       .catch((error) => error);
   }
 
-  it("输出被截断时不说「请稍后重试」，因为重试一定还是一样", async () => {
+  it("输出被截断时不说「请稍后重试」，并告诉学生该减少课程数量", async () => {
     // 实测：真实规划两次都因 finish_reason=length 失败，页面却只说
     // 「服务没有完成请求，请稍后重试」，学生只会一直点重试。
     const error = await failWith("MODEL_OUTPUT_TRUNCATED");
     expect(error).toBeInstanceOf(ApiFailure);
-    expect(error.message).toContain("输出预算截断");
-    expect(error.message).toContain("重试不会有帮助");
+    expect(error.message).toContain("内容太长");
+    expect(error.message).toContain("减少一次要规划的课程");
+    expect(error.message).not.toContain("预算");
     expect(error.message).not.toContain("请稍后重试");
   });
 
-  it("没有专门说明的失败仍然走原来的兜底文案", async () => {
-    const error = await failWith("SOMETHING_ELSE");
-    expect(error.message).toBe("服务没有完成请求，请稍后重试。");
+  it("服务端原文不是中文句子时，兜底文案带上错误码而不是只说「没有完成」", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          422,
+          envelope("ERROR", {}, [
+            {
+              code: "SOMETHING_ELSE",
+              message: "raw upstream text",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = new HttpApiClient(
+      "http://127.0.0.1:8000",
+      fetcher as unknown as typeof fetch,
+    );
+    await client.createSession();
+    const error = await client
+      .submitPlanning(
+        {
+          schemaVersion: "1.0",
+          curriculumSnapshotId: "curriculum-2026",
+          offeringSnapshotId: null,
+          academicRecordId: "record-1",
+          motives: ["EXPLORE"],
+          constraints: [],
+          selectedCourseCodes: [],
+          priorityOrder: [],
+        } as unknown as PlanningRequest,
+        "idem-explained-2",
+      )
+      .catch((failure) => failure);
+    expect(error.message).toBe(
+      "服务没有完成请求（错误码 SOMETHING_ELSE），请稍后重试。",
+    );
+  });
+});
+
+describe("HTTP API client · 服务端错误说明与未导入", () => {
+  it("课程搜索 500 时展示服务端给出的中文原句，而不是只说「没有完成请求」", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          500,
+          envelope("ERROR", null, [
+            {
+              code: "ERROR",
+              message: "课程目录暂时读取失败，请稍后再试",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    const error = await client
+      .listCourses("curriculum-2026", null, undefined, "数据库")
+      .catch((failure) => failure);
+    expect(error).toBeInstanceOf(ApiFailure);
+    expect(error.message).toBe("课程目录暂时读取失败，请稍后再试");
+  });
+
+  it("额度用完（503 BUDGET_EXCEEDED）时保留服务端中文原句，且不标为可重试", async () => {
+    const serverText =
+      "本会话额度已用完（会话累计输出 token 已达上限）。请新建会话后再试；新建会话只重置本会话额度，今日全站额度不变。";
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          503,
+          envelope("ERROR", null, [
+            {
+              code: "BUDGET_EXCEEDED",
+              message: serverText,
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    const error = await client
+      .listCourses("curriculum-2026")
+      .catch((failure) => failure);
+    expect(error.message).toBe(serverText);
+    expect(error.code).toBe("BUDGET_EXCEEDED");
+    expect(error.retryable).toBe(false);
+  });
+
+  it("服务端只给英文原文和错误码时，兜底文案带上错误码", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          500,
+          envelope("ERROR", null, [
+            {
+              code: "CATALOG_DOWN",
+              message: "catalog timeout",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    const error = await client
+      .listCourses("curriculum-2026")
+      .catch((failure) => failure);
+    expect(error.message).toBe(
+      "服务没有完成请求（错误码 CATALOG_DOWN），请稍后重试。",
+    );
+    expect(error.code).toBe("CATALOG_DOWN");
+  });
+
+  it("换班遇到时间冲突（422 + 冲突码）时说明这个班次和已选课程时间冲突", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          422,
+          envelope("INVALID_INPUT", null, [
+            {
+              code: "TIME_CONFLICT",
+              message: "selectedClassId conflicts",
+              field: "selectedClassId",
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    const error = await client
+      .replaceSessionPlanItem(
+        {
+          previousPlanId: "plan-1",
+          courseCode: "CS101",
+          selectedClassId: "CS101-02",
+        },
+        "idem-replace-1",
+      )
+      .catch((failure) => failure);
+    expect(error.message).toBe("这个班次和已选课程时间冲突。");
+    expect(error.status).toBe(422);
+  });
+
+  it("换班遇到中文业务原句时直接展示原句", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          422,
+          envelope("INVALID_INPUT", null, [
+            {
+              code: "INVALID_INPUT",
+              message: "这份方案没有班次快照，不能替换班次",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    const error = await client
+      .replaceSessionPlanItem(
+        {
+          previousPlanId: "plan-1",
+          courseCode: "CS101",
+          selectedClassId: "CS101-02",
+        },
+        "idem-replace-2",
+      )
+      .catch((failure) => failure);
+    expect(error.message).toBe("这份方案没有班次快照，不能替换班次");
+  });
+
+  it("本会话还没有导入学校进度（404）时返回 null，不当成错误", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          404,
+          envelope("NOT_FOUND", null, [
+            {
+              code: "NOT_FOUND",
+              message: "没有学校进度",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    await expect(client.getSchoolProgress()).resolves.toBeNull();
+  });
+
+  it("404 即使没有标准信封也按未导入处理", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(new Response("Not Found", { status: 404 }));
+    const client = await authedClient(fetcher);
+    await expect(client.getSchoolProgress()).resolves.toBeNull();
+  });
+
+  it("其他错误的学校进度读取仍然抛出", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(sessionResponse())
+      .mockResolvedValueOnce(
+        response(
+          500,
+          envelope("ERROR", null, [
+            {
+              code: "ERROR",
+              message: "读取失败",
+              field: null,
+              retryable: false,
+            },
+          ]),
+        ),
+      );
+    const client = await authedClient(fetcher);
+    await expect(client.getSchoolProgress()).rejects.toBeInstanceOf(ApiFailure);
   });
 });

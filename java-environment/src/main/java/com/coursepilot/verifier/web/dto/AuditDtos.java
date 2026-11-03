@@ -22,7 +22,16 @@ public final class AuditDtos {
     /** contracts: AuditItem.state */
     public enum State { SATISFIED, UNSATISFIED, UNKNOWN }
 
-    /** contracts: AuditItem。gapCredits 在 state=UNKNOWN 时为 null，表示缺口无法确定。 */
+    /** contracts: AuditItem.source。SCHOOL_REPORT 表示学分直接取自学校报告的同名类别。 */
+    public enum Source { LOCAL, SCHOOL_REPORT }
+
+    /** contracts: AuditResult.transcriptCompleteSource。 */
+    public enum TranscriptCompleteSource { SCHOOL_IMPORT_FULL, MANUAL }
+
+    /**
+     * contracts: AuditItem。gapCredits 在 state=UNKNOWN 时为 null，表示缺口无法确定。
+     * inProgressCredits 是在读课程的学分（不计入 earnedCredits）；学分未知时为 null。
+     */
     public record AuditItem(
         String requirementId,
         /** 类别名（必修 / 通识 …）。没有这个字段，前端只能显示「培养要求 1」。 */
@@ -32,7 +41,9 @@ public final class AuditDtos {
         double earnedCredits,
         Double gapCredits,
         State state,
-        List<String> sourceRefIds) {}
+        List<String> sourceRefIds,
+        Source source,
+        Double inProgressCredits) {}
 
     /** contracts: AuditResult */
     public record AuditResult(
@@ -42,7 +53,9 @@ public final class AuditDtos {
         boolean transcriptComplete,
         List<AuditItem> requirements,
         List<String> suggestedCourseCodes,
-        List<Issue> unknowns) {}
+        List<Issue> unknowns,
+        /** transcriptComplete=true 时说明依据；false 时为 null。 */
+        TranscriptCompleteSource transcriptCompleteSource) {}
 
     /** contracts: Issue */
     public record Issue(String code, String message, String field, boolean retryable) {}

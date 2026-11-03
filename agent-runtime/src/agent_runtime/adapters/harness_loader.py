@@ -32,6 +32,8 @@ class ContextLimits:
     max_review_notes: int = 10
     max_offerings: int = 20
     include_unknowns: bool = True
+    # Recommended courses per planning reply, pinned courses included (see context_policy.yaml).
+    max_recommended_courses: int = 8
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,9 @@ class HarnessLoader:
             max_course_facts=_limit(data, "max_course_facts", defaults.max_course_facts),
             max_review_notes=_limit(data, "max_review_notes", defaults.max_review_notes),
             max_offerings=_limit(data, "max_offerings", defaults.max_offerings),
+            max_recommended_courses=_limit(
+                data, "max_recommended_courses", defaults.max_recommended_courses
+            ),
             include_unknowns=_flag(data, "include_unknowns", defaults.include_unknowns),
         )
 

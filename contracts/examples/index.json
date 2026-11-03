@@ -123,5 +123,105 @@
     "file": "advice-chat-answer.json",
     "definition": "AdviceChatAnswer",
     "valid": true
+  },
+  {
+    "file": "offering-import-official-document.json",
+    "definition": "OfferingImport",
+    "valid": true
+  },
+  {
+    "file": "invalid-offering-import-unknown-source-kind.json",
+    "definition": "OfferingImport",
+    "valid": false
+  },
+  {
+    "file": "offering-verification-request.json",
+    "definition": "OfferingVerificationRequest",
+    "valid": true
+  },
+  {
+    "file": "invalid-offering-verification-small-sample.json",
+    "definition": "OfferingVerificationRequest",
+    "valid": false
+  },
+  {
+    "file": "invalid-offering-verification-bad-sha.json",
+    "definition": "OfferingVerificationRequest",
+    "valid": false
+  },
+  {
+    "file": "verification-two-sections.json",
+    "definition": "PlanValidation",
+    "valid": true
+  },
+  {
+    "file": "invalid-section-valid-with-unknown.json",
+    "definition": "PlanValidation",
+    "valid": false
+  },
+  {
+    "file": "invalid-overall-not-worst-section.json",
+    "definition": "PlanValidation",
+    "valid": false
+  },
+  {
+    "file": "invalid-section-scope.json",
+    "definition": "PlanValidation",
+    "valid": false
+  },
+  {
+    "file": "teacher-course-option-offering.json",
+    "definition": "TeacherCourseOption",
+    "valid": true
+  },
+  {
+    "file": "invalid-teacher-course-option-offering-without-snapshot.json",
+    "definition": "TeacherCourseOption",
+    "valid": false
+  },
+  {
+    "file": "invalid-teacher-course-option-unknown-fact-source.json",
+    "definition": "TeacherCourseOption",
+    "valid": false
+  },
+  {
+    "file": "audit-result-school-report.json",
+    "definition": "AuditResult",
+    "valid": true
+  },
+  {
+    "file": "invalid-audit-item-unknown-source.json",
+    "definition": "AuditResult",
+    "valid": false
+  },
+  {
+    "file": "session-plan-add-course-request.json",
+    "definition": "SessionPlanCourseAddRequest",
+    "valid": true
+  },
+  {
+    "file": "session-plan-add-course-result.json",
+    "definition": "SessionPlanEditResult",
+    "valid": true
+  },
+  {
+    "file": "invalid-session-plan-add-course-extra-field.json",
+    "definition": "SessionPlanCourseAddRequest",
+    "valid": false
+  },
+  {
+    "file": "planning-context.json",
+    "definition": "PlanningContext",
+    "valid": true
+  },
+  {
+    "file": "invalid-planning-context-target-term.json",
+    "definition": "PlanningContext",
+    "valid": false
+  },
+  {
+    "file": "invalid-planning-context-term-without-snapshot.json",
+    "definition": "PlanningContext",
+    "valid": false
   }
 ]
