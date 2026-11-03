@@ -4,7 +4,12 @@ import type { CourseNameLookup } from "../domain/course-names";
 import {
   courseDisplayName,
   creditsLabel,
+  hasAnyCredit,
+  hasChildNodes,
+  majorRootOf,
+  nodeHasContent,
   nodeName,
+  remainingSummaryLine,
   SCHOOL_OUTCOME_LABELS,
   UNREAD_CATEGORY_NAME,
 } from "../domain/school-categories";
@@ -20,60 +25,43 @@ const props = withDefaults(
     parentId?: string | null;
     /** 课程名的备用来源（课程目录）。学校报告里的课程名读不出来时用它补。 */
     nameLookup?: CourseNameLookup;
+    /** 是否在顶部显示「按学校报告还差」一句（嵌在紧凑摘要里时关掉，避免重复）。 */
+    showSummary?: boolean;
   }>(),
-  { parentId: null, courses: () => [], nameLookup: undefined },
+  {
+    parentId: null,
+    courses: () => [],
+    nameLookup: undefined,
+    showSummary: true,
+  },
 );
-const visibleNodes = computed(() =>
-  props.nodes.filter((node) => node.parentId === props.parentId),
-);
-const hasChildren = (id: string) =>
-  props.nodes.some((node) => node.parentId === id);
+const hasChildren = (id: string) => hasChildNodes(id, props.nodes);
 const coursesOf = (id: string) =>
   (props.courses ?? []).filter((course) => course.nodeId === id);
+const visibleNodes = computed(() =>
+  props.nodes.filter(
+    (node) =>
+      node.parentId === props.parentId &&
+      nodeHasContent(node, props.nodes, props.courses ?? []),
+  ),
+);
 const creditLabel = (value: number | null) =>
   value === null ? "待确认" : String(value);
-/** 学校报告给了这一层的任何学分值（要求/已获/还差）才显示数字行。 */
-const hasAnyCredit = (node: SchoolProgressNode) =>
-  node.requiredCredits !== null ||
-  node.earnedCredits !== null ||
-  node.remainingCredits !== null;
 const remainingOf = (node: SchoolProgressNode) => node.remainingCredits ?? 0;
-const unknownLayerNote = (node: SchoolProgressNode) => {
-  if (hasChildren(node.nodeId))
-    return "学校页面没有给出这一层的总学分，请看下面各类别";
-  if (coursesOf(node.nodeId).length)
-    return "学校页面没有给出这一层的总学分，请看下面课程";
-  return "学校页面没有列出这一类的学分和课程";
-};
+const unknownLayerNote = (node: SchoolProgressNode) =>
+  hasChildren(node.nodeId)
+    ? "学校页面没有给出这一层的总学分，请看下面各类别"
+    : "学校页面没有给出这一层的总学分，请看下面课程";
 /** 默认展开的只有「主修」这一层本身（它的第一级子类别直接可见），更深的层级保持收起。 */
-const majorRoot = computed(
-  () =>
-    props.nodes.find(
-      (node) => node.parentId === null && nodeName(node).includes("主修"),
-    ) ?? null,
-);
+const majorRoot = computed(() => majorRootOf(props.nodes));
 const isMajorRoot = (node: SchoolProgressNode) =>
   majorRoot.value !== null && majorRoot.value.nodeId === node.nodeId;
-/**
- * 顶层摘要：只列「主修」下第一级子类别各自的还差值，不跨层累加，
- * 所以父类与子类不会被重复计算。
- */
-const remainingSummary = computed(() => {
-  const root = majorRoot.value;
-  if (root === null || props.parentId !== null) return "";
-  const items = props.nodes
-    .filter(
-      (node) =>
-        node.parentId === root.nodeId &&
-        node.remainingCredits !== null &&
-        node.remainingCredits > 0,
-    )
-    .sort((a, b) => remainingOf(b) - remainingOf(a));
-  if (items.length === 0) return "";
-  return `按学校报告还差：${items
-    .map((node) => `${nodeName(node)} ${node.remainingCredits}`)
-    .join("、")}`;
-});
+/** 顶层摘要，口径见 remainingSummaryLine。 */
+const remainingSummary = computed(() =>
+  props.parentId !== null || !props.showSummary
+    ? ""
+    : remainingSummaryLine(props.nodes),
+);
 const titleOf = (node: SchoolProgressNode) => nodeName(node);
 const isUnnamed = (node: SchoolProgressNode) =>
   nodeName(node) === UNREAD_CATEGORY_NAME;

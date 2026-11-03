@@ -9,6 +9,7 @@
 import type { AuditResult } from "../contracts";
 import { explainAuditUnknown } from "./academic-record";
 import type { CourseNameLookup } from "./course-names";
+import { unmodeledRuleCount, unmodeledRuleLine } from "./plan-sections";
 import type {
   SchoolProgressCourse,
   SchoolProgressNode,
@@ -33,6 +34,89 @@ export function usableName(raw: unknown): string | null {
 
 export function nodeName(node: SchoolProgressNode): string {
   return usableName(node.name) ?? UNREAD_CATEGORY_NAME;
+}
+
+/** 学校报告给了这一层的任何学分值（要求/已获/还差）。 */
+export function hasAnyCredit(node: SchoolProgressNode): boolean {
+  return (
+    node.requiredCredits !== null ||
+    node.earnedCredits !== null ||
+    node.remainingCredits !== null
+  );
+}
+
+/** 有子类别的节点。 */
+export function hasChildNodes(
+  nodeId: string,
+  nodes: readonly SchoolProgressNode[],
+): boolean {
+  return nodes.some((node) => node.parentId === nodeId);
+}
+
+/**
+ * 这一层有没有可显示的内容：数字、子类别或课程任一即可。
+ * 三者都没有的类别（学校页面只留了个空标题）不展示。
+ */
+export function nodeHasContent(
+  node: SchoolProgressNode,
+  nodes: readonly SchoolProgressNode[],
+  courses: readonly SchoolProgressCourse[],
+): boolean {
+  return (
+    hasAnyCredit(node) ||
+    hasChildNodes(node.nodeId, nodes) ||
+    courses.some((course) => course.nodeId === node.nodeId)
+  );
+}
+
+/** 名字含「主修」的顶层节点；没有则为 null。 */
+export function majorRootOf(
+  nodes: readonly SchoolProgressNode[],
+): SchoolProgressNode | null {
+  return (
+    nodes.find(
+      (node) => node.parentId === null && nodeName(node).includes("主修"),
+    ) ?? null
+  );
+}
+
+/**
+ * 第一级类别：有主修时是主修下的直接子类别，否则是顶层节点。
+ * 只保留有内容的（见 nodeHasContent）。
+ */
+export function firstLevelNodes(
+  nodes: readonly SchoolProgressNode[],
+  courses: readonly SchoolProgressCourse[],
+): SchoolProgressNode[] {
+  const root = majorRootOf(nodes);
+  const parentId = root ? root.nodeId : null;
+  return nodes.filter(
+    (node) =>
+      node.parentId === parentId && nodeHasContent(node, nodes, courses),
+  );
+}
+
+/**
+ * 顶层摘要：只列主修下第一级子类别各自的还差值（按还差从大到小），
+ * 不跨层累加，父类与子类不会重复计算。没有还差或没有主修时返回 ""。
+ */
+export function remainingSummaryLine(
+  nodes: readonly SchoolProgressNode[],
+): string {
+  const root = majorRootOf(nodes);
+  if (root === null) return "";
+  const items = nodes
+    .filter(
+      (node) =>
+        node.parentId === root.nodeId &&
+        node.remainingCredits !== null &&
+        node.remainingCredits > 0,
+    )
+    .sort((a, b) => (b.remainingCredits ?? 0) - (a.remainingCredits ?? 0));
+  if (items.length === 0) return "";
+  return `按学校报告还差：${items
+    .map((node) => `${nodeName(node)} ${node.remainingCredits}`)
+    .join("、")}`;
 }
 
 /**
@@ -250,9 +334,8 @@ export function summarizeAuditUnknowns(
       if (code) addCourse(pending, code);
       else pending.notes.push(issue.message);
     } else if (issue.code === "UNMODELED_CURRICULUM_RULES") {
-      const count = issue.message.match(/有 (\d+) 条规则/);
-      ruleCount += count ? Number(count[1]) : 1;
-      rules.notes.push(issue.message);
+      ruleCount += unmodeledRuleCount(issue);
+      rules.notes.push(unmodeledRuleLine(issue));
     } else {
       other.notes.push(explainAuditUnknown(issue.code, issue.message));
     }

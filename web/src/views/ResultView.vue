@@ -34,7 +34,6 @@ import {
   hasSections,
   sectionLines,
   sectionTone,
-  unmodeledRulesNote,
   verdictBadge,
   type SectionLine,
 } from "../domain/plan-sections";
@@ -1308,9 +1307,6 @@ async function goBackToQuestions() {
               </ul>
               <p v-else-if="section.verdict === 'VALID'" class="microcopy">
                 已核对，未发现冲突或不满足项。
-              </p>
-              <p v-if="unmodeledRulesNote(section)" class="microcopy">
-                {{ unmodeledRulesNote(section) }}
               </p>
             </section>
           </div>

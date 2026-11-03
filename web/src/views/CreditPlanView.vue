@@ -636,10 +636,7 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
 
     <details v-if="store.schoolProgress" class="school-report-reference">
       <summary>学校报告进度 · 原始类别与学分</summary>
-      <p class="microcopy">
-        以下数字保留学校报告原值。Java
-        本地核对状态和缺口单独显示，学校类别尚未确认抵扣关系。
-      </p>
+      <p class="microcopy">以下数字是学校报告的原值。</p>
       <SchoolProgressTree
         :nodes="store.schoolProgress.snapshot.nodes"
         :courses="store.schoolProgress.snapshot.courses"
@@ -682,19 +679,13 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
     </p>
 
     <template v-else>
-      <!-- 必须显示：跨类别抵扣系统没有建模，凑分只按单个类别计算。 -->
-      <div
-        v-for="issue in unmodeledIssues"
-        :key="issue.code"
+      <p
+        v-if="unmodeledIssues.length"
         class="notice notice--warning credits-unmodeled"
         role="note"
       >
-        <p><strong>系统没有算跨类别抵扣。</strong></p>
-        <p>{{ issue.message }}</p>
-        <p class="microcopy">
-          凑学分只按单个类别计算。跨类别的抵扣系统算不了，请以教务认定为准。
-        </p>
-      </div>
+        学分按学校教务导入的学业情况计算；跨类别抵扣以教务认定为准。
+      </p>
 
       <p v-if="!audit" class="notice notice--warning" role="note">
         还没有学业核对结果，无法知道每个类别还差多少学分。

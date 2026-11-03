@@ -23,9 +23,6 @@ export const SECTION_TITLE: Record<PlanSection["scope"], string> = {
 
 export const UNMODELED_RULES_CODE = "UNMODELED_CURRICULUM_RULES";
 
-export const UNMODELED_RULES_NOTE =
-  "这些培养方案规则需要人工确认，系统暂不自动判断。";
-
 export function verdictBadge(verdict: PlanVerdict): string {
   switch (verdict) {
     case "VALID":
@@ -88,9 +85,11 @@ export function sectionLines(
   );
   const unknowns: SectionLine[] = section.unknownChecks.flatMap(
     (issue, index) => {
-      // 未建模规则保留 Java 文案（含条数与原表位置），不走通用解释。
+      // 未建模规则只说条数，不列原表位置（位置是给工程核对用的）。
       const text =
-        issue.code === UNMODELED_RULES_CODE ? issue.message : explain(issue);
+        issue.code === UNMODELED_RULES_CODE
+          ? unmodeledRuleLine(issue)
+          : explain(issue);
       return once(issue.code, text)
         ? [{ key: `u${index}:${issue.code}`, kind: "unknown", text }]
         : [];
@@ -99,13 +98,15 @@ export function sectionLines(
   return [...violations, ...unknowns];
 }
 
-/** 毕业要求分项因未建模规则而无法确认时的附注；其他情况返回 null。 */
-export function unmodeledRulesNote(section: PlanSection): string | null {
-  if (section.scope !== "CURRICULUM") return null;
-  const hasUnmodeled = section.unknownChecks.some(
-    (issue) => issue.code === UNMODELED_RULES_CODE,
-  );
-  return hasUnmodeled ? UNMODELED_RULES_NOTE : null;
+/** 未建模规则的条数：取自 Java 文案「有 N 条规则」，取不到按 1 条算。 */
+export function unmodeledRuleCount(issue: Issue): number {
+  const match = issue.message.match(/有 (\d+) 条规则/);
+  return match ? Number(match[1]) : 1;
+}
+
+/** 学生页只显示条数，不显示原表位置和 Java 原文。规则原文目前接口未返回，故不提供展开。 */
+export function unmodeledRuleLine(issue: Issue): string {
+  return `有 ${unmodeledRuleCount(issue)} 条培养方案说明需人工确认`;
 }
 
 /** 分项是否存在可展示的分项数据（旧后端不返回 sections 时为 false，调用方退回旧展示）。 */

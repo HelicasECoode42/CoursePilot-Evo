@@ -14,7 +14,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api";
 import type { CareerDirection, Course, ReviewNote } from "../contracts";
-import SchoolProgressTree from "../components/SchoolProgressTree.vue";
+import SchoolProgressSummary from "../components/SchoolProgressSummary.vue";
 import LearnedCourseGroups from "../components/LearnedCourseGroups.vue";
 import LocalAuditSummary from "../components/LocalAuditSummary.vue";
 import ReviewSummary from "../components/ReviewSummary.vue";
@@ -496,7 +496,7 @@ onUnmounted(() => controller?.abort());
           >
         </div>
         <template v-else-if="store.schoolProgress">
-          <SchoolProgressTree
+          <SchoolProgressSummary
             :nodes="store.schoolProgress.snapshot.nodes"
             :courses="store.schoolProgress.snapshot.courses"
             :name-lookup="lookupCourseName"

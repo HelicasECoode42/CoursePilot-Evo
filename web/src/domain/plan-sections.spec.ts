@@ -4,7 +4,7 @@ import {
   hasSections,
   sectionLines,
   sectionTone,
-  unmodeledRulesNote,
+  unmodeledRuleCount,
   verdictBadge,
 } from "./plan-sections";
 
@@ -69,7 +69,7 @@ describe("plan verification sections", () => {
     ]);
   });
 
-  it("keeps the unmodeled-rule locators from Java and adds the manual-check note for CURRICULUM", () => {
+  it("shows only the rule count for unmodeled rules, without sheet locators", () => {
     const curriculum = section({
       scope: "CURRICULUM",
       verdict: "UNKNOWN",
@@ -77,34 +77,13 @@ describe("plan verification sections", () => {
     });
     const lines = sectionLines(curriculum, () => "不应使用");
     expect(lines).toHaveLength(1);
-    expect(lines[0].text).toContain("测试表!A7");
-    expect(unmodeledRulesNote(curriculum)).toBe(
-      "这些培养方案规则需要人工确认，系统暂不自动判断。",
-    );
+    expect(lines[0].text).toBe("有 2 条培养方案说明需人工确认");
+    expect(lines[0].text).not.toContain("测试表");
   });
 
-  it("adds no unmodeled note to the timetable section or to other curriculum unknowns", () => {
-    expect(
-      unmodeledRulesNote(
-        section({ scope: "TIMETABLE", unknownChecks: [UNMODELED] }),
-      ),
-    ).toBeNull();
-    expect(
-      unmodeledRulesNote(
-        section({
-          scope: "CURRICULUM",
-          verdict: "UNKNOWN",
-          unknownChecks: [
-            {
-              code: "CREDITS_UNKNOWN",
-              message: "x",
-              field: null,
-              retryable: false,
-            },
-          ],
-        }),
-      ),
-    ).toBeNull();
+  it("counts unmodeled rules from Java text and falls back to 1", () => {
+    expect(unmodeledRuleCount(UNMODELED)).toBe(2);
+    expect(unmodeledRuleCount({ ...UNMODELED, message: "未知格式" })).toBe(1);
   });
 
   it("detects whether a validation carries sections", () => {

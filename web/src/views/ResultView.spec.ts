@@ -1109,10 +1109,8 @@ describe("result page course search and replacement", () => {
     expect(blocks[0].classes()).toContain("notice--success");
     expect(blocks[1].text()).toContain("毕业要求核对：无法确认");
     expect(blocks[1].classes()).toContain("notice--warning");
-    expect(blocks[1].text()).toContain("测试表!A7");
-    expect(blocks[1].text()).toContain(
-      "这些培养方案规则需要人工确认，系统暂不自动判断。",
-    );
+    expect(blocks[1].text()).toContain("有 1 条培养方案说明需人工确认");
+    expect(blocks[1].text()).not.toContain("测试表!A7");
     expect(wrapper.find(".plan-sections").text()).toContain(
       "总体：部分条件无法确认（取两项中较差的结果）",
     );

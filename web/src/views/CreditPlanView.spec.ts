@@ -226,9 +226,11 @@ describe("凑学分选课页", () => {
 
   it("shows the unmodeled cross-category rule notice verbatim", async () => {
     const { wrapper } = await mountView();
-    expect(wrapper.text()).toContain("系统没有算跨类别抵扣");
-    expect(wrapper.text()).toContain("本培养方案有 3 条规则系统未建模");
-    expect(wrapper.text()).toContain("凑学分只按单个类别计算");
+    expect(wrapper.text()).toContain(
+      "学分按学校教务导入的学业情况计算；跨类别抵扣以教务认定为准。",
+    );
+    expect(wrapper.text()).not.toContain("凑分只按单个类别");
+    expect(wrapper.text()).not.toContain("原表位置");
     expect(wrapper.text()).toContain(
       "已修课程可能还未填全，暂时无法确定剩余要求。",
     );

@@ -265,16 +265,15 @@ describe("学校学业进度树", () => {
     const topCards = wrapper.findAll(
       ".school-progress-tree:not(.school-progress-tree--nested) > .school-category",
     );
-    expect(topCards).toHaveLength(2);
+    // 其他课程：没有数字、没有子类别、没有课程，整张卡不渲染。
+    expect(topCards).toHaveLength(1);
+    expect(wrapper.text()).not.toContain("示例其他课程");
+    expect(wrapper.text()).not.toContain("学校页面没有列出这一类的学分和课程");
     // 主修：没有数字，只有一句说明，不出现三个「待确认」。
     expect(topCards[0]!.element.querySelector(":scope > dl")).toBeNull();
     expect(topCards[0]!.text()).toContain(
       "学校页面没有给出这一层的总学分，请看下面各类别",
     );
-    // 其他课程：没有数字、没有子类别、没有课程，给一行说明。
-    expect(topCards[1]!.element.querySelector(":scope > dl")).toBeNull();
-    expect(topCards[1]!.text()).toContain("学校页面没有列出这一类的学分和课程");
-    expect(topCards[1]!.text()).not.toContain("待确认");
     // 主修的 details 默认展开，第一级子类别的数字直接可见；更深一层仍收起。
     const details = wrapper
       .findAll("details")
