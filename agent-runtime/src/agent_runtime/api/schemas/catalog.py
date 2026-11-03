@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints
+from pydantic import Field, StringConstraints, model_validator
 
 from ._base import Credits, DomainModel, Id
 
@@ -54,6 +54,19 @@ class TeacherCourseOption(DomainModel):
     offeringSnapshotId: Id | None = None
     offeringSourceValidation: SourceValidation | None = None
     factSource: OfferingFactSource | None = None
+
+    @model_validator(mode="after")
+    def _offering_fact_shape(self) -> TeacherCourseOption:
+        # 重现 domain.schema.json 中 TeacherCourseOption 的 if/then 规则：
+        # factSource=OFFERING_SNAPSHOT 时三个开课事实字段必填。
+        if self.factSource == "OFFERING_SNAPSHOT":
+            if self.sectionCount is None or self.sectionCount < 1:
+                raise ValueError("OFFERING_SNAPSHOT requires sectionCount >= 1")
+            if self.offeringSnapshotId is None:
+                raise ValueError("OFFERING_SNAPSHOT requires offeringSnapshotId")
+            if self.offeringSourceValidation is None:
+                raise ValueError("OFFERING_SNAPSHOT requires offeringSourceValidation")
+        return self
 
 
 class CareerDirection(DomainModel):
