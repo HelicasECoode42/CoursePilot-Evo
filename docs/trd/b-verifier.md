@@ -197,3 +197,16 @@ sequenceDiagram
 - 测试：`PlanValidationEndpointTest` 覆盖分项拆分、总判决取最差、SECTION_UNASSIGNED；`OfferingVerificationEndpointTest` 覆盖（a）已核验无冲突 → TIMETABLE VALID 而 CURRICULUM UNKNOWN（未建模规则）；（b）OFFICIAL_DOCUMENT 未核验 → TIMETABLE UNKNOWN(TIMETABLE_UNVERIFIED)；（c）BLOCK_DAY 命中 → TIMETABLE INVALID、总判决 INVALID；`A1WorkbookImporterTest` 覆盖 INFORMATIONAL 分类。
 - 已知限制：Python 网关的 `PlanValidation.sections` 暂缺省为空列表（既有 fake/测试数据未带分项），页面尚未展示分项；这两处需在 UI 与 fixture 任务中补齐。
 - 已知限制：`INFORMATIONAL` 是新的处置值。`spring.jpa.hibernate.ddl-auto=update` 不会修改已存在表上的枚举检查约束，已有本地库需用新导入重建（或手工放宽约束）后才能写入此处置值；未重新导入前，现存库中的 `UNMODELED` 行保持原样，仍会作为未知出现。
+
+### 学校报告与学业核对同步（2026-11-03）
+
+owner 决定：本地学业核对必须与导入的学校报告同步（替代此前「学校报告与 Java 核对分开」的设计，`docs/27` 中相应描述以此为准）。实现位于 `AuditResultAssembler`、`AcademicLedger`、`SchoolReport`（读取 `SchoolProgressService` 保存的最近一次导入）。
+
+- **在读不计学分、不致 UNKNOWN**：IN_PROGRESS 课程不计 `earnedCredits`，缺口 = 要求 − 已通过学分；在读学分单独放在 `AuditItem.inProgressCredits`。只有 UNKNOWN 结果的课程仍记为待定。
+- **学校同名类别优先**：类别按名称精确匹配学校节点（同名时取唯一顶层节点；有歧义则不映射）。匹配且学分已读全时，直接采用学校的 required/earned/remaining，`remaining` 为 0 即 SATISFIED，`AuditItem.source = SCHOOL_REPORT`，与课程是否在课程库无关。未匹配的类别仍走本地折算，`source = LOCAL`。
+- **课程归类**：不在课程库中、但学校报告把它挂在某类别下的课程，归入该学校类别，不再报「课程 X 不在课程库中，无法归类」。无任何类别链接的课程仍是未归类，照常记 `COURSE_NOT_IN_CATALOG`。
+- **学业记录读全**：学校导入时若每门课状态已知（无 UNKNOWN）且每个节点的 required/earned/remaining 都已读到，学业记录按完整处理（`transcriptComplete = true`），`AcademicResult.transcriptCompleteSource = SCHOOL_IMPORT_FULL`；否则保持手动声明，依据为 `MANUAL`。
+- **未建模规则**仍以 UNKNOWN 项列出，但不改变学校报告已判定的类别。
+- 契约变更：`AuditItem` 增加可选 `source`、`inProgressCredits`；`AuditResult` 增加可选 `transcriptCompleteSource`。Python `audit.py` 同步；Web `contracts.ts` 仅增加类型。
+- 测试：`SchoolReportAuditTest`（同名类别采用学校口径且课程不在库、学校剩余学分与在读学分、课程按学校链接归类、读全自动完整、未读全保持手动、无同名回退 LOCAL）；`AuditResultAssemblerTest` 的在读用例改为「不致 UNKNOWN」；`SchoolProgressEndpointTest.fullyReadImportIsSavedAsCompleteTranscript`。
+- 限制：学校报告按主体取最近一次导入，未与培养快照版本做逐项比对（学业记录的快照不一致仍由 `SnapshotMismatch` 拦截）；同名但不同层级且都未读全的节点不映射。

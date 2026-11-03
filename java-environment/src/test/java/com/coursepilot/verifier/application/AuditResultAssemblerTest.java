@@ -126,8 +126,8 @@ class AuditResultAssemblerTest {
   }
 
   @Test
-  @DisplayName("在修的课程不计学分，相应类别的缺口不能确定，判 UNKNOWN 而不是 UNSATISFIED")
-  void inProgressCourseMakesGapUnknown() {
+  @DisplayName("在修的课程不计学分、不让类别判 UNKNOWN：缺口 = 要求 - 已通过学分，在读学分单列")
+  void inProgressCourseDoesNotMakeGapUnknown() {
     requirementRepo.save(new Requirement(PLAN, "实践", 10.0));
     course("C6", "实践课", 2.0, "实践");
     transcript(true, row("C6", null, TranscriptCourse.Outcome.IN_PROGRESS, 1));
@@ -135,8 +135,12 @@ class AuditResultAssemblerTest {
     AuditDtos.AuditResult result = assembler.assemble(PLAN, STUDENT);
     AuditDtos.AuditItem item = onlyItem(result);
     assertEquals(0.0, item.earnedCredits(), "在修课程不能计入已修学分");
-    assertEquals(AuditDtos.State.UNKNOWN, item.state());
-    assertTrue(result.unknowns().stream().anyMatch(i -> i.code().equals("PENDING_COURSE")));
+    assertEquals(AuditDtos.State.UNSATISFIED, item.state(), "在读不能让类别变 UNKNOWN");
+    assertEquals(10.0, item.gapCredits());
+    assertEquals(2.0, item.inProgressCredits(), "在读学分单独报告");
+    assertEquals(AuditDtos.Source.LOCAL, item.source());
+    assertTrue(result.unknowns().stream().noneMatch(i -> i.code().startsWith("PENDING")),
+        "在读课不产生待定项");
   }
 
   @Test
@@ -155,8 +159,8 @@ class AuditResultAssemblerTest {
   }
 
   @Test
-  @DisplayName("同一课程先未通过、后在修：没有通过记录，仍按待定处理")
-  void failedThenInProgressIsStillPending() {
+  @DisplayName("同一课程先未通过、后在修：没有通过记录，不计已修，在读学分单列")
+  void failedThenInProgressIsNotPassed() {
     requirementRepo.save(new Requirement(PLAN, "工程", 4.0));
     course("C9", "工程课", 4.0, "工程");
     transcript(true,
@@ -165,7 +169,9 @@ class AuditResultAssemblerTest {
 
     AuditDtos.AuditItem item = onlyItem(assembler.assemble(PLAN, STUDENT));
     assertEquals(0.0, item.earnedCredits());
-    assertEquals(AuditDtos.State.UNKNOWN, item.state());
+    assertEquals(AuditDtos.State.UNSATISFIED, item.state());
+    assertEquals(4.0, item.gapCredits());
+    assertEquals(4.0, item.inProgressCredits());
   }
 
   @Test

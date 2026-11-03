@@ -83,6 +83,18 @@ class SchoolProgressEndpointTest {
     }
 
     @Test
+    void fullyReadImportIsSavedAsCompleteTranscript() throws Exception {
+        // 把唯一的 UNKNOWN 课程状态改成 PASSED：每门课状态已知、每个类别已读到，即「学校导入读全」。
+        String fullyRead = body().replace("\"outcome\":\"UNKNOWN\"", "\"outcome\":\"PASSED\"");
+        mvc.perform(put("/api/v1/school-progress").header("X-Service-Key", "test-key")
+                .header("X-Subject-Id", "S906").header("Idempotency-Key", "school-full-read")
+                .contentType(MediaType.APPLICATION_JSON).content(fullyRead))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.academicRecord.transcriptComplete").value(true));
+        assertEquals(true, transcripts.findByStudentId("S906").orElseThrow().isTranscriptComplete());
+    }
+
+    @Test
     void contentHashIgnoresCaptureTimeAndIncludesCurriculumId() throws Exception {
         send("S903", "school-three");
         String recaptured = body().replace("2026-10-29T00:00:00Z", "2026-10-30T00:00:00Z");

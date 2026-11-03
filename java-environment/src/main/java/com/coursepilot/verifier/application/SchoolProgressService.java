@@ -93,8 +93,10 @@ public class SchoolProgressService {
                     course.courseCode(), null, RecordDtos.Outcome.UNKNOWN, term));
             }
         }
+        // 学校导入读全（每门课状态已知、每个类别已读到）时，学业记录按完整处理（docs/27 之前写死为 false）。
+        boolean fullyRead = SchoolReport.from(input.snapshot()).fullyRead();
         var inputRecord = new RecordDtos.AcademicRecordInput("1.0", input.curriculumSnapshotId(),
-            new ArrayList<>(uniqueCourses.values()), false, "USER_IMPORT");
+            new ArrayList<>(uniqueCourses.values()), fullyRead, "USER_IMPORT");
         RecordDtos.AcademicRecord academicRecord = records.submit(subjectId,
             key == null ? null : "school-record:" + hashText(key), inputRecord);
         Instant importedAt = Instant.now();

@@ -1080,6 +1080,28 @@
           },
           "minItems": 1,
           "maxItems": 20
+        },
+        "source": {
+          "description": "LOCAL：按本地课程折算；SCHOOL_REPORT：学分直接取自学校报告的同名类别（按学校报告，非本地核对）。缺省视为 LOCAL。",
+          "type": "string",
+          "enum": [
+            "LOCAL",
+            "SCHOOL_REPORT"
+          ]
+        },
+        "inProgressCredits": {
+          "description": "在读课程的学分，不计入 earnedCredits；学分未知时为 null。缺省表示未提供。",
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "multipleOf": 0.01
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1113,6 +1135,21 @@
         },
         "transcriptComplete": {
           "type": "boolean"
+        },
+        "transcriptCompleteSource": {
+          "description": "transcriptComplete 为 true 时的依据：SCHOOL_IMPORT_FULL 为学校导入读全，MANUAL 为手动声明；为 false 时为 null。",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "SCHOOL_IMPORT_FULL",
+                "MANUAL"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "requirements": {
           "type": "array",

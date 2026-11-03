@@ -183,5 +183,15 @@
     "file": "invalid-teacher-course-option-unknown-fact-source.json",
     "definition": "TeacherCourseOption",
     "valid": false
+  },
+  {
+    "file": "audit-result-school-report.json",
+    "definition": "AuditResult",
+    "valid": true
+  },
+  {
+    "file": "invalid-audit-item-unknown-source.json",
+    "definition": "AuditResult",
+    "valid": false
   }
 ]

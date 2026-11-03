@@ -1,0 +1,54 @@
+{
+  "curriculumSnapshotId": "synthetic-plan-2025",
+  "academicRecordId": "synthetic-student-01",
+  "recordRevision": 3,
+  "transcriptComplete": true,
+  "transcriptCompleteSource": "SCHOOL_IMPORT_FULL",
+  "requirements": [
+    {
+      "requirementId": "req-101",
+      "category": "体育",
+      "courseCodes": ["SYN-PE-01", "SYN-PE-02", "SYN-PE-03"],
+      "requiredCredits": 6,
+      "earnedCredits": 6,
+      "gapCredits": 0,
+      "state": "SATISFIED",
+      "sourceRefIds": ["curriculum:synthetic-plan-2025"],
+      "source": "SCHOOL_REPORT",
+      "inProgressCredits": 0
+    },
+    {
+      "requirementId": "req-102",
+      "category": "专业选修课",
+      "courseCodes": ["SYN-EL-01"],
+      "requiredCredits": 24,
+      "earnedCredits": 9,
+      "gapCredits": 15,
+      "state": "UNSATISFIED",
+      "sourceRefIds": ["curriculum:synthetic-plan-2025"],
+      "source": "SCHOOL_REPORT",
+      "inProgressCredits": 3
+    },
+    {
+      "requirementId": "req-103",
+      "category": "实践教学环节",
+      "courseCodes": [],
+      "requiredCredits": 4,
+      "earnedCredits": 0,
+      "gapCredits": 4,
+      "state": "UNSATISFIED",
+      "sourceRefIds": ["curriculum:synthetic-plan-2025"],
+      "source": "LOCAL",
+      "inProgressCredits": 0
+    }
+  ],
+  "suggestedCourseCodes": [],
+  "unknowns": [
+    {
+      "code": "UNMODELED_RULE",
+      "message": "培养方案有 1 条未建模规则，需人工确认（示例）",
+      "field": "curriculumSnapshotId",
+      "retryable": false
+    }
+  ]
+}

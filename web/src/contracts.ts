@@ -138,6 +138,10 @@ export interface AuditItem {
   gapCredits: number | null;
   state: AuditState;
   sourceRefIds: string[];
+  /** LOCAL 为本地课程折算；SCHOOL_REPORT 为学分取自学校报告同名类别。缺省视为 LOCAL。 */
+  source?: "LOCAL" | "SCHOOL_REPORT";
+  /** 在读课程学分，不计入 earnedCredits；学分未知时为 null，缺省表示未提供。 */
+  inProgressCredits?: number | null;
 }
 
 export interface AuditResult {
@@ -145,6 +149,8 @@ export interface AuditResult {
   academicRecordId: string;
   recordRevision: number;
   transcriptComplete: boolean;
+  /** transcriptComplete 为 true 时的依据；为 false 时为 null。 */
+  transcriptCompleteSource?: "SCHOOL_IMPORT_FULL" | "MANUAL" | null;
   requirements: AuditItem[];
   suggestedCourseCodes: string[];
   unknowns: Issue[];
