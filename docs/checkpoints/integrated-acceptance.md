@@ -35,13 +35,4 @@ Java 第一次追加回归使用默认文件库，19 项因原运行服务持有
 
 正方扩展直接回传、页面图标状态对照、真实评价在模型输出中的对应关系，以及真实目标学期开课快照下的换班和课表，均未完成本次浏览器验收。文件导入通过不能替代扩展跨标签页回传验收。
 
-## Checkpoint 与恢复
-
-各模块的不可变引用、测试和实现说明分别见：
-
-- [学校进度导入](luna-school-import.md)
-- [评价与模型](luna-reviews-ai.md)
-- [方案编辑](luna-plan-edit.md)
-- [完整流程、技术栈及恢复方法](../26-integrated-student-workflow.md)
-
-代码 checkpoint 排除忽略文件和数据库。隔离验收数据库的停写备份、恢复副本和截图保存在本机 `/private/tmp/coursepilot-acceptance/`；该目录为临时验收材料，不能代替正式数据备份。原服务及其数据库未改变。
+完整流程、技术栈和恢复方法见[学生流程集成说明](../26-integrated-student-workflow.md)。

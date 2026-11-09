@@ -22,6 +22,7 @@ export interface TimetableSource {
 
 /** 格子里的一条：某门课的某一段时间。 */
 export interface TimetableEntry {
+  key: string;
   courseCode: string;
   classId: string;
   teacherText: string;
@@ -42,15 +43,6 @@ export interface TimetableOptions {
   weekView?: WeekView;
 }
 
-/** 已真正画进课表的班次（每门一条，用于下方的明细列表）。 */
-export interface PlacedCourse {
-  courseCode: string;
-  classId: string;
-  teacherText: string;
-  meetingTextRaw: string;
-  weeksText: string;
-}
-
 /** 没有画进课表的原因，直接展示给学生。 */
 export interface TimetableGap {
   courseCode: string;
@@ -61,7 +53,8 @@ export interface TimetableGap {
 export interface TimetableView {
   /** key 为 slotKey(星期, 节次)。同一格多门课时全部保留，不覆盖。 */
   cells: Map<string, TimetableEntry[]>;
-  placed: PlacedCourse[];
+  placedCount: number;
+  overlapCells: Set<string>;
   gaps: TimetableGap[];
 }
 
@@ -237,7 +230,7 @@ export function buildTimetable(
 ): TimetableView {
   const weekView = options.weekView ?? "ALL";
   const cells = new Map<string, TimetableEntry[]>();
-  const placed: PlacedCourse[] = [];
+  let placedCount = 0;
   const gaps: TimetableGap[] = [];
 
   for (const source of sources) {
@@ -271,8 +264,8 @@ export function buildTimetable(
       continue;
     }
 
-    const placedWeeks: number[] = [];
-    for (const meeting of offering.meetings) {
+    let placed = false;
+    for (const [index, meeting] of offering.meetings.entries()) {
       const problem = meetingProblem(meeting);
       if (problem !== null) {
         gaps.push({
@@ -282,10 +275,11 @@ export function buildTimetable(
         });
         continue;
       }
-      placedWeeks.push(...meeting.weeks);
+      placed = true;
       // 周次视图只影响格子；明细和未排说明仍按整学期计算。
       if (!meetingInWeekView(meeting.weeks, weekView)) continue;
       const entry: TimetableEntry = {
+        key: JSON.stringify([courseCode, classId, index]),
         courseCode,
         classId,
         teacherText: offering.teacherText,
@@ -303,16 +297,23 @@ export function buildTimetable(
       }
     }
 
-    if (placedWeeks.length > 0) {
-      placed.push({
-        courseCode,
-        classId,
-        teacherText: offering.teacherText,
-        meetingTextRaw: offering.meetingTextRaw,
-        weeksText: weeksText(placedWeeks),
-      });
-    }
+    if (placed) placedCount += 1;
   }
 
-  return { cells, placed, gaps };
+  const overlapCells = new Set<string>();
+  const range = WEEK_VIEW_RANGES[weekView];
+  for (const [key, entries] of cells) {
+    if (entries.length < 2) continue;
+    const classByWeek = new Map<number, string>();
+    for (const { classId, weeks } of entries) {
+      for (const week of weeks) {
+        if (range && (week < range[0] || week > range[1])) continue;
+        const previous = classByWeek.get(week);
+        if (previous !== undefined && previous !== classId)
+          overlapCells.add(key);
+        classByWeek.set(week, classId);
+      }
+    }
+  }
+  return { cells, placedCount, overlapCells, gaps };
 }

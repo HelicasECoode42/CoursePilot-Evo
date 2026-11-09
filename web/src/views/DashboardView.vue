@@ -2,7 +2,7 @@
 /**
  * 个人控制台。配置完之后的落地页，四块：
  *   ① 我的状态   —— 来自 Java 的学业核对，原样显示，不改写 UNKNOWN
- *   ② 问一问     —— 确定性的回答 + 职业方向；不编造，也不假装在和模型对话
+ *   ② 问一问     —— 课程规划对话与职业方向
  *   ③ 看开什么课 —— 真实培养方案的课程，按要求类别分组，展开才查评价
  *   ④ 开始选课   —— 进现有的规划流程，这一页不重做它
  *
@@ -337,8 +337,10 @@ onUnmounted(() => controller?.abort());
         <h1 id="dash-title" tabindex="-1">我的学业</h1>
         <p class="dashboard-subtitle">
           {{
-            store.selectedCurriculum?.displayName ||
-            "先连接学业资料，再开始规划"
+            store.selectedCurriculum
+              ? (usableName(store.selectedCurriculum.displayName) ??
+                "培养方案名称暂未提供")
+              : "先连接学业资料，再开始规划"
           }}
           <span v-if="store.selectedCurriculum" class="source-pill">{{
             sourceLabel
@@ -614,7 +616,7 @@ onUnmounted(() => controller?.abort());
             <h2 id="dash-courses">培养方案中的课程</h2>
             <p class="microcopy">
               {{ courseCount }} 门课程 ·
-              按类别浏览，点开查看历史评价。目录不代表下学期开课清单。
+              按类别浏览，点开查看历史评价。评价资料只覆盖部分课程，没有记录会明确写出来；目录不代表下学期开课清单。
             </p>
           </div>
         </div>
@@ -700,7 +702,7 @@ onUnmounted(() => controller?.abort());
                     "
                     class="microcopy"
                   >
-                    暂无评价记录。
+                    暂无评价记录：这门课还没有导入评价资料，不代表没人评价。
                   </p>
                   <template v-else
                     ><p
@@ -925,7 +927,6 @@ onUnmounted(() => controller?.abort());
 }
 .dash-audit,
 .dash-audit ul,
-.dash-learned,
 .dash-courses,
 .dash-directions {
   list-style: none;
@@ -949,17 +950,6 @@ onUnmounted(() => controller?.abort());
   border-bottom: 1px solid var(--line, #e5e7eb);
 }
 
-.dash-learned li {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.8rem;
-  border-bottom: 1px solid var(--line);
-  padding: 0.6rem 0;
-  font-size: 0.85rem;
-}
-.dash-learned li > span:last-child {
-  color: var(--soft);
-}
 .dash-answer {
   background: var(--wash);
   border-radius: 12px;
@@ -1043,37 +1033,6 @@ onUnmounted(() => controller?.abort());
   background: var(--wash);
   border: 1px solid var(--line);
 }
-.dash-ask-label {
-  display: block;
-  margin-top: 1.25rem;
-  font-size: 0.85rem;
-}
-.dash-ask-input {
-  display: block;
-  width: 100%;
-  min-height: 88px;
-  padding: 0.85rem;
-  margin-top: 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  resize: vertical;
-}
-.dash-samples {
-  display: flex;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-  margin-block: 0.8rem 1.2rem;
-}
-.dash-sample {
-  padding: 0.4rem 0.65rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  font-size: 0.75rem;
-  color: var(--soft);
-  text-align: left;
-}
 .plan-start__actions {
   display: flex;
   flex-wrap: wrap;
@@ -1114,10 +1073,6 @@ onUnmounted(() => controller?.abort());
   }
   .dash-directions {
     grid-template-columns: 1fr;
-  }
-  .dash-learned li {
-    flex-direction: column;
-    gap: 0.2rem;
   }
 }
 </style>

@@ -58,7 +58,7 @@ def resolve_private(private_root, requested, *, role: str) -> Path:
 
     if req.is_absolute():
         raise PrivateAccessError("absolute_path", requested)
-    parts = [p for p in req.parts if p not in (".",)]
+    parts = req.parts
     if not parts or any(p == ".." for p in parts):
         raise PrivateAccessError("path_traversal", requested)
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, cast
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request
 
@@ -30,7 +30,7 @@ def offering_summary(
 ) -> dict:
     context = make_context(request, subject_id, x_request_id, body.curriculumSnapshotId)
     result = summarize_offerings(
-        cast(Any, tool_client),
+        tool_client,
         context,
         curriculum_snapshot_id=body.curriculumSnapshotId,
         offering_snapshot_id=body.offeringSnapshotId,

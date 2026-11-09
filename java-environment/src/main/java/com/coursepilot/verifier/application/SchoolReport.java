@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.math.BigDecimal;
 
 /**
  * 学校学业进度（导入的学校报告）的只读视图。
@@ -27,19 +28,19 @@ import java.util.Set;
 final class SchoolReport {
 
     /** 学校报告里的一个类别，三个学分都已读到。 */
-    record Category(String name, double required, double earned, double remaining) {}
+    record Category(String name, BigDecimal required, BigDecimal earned, BigDecimal remaining) {}
 
     static final SchoolReport NONE = new SchoolReport(Map.of(), Map.of(), Map.of(), false);
 
     private final Map<String, Category> categories;
     /** 课程编号 -> 每个出现位置的祖先名称链（从最近到最远，含自身节点）。 */
     private final Map<String, List<List<String>>> chainsOfCourse;
-    private final Map<String, Double> creditsOfCourse;
+    private final Map<String, BigDecimal> creditsOfCourse;
     private final boolean fullyRead;
 
     private SchoolReport(Map<String, Category> categories,
                          Map<String, List<List<String>>> chainsOfCourse,
-                         Map<String, Double> creditsOfCourse, boolean fullyRead) {
+                         Map<String, BigDecimal> creditsOfCourse, boolean fullyRead) {
         this.categories = categories;
         this.chainsOfCourse = chainsOfCourse;
         this.creditsOfCourse = creditsOfCourse;
@@ -68,18 +69,17 @@ final class SchoolReport {
                 continue;
             }
             SchoolProgressDtos.Node pick = tops.get(0);
-            if (pick.requiredCredits() == null || pick.remainingCredits() == null) {
+            if (pick.requiredCredits() == null || pick.earnedCredits() == null || pick.remainingCredits() == null) {
                 continue;
             }
-            double required = pick.requiredCredits().doubleValue();
-            double remaining = pick.remainingCredits().doubleValue();
-            double earned = pick.earnedCredits() != null
-                ? pick.earnedCredits().doubleValue() : required - remaining;
+            BigDecimal required = pick.requiredCredits();
+            BigDecimal remaining = pick.remainingCredits();
+            BigDecimal earned = pick.earnedCredits();
             categories.put(e.getKey(), new Category(e.getKey(), required, earned, remaining));
         }
 
         Map<String, List<List<String>>> chains = new HashMap<>();
-        Map<String, Double> credits = new HashMap<>();
+        Map<String, BigDecimal> credits = new HashMap<>();
         boolean anyUnknownOutcome = false;
         for (SchoolProgressDtos.Course c : snapshot.courses()) {
             if ("UNKNOWN".equals(c.outcome())) anyUnknownOutcome = true;
@@ -88,7 +88,7 @@ final class SchoolReport {
                 chains.computeIfAbsent(c.courseCode(), k -> new ArrayList<>()).add(chainOf(node, byId));
             }
             if (c.credits() != null) {
-                credits.putIfAbsent(c.courseCode(), c.credits().doubleValue());
+                credits.putIfAbsent(c.courseCode(), c.credits());
             }
         }
 
@@ -144,7 +144,7 @@ final class SchoolReport {
     }
 
     /** 学校报告里该课程的学分（在读课的学分只能从这里得到）；没有则为 null。 */
-    Double creditsOfCourse(String courseCode) {
+    BigDecimal creditsOfCourse(String courseCode) {
         return creditsOfCourse.get(courseCode);
     }
 

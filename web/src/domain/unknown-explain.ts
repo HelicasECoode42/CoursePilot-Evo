@@ -41,6 +41,14 @@ export const UNKNOWN_EXPLANATIONS: Record<string, string> = {
     "方案中的班次不在当前开课资料中，无法完成核验。可以在结果页换一个班次后重新核验。",
   PIN_TEACHER_UNKNOWN:
     "指定的教师无法从当前资料中确认。可以在目标里放宽教师要求，或改选其他教师的班次。",
+  MUST_TEACHER_NOT_PRESERVED:
+    "你要求「必须保留」的教师对应的课程没能进入方案，所以这次没有生成方案。可以到「已选课程」里也选上这门课（或在对话里加入待选），或把这名教师改成「优先考虑」后重新生成。",
+  PIN_TEACHER_MISMATCH:
+    "方案里的教师与「必须保留」指定的教师不一致，本次不能算通过。可以在结果页换回指定教师的班次，或放宽这条教师条件后重新生成。",
+  PIN_COURSE_MISSING:
+    "有一条「必须包含这门课」的条件没有排进方案，本次不能算通过。可以恢复这门课或删除该条件后重新生成。",
+  EVIDENCE_MISMATCH:
+    "候选课程与工具返回的事实对不上，系统没有生成方案。请调整条件后重试；如果反复出现，查看下方排查编号与详情。",
   CONSTRAINT_UNVERIFIABLE:
     "缺少已核验的班次时间，无法确认时间类条件（例如必避时段）是否满足。可以在目标里放宽该条件，或等班次资料核验后重新生成。",
   COURSE_FACTS_UNKNOWN:
@@ -97,7 +105,6 @@ export interface UnknownContext {
 /** 与某一份方案的核验判决绑定的未知项：换班重新核验后，旧判决里的这些项不再适用。 */
 const VERIFICATION_LEVEL_CODES = new Set([
   // 未选定班次描述的是换班前的方案，换班后同样过时。
-  "SECTION_NOT_ASSIGNED",
   "TIMETABLE_UNVERIFIED",
   "TIME_UNPARSEABLE",
   "TIME_UNPARSED",
@@ -116,9 +123,9 @@ export function isVerificationLevelUnknown(code: string): boolean {
   return VERIFICATION_LEVEL_CODES.has(code);
 }
 
-/** Java 的 PENDING_COURSE message 形如「课程 CODE 在修或结果未知，CATEGORY 类别的缺口不能确定」。 */
+/** 兼容当前的「结果未知」以及旧结果里的「在修或结果未知」。 */
 export const PENDING_COURSE_PATTERN =
-  /课程 (\S+) 在修或结果未知(?:，(.+?) 类别的缺口不能确定)?/;
+  /课程 (\S+) (?:在修或)?结果未知(?:，(.+?) 类别的缺口不能确定)?/;
 
 function pendingCourseText(
   issue: Issue,
@@ -133,7 +140,7 @@ function pendingCourseText(
   const categoryText = category
     ? `${category}类别的缺口暂不能确定`
     : "相关类别的缺口暂不能确定";
-  return `${label} 在修或结果未知，${categoryText}。可以在学业资料里把它标为已修、未修或在修，确认后再核对。`;
+  return `${label} ${issue.message.includes("在修或结果未知") ? "在修或结果未知" : "结果未知"}，${categoryText}。可以在学业资料里把它标为已修、未修或在修，确认后再核对。`;
 }
 
 /**

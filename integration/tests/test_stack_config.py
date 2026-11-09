@@ -5,13 +5,7 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 from stack_config import PLACEHOLDERS, SPECS, errors, masked, read_env_file, resolve, validate
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 
 PW_KEY = "CP_MYSQL_" + "PASSWORD"
 SK_KEY = "CP_SERVICE_" + "KEY"

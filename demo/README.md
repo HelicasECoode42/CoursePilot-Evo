@@ -6,7 +6,7 @@
 
 白底、少量绿色、清晰文字、留白；内容位于 640px 居中窄栏，一次只出现一个问题，回答后替换当前页。使用 PingFang SC/微软雅黑、短进度条和叶片标记，不加外围大圆角阴影卡片。顶部保留产品名和学业记录入口，底部保留返回/下一步。不把所有问题、项目介绍、可信度说明和开发报告堆到一条长页面。
 
-第一问是“本学期最在意什么”，多选：高绩点、轻松些、好评课程、指定教师课程、兴趣、职业、升学、时间。不同动机触发对应追问，未选择职业准备不问岗位。返回保留答案，不能重置已选教师和时间条件。
+第一问收集高绩点、轻松些、好评课程、指定教师课程、兴趣、职业、升学和时间等目标。所有学生按相同顺序查看九步，返回时保留已填答案。
 
 学业基础正常从已导入记录读取；“我的学业记录”查看/纠错，缺资料才导入。未完成必修、建议修读和类别缺口由后端计算；教学计划建议学期不是当期必须修读。
 
@@ -24,7 +24,7 @@
 
 ## E 如何做成 Vue
 
-建议组件：QuestionFrame、GoalQuestion、ConditionalQuestion、AcademicRecordPanel、TeacherCoursePicker、ReviewDetail、TimePreferencePicker、CandidateList；Vue Router 管问题/结果页，Pinia 或等价会话状态保留答案。路由生成依据已确认目标及澄清状态；不能为了照抄 HTML 固定让每个人走完全部问题。
+建议组件：QuestionFrame、GoalQuestion、AcademicRecordPanel、TeacherCoursePicker、ReviewDetail、TimePreferencePicker、CandidateList。Vue Router 管问题和结果页，Pinia 保留答案。所有学生看到相同的问题，偏好可留空。
 
 API 与字段用 [共享契约](../docs/04-infrastructure-workflow.md)。前端汇总同一 PlanningRequest，消费 AuditResult 与 PlanningAnswer；来源、学分、时间合法性与演化评分由对应后端提供。单文件 JS 只作行为示例。
 
@@ -33,7 +33,7 @@ API 与字段用 [共享契约](../docs/04-infrastructure-workflow.md)。前端�
 ## 评审时检查
 
 1. 打开时只看到一个问题；小屏当前问题可自然滚动，没有后续题接在下面。
-2. 多动机、跳过职业、按专业方向介绍、返回保留答案都能使用。
+2. 多动机、留空职业偏好、按专业介绍方向和返回保留答案都能使用。
 3. 指定教师可查看评价、改变必须/偏好；不可静默换教师。
 4. 评价显示课程/教师/修读学期/来源/未知；没有数据不出现假分数。
 5. 学业记录正常载入，无数据有导入入口；不要求每次重写全部课程。

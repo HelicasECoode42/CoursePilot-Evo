@@ -23,10 +23,6 @@ from agent_runtime.application.budget import Budget, BudgetExceeded, BudgetTrack
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.offering_check import COURSE_OFFERING_LIMIT, OFFERING_PAGE_LIMIT
 
-# One request covers at most this many courses: 1 scan + 10 lookups fits the default
-# Budget.max_offering_calls (16) with room to spare.
-OFFERING_SUMMARY_MAX_CODES = 10
-
 
 @dataclass(frozen=True)
 class CourseSectionSummary:
@@ -43,7 +39,7 @@ class OfferingSummary:
 
 def _summary(code: str, rows: Iterable[CourseOffering]) -> CourseSectionSummary:
     rows = list(rows)
-    texts = tuple(dict.fromkeys(row.teacherText for row in rows if row.teacherText))[:5]
+    texts = tuple(dict.fromkeys(row.teacherText for row in rows))[:5]
     return CourseSectionSummary(courseCode=code, sectionCount=len(rows), teacherTexts=texts)
 
 

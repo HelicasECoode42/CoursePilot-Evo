@@ -35,15 +35,6 @@ export function buildCourseNameIndex(
   return index;
 }
 
-/** 「课程号 · 课程名」。查不到名字就只给号，不编。 */
-export function describeCourse(
-  courseCode: string,
-  lookup: CourseNameLookup,
-): string {
-  const name = lookup(courseCode);
-  return name ? `${courseCode} · ${name}` : courseCode;
-}
-
 export type CourseCodeList = {
   shown: string[];
   hiddenCount: number;

@@ -27,11 +27,11 @@ class RunManifest(DomainModel):
     parentVersion: Id | None
     modelId: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     temperature: Annotated[float, Field(ge=0, le=2)]
-    maxInputTokens: Literal[8000]
-    maxOutputTokens: Literal[4000]
-    maxToolCalls: Literal[6]
-    maxModelCalls: Literal[3]
-    deadlineMs: Literal[45000]
+    maxInputTokens: Annotated[int, Field(ge=1)]
+    maxOutputTokens: Annotated[int, Field(ge=1)]
+    maxToolCalls: Annotated[int, Field(ge=1)]
+    maxModelCalls: Annotated[int, Field(ge=1)]
+    deadlineMs: Annotated[int, Field(ge=1)]
     repeatCount: Annotated[int, Field(ge=1, le=10)]
     seed: int | None
     createdAt: datetime

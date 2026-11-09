@@ -273,11 +273,6 @@ h1:focus {
   background: #fff4f2;
 }
 
-.notice--success {
-  color: #365a49;
-  background: var(--wash);
-}
-
 .choice-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -714,10 +709,6 @@ fieldset {
   gap: 12px;
 }
 
-.teacher-search > .button {
-  justify-self: start;
-}
-
 .teacher-search-actions {
   display: flex;
   flex-wrap: wrap;
@@ -771,10 +762,6 @@ fieldset {
 
   .brand {
     font-size: 18px;
-  }
-
-  .brand .small {
-    display: none;
   }
 
   .page-shell {

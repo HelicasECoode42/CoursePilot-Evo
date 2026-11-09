@@ -11,7 +11,7 @@
          需要 Java 服务已运行且已包含 DELETE /api/v1/reviews/import。
 
 规则（不改变事实，只改切分与显示名）：
-- 分隔符处切开；每段去掉段首段尾的 OCR 残留（口 丨 ｜ 」 「 『 』 以及段首孤立的 I/Ⅰ）和首尾空白。
+- 分隔符处切开，去掉分隔符旁独立的 OCR 残留及首尾空白，保留「口头」「接口」等正文。
 - 只删除两侧都是中日文字符之间的空格（PDF 换行造成的「游泳 健将」「讲 台」）；英文和数字之间的空格保留。
 - 段长不足 2 个字符的碎片丢弃（计数输出）。
 - 新 ID = 原 reviewNoteId + "-s01"、"-s02"…；sourceRefId 同样加后缀；dimensions 沿用原条目（来源标签是整块的）。
@@ -46,7 +46,7 @@ CHUNK = 200
 
 SEPARATORS = ["Ⅱ", "‖", "||", "｜｜", "丨", "』"]
 SEP_RE = re.compile("|".join(re.escape(s) for s in SEPARATORS))
-EDGE_ARTIFACTS = "口丨｜|」「『』 \t　"
+EDGE_ARTIFACTS = "丨｜|」「『』 \t　"
 CJK = r"　-鿿＀-￯"
 CJK_GAP = re.compile(rf"(?<=[{CJK}])\s+(?=[{CJK}])")
 MIN_SEGMENT = 2
@@ -57,10 +57,12 @@ def clean_text(text):
     return CJK_GAP.sub("", text).strip()
 
 
-def clean_piece(piece, is_split_part):
+def clean_piece(piece, after_separator=False, before_separator=False):
     s = piece.strip(EDGE_ARTIFACTS)
-    if is_split_part:
-        s = re.sub(r"^[IⅠ]\s+", "", s)  # 分隔符旁孤立的 OCR 字母，如 "ⅡI 老师…"
+    if after_separator:
+        s = re.sub(r"^[IⅠ口](?:\s+|$)", "", s)
+    if before_separator:
+        s = re.sub(r"(?:^|\s+)口$", "", s)
     s = s.strip(EDGE_ARTIFACTS)
     return clean_text(s)
 
@@ -69,11 +71,11 @@ def split_excerpt(excerpt):
     """返回 (片段列表, 是否含分隔符)。片段已清理且长度达标。"""
     pieces = SEP_RE.split(excerpt)
     if len(pieces) == 1:
-        cleaned = clean_piece(excerpt, is_split_part=False)
-        return ([cleaned] if len(cleaned) >= MIN_SEGMENT else []), False
+        cleaned = clean_piece(excerpt)
+        return ([cleaned] if cleaned else []), False
     out = []
     for i, p in enumerate(pieces):
-        c = clean_piece(p, is_split_part=i > 0)
+        c = clean_piece(p, after_separator=i > 0, before_separator=i < len(pieces) - 1)
         if len(c) >= MIN_SEGMENT:
             out.append(c)
     return out, True
@@ -182,6 +184,11 @@ def cmd_apply(_args):
     payload = json.loads(PAYLOAD_FILE.read_text(encoding="utf-8"))["notes"]
     retire = json.loads(RETIRE_FILE.read_text(encoding="utf-8"))["reviewNoteIds"]
     codes = {n["courseCode"] for n in payload}
+    # A retired source note may have no surviving fragment, so its course can
+    # be absent from the new payload. Include those courses in the backup and
+    # post-import export set as well.
+    source_notes = b.load_delivery_notes()
+    codes.update(source_notes[r]["courseCode"] for r in retire)
     before = export_courses(codes, env)
     b.write_private_json(BEFORE_FILE, before)
     before_ids = {i["reviewNoteId"] for items in before.values() for i in items}

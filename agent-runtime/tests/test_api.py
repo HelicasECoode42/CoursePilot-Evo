@@ -395,8 +395,8 @@ def test_planning_empty_catalog_is_unable_to_verify_not_422() -> None:
 
 def test_planning_invalid_model_output_returns_422() -> None:
     class AlwaysInvalid:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             raise ModelInvalidOutput("broken json")
 
     app = create_app(tool_client=TypedFakeToolClient())
@@ -422,8 +422,8 @@ def test_planning_invalid_model_output_returns_422() -> None:
 
 def test_planning_model_rate_limit_returns_429() -> None:
     class Limited:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             raise ModelUpstreamError("模型端点限流", status_code=429)
 
     app = create_app(tool_client=TypedFakeToolClient())
@@ -450,8 +450,8 @@ def test_planning_model_rate_limit_returns_429() -> None:
 
 def test_planning_model_unavailable_returns_503() -> None:
     class Down:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             raise ModelUpstreamError("模型端点不可用", status_code=503)
 
     app = create_app(tool_client=TypedFakeToolClient())
@@ -489,8 +489,8 @@ def test_create_app_rejects_placeholder_model_when_endpoint_is_configured() -> N
 
 def test_planning_model_timeout_returns_504() -> None:
     class TimedOut:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             raise ModelTimeout("模型请求超时")
 
     app = create_app(tool_client=TypedFakeToolClient())

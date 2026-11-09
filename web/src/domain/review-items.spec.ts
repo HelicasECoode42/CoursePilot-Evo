@@ -26,7 +26,7 @@ const note = (overrides: Partial<ReviewNote>): ReviewNote => ({
 describe("splitReviewExcerpt", () => {
   it("splits glued reviews on the Ⅱ separator and drops OCR artifacts", () => {
     const parts = splitReviewExcerpt(
-      "上课有点催眠，作业管的不紧。Ⅱ水水水ⅡI 老师挺好说话的，但是课讲的不太清楚。Ⅱ水中贵族，如果你是 游泳健将，选他Ⅱ巨 水，选的话建议自学口Ⅱ",
+      "上课有点催眠，作业管的不紧。Ⅱ水水水ⅡI 老师挺好说话的，但是课讲的不太清楚。Ⅱ水中贵族，如果你是 游泳健将，选他Ⅱ巨 水，选的话建议自学 口Ⅱ",
     );
     expect(parts).toEqual([
       "上课有点催眠，作业管的不紧。",
@@ -55,6 +55,13 @@ describe("splitReviewExcerpt", () => {
   it("does not remove spaces between Latin words or numbers", () => {
     expect(splitReviewExcerpt("Python 作业 8587 分")).toEqual([
       "Python 作业 8587 分",
+    ]);
+  });
+
+  it("preserves words containing 口 at the edges of review segments", () => {
+    expect(splitReviewExcerpt("讲了接口Ⅱ口头报告很多")).toEqual([
+      "讲了接口",
+      "口头报告很多",
     ]);
   });
 });

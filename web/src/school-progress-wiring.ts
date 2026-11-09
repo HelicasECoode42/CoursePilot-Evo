@@ -74,7 +74,7 @@ export async function saveSchoolProgressPayload(
 
 export function startSchoolProgressBridge(router: Router): () => void {
   bridge = createSchoolProgressBridge({
-    save: (payload) => saveSchoolProgressPayload(payload),
+    save: saveSchoolProgressPayload,
     post(message) {
       globalThis.window.postMessage(message, globalThis.location.origin);
     },

@@ -15,6 +15,7 @@ from agent_runtime.api.schemas import (
     PlanValidation,
     TeacherCourseOption,
 )
+from agent_runtime.api.schemas.validation import PlanSection
 from agent_runtime.application.ids import new_id
 
 
@@ -72,6 +73,18 @@ class TypedFakeToolClient:
         if tool == "listTeacherCourseOptions":
             return list(self._TEACHERS)
         if tool == "validatePlan":
+            timetable = Issue(
+                code="OFFERING_UNAVAILABLE",
+                message="未取得本学期班次，不能声称无冲突",
+                field="offeringSnapshotId",
+                retryable=False,
+            )
+            curriculum = Issue(
+                code="FAKE_TOOL",
+                message="演示工具未核对毕业要求",
+                field=None,
+                retryable=False,
+            )
             return PlanValidation(
                 verifierResultId=new_id("verify"),
                 verdict="UNKNOWN",
@@ -80,13 +93,20 @@ class TypedFakeToolClient:
                 offeringSnapshotId=dto.offeringSnapshotId,
                 recordRevision=1,
                 violations=[],
-                unknownChecks=[
-                    Issue(
-                        code="OFFERING_UNAVAILABLE",
-                        message="未取得本学期班次，不能声称无冲突",
-                        field="offeringSnapshotId",
-                        retryable=False,
-                    )
+                unknownChecks=[timetable, curriculum],
+                sections=[
+                    PlanSection(
+                        scope="TIMETABLE",
+                        verdict="UNKNOWN",
+                        violations=[],
+                        unknownChecks=[timetable],
+                    ),
+                    PlanSection(
+                        scope="CURRICULUM",
+                        verdict="UNKNOWN",
+                        violations=[],
+                        unknownChecks=[curriculum],
+                    ),
                 ],
                 performedChecks=["COURSE_EXISTS"],
                 sourceRefIds=["source:fake-w2"],
@@ -142,9 +162,11 @@ class TypedFakeToolClient:
             raise ToolRejected(tool, 400, "INVALID_QUERY", "cursor 格式不合法")
         offset = int(cursor) if cursor is not None else 0
         requested_limit = params.get("limit")
-        limit = 20 if requested_limit is None else requested_limit
-        if not isinstance(limit, int) or not 1 <= limit <= 100:
-            raise ToolRejected(tool, 400, "INVALID_QUERY", "limit 须在 1 到 100 之间")
+        max_limit = {"listCourses": 200, "searchReviews": 10}.get(tool, 100)
+        default_limit = 5 if tool == "searchReviews" else 20
+        limit = default_limit if requested_limit is None else requested_limit
+        if not isinstance(limit, int) or not 1 <= limit <= max_limit:
+            raise ToolRejected(tool, 400, "INVALID_QUERY", f"limit 须在 1 到 {max_limit} 之间")
         end = min(offset + limit, len(items))
         next_cursor = str(end) if end < len(items) else None
         return ToolPage(items[offset:end], next_cursor)

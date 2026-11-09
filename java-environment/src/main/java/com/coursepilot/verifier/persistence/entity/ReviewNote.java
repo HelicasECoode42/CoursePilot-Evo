@@ -9,9 +9,9 @@ import java.util.List;
 /**
  * 课程/教师评价证据（contracts: ReviewNote 的存储形态）。
  *
- * teacherKey 为 null 表示这条评价没能匹配到具体教师（只能说明课程层面）。
- * matchStatus 不存库：由 TeacherReviewAssembler 按「是否有教师、是否命中绑定」现算，
- * 避免库里出现「teacherKey 为空却标了已匹配」这种互相矛盾的状态。
+ * teacherKey 为 null 时，评价只能作为课程层面的证据。
+ * 导入时保存 importedMatchStatus。读取时保留导入的受限状态，
+ * 未提供导入状态的记录由 TeacherReviewAssembler 根据教师绑定判断。
  *
  * dimensions 把考勤、给分、作业量、授课等维度分开存，不能用一个总分代替。
  */

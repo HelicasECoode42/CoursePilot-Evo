@@ -150,9 +150,15 @@ class AdviceChatService:
         if not usable:
             raise InvalidInputError("培养方案来源与当前模式不匹配", field="curriculumSnapshotId")
 
-        # Taken status from the school report counts even when the report is not used as
-        # a fact for this turn (mismatch below); see course_scope.build_course_scope.
-        school_for_taken = progress
+        # Keep curriculum-matched school gap facts independently from the report's
+        # embedded academic record. Course statuses are usable only with that exact
+        # record selected for this turn.
+        school_report = (
+            progress
+            if progress
+            and progress.academicRecord.curriculumSnapshotId == request.curriculumSnapshotId
+            else None
+        )
         if progress and (
             progress.academicRecord.curriculumSnapshotId != request.curriculumSnapshotId
             or (
@@ -164,10 +170,9 @@ class AdviceChatService:
             progress_mismatch = True
 
         if request.academicRecordId:
-            if progress and progress.academicRecord.academicRecordId == request.academicRecordId:
-                record = progress.academicRecord
-            else:
-                record = call("getAcademicRecord", {"recordId": request.academicRecordId})
+            # Record ids remain stable across revisions. Read the current Java
+            # record even when the school report embeds the same id.
+            record = call("getAcademicRecord", {"recordId": request.academicRecordId})
             if not isinstance(record, AcademicRecord):
                 raise InvalidInputError("学业记录返回类型错误")
             if (
@@ -175,6 +180,9 @@ class AdviceChatService:
                 or record.curriculumSnapshotId != request.curriculumSnapshotId
             ):
                 raise InvalidInputError("学业记录不属于当前培养方案", field="academicRecordId")
+            if progress and progress.academicRecord.revision != record.revision:
+                progress = None
+                progress_mismatch = True
         elif (
             progress
             and progress.academicRecord.curriculumSnapshotId == request.curriculumSnapshotId
@@ -204,10 +212,15 @@ class AdviceChatService:
             courses,
             record_courses,
             school_taken=(
-                school_taken_codes(school_for_taken.snapshot.courses) if school_for_taken else ()
+                school_taken_codes(school_report.snapshot.courses)
+                if school_report
+                and record
+                and school_report.academicRecord.academicRecordId == record.academicRecordId
+                and school_report.academicRecord.revision == record.revision
+                else ()
             ),
-            school_nodes=progress.snapshot.nodes if progress else (),
-            school_courses=progress.snapshot.courses if progress else (),
+            school_nodes=school_report.snapshot.nodes if school_report else (),
+            school_courses=school_report.snapshot.courses if school_report else (),
             explicitly_selected=request.selectedCourseCodes,
         )
         allowed = scope.eligible
@@ -431,10 +444,11 @@ class AdviceChatService:
             )
 
         suggestions = []
+        accepted_course_codes = {item.courseCode for item in completed_courses}
         for raw in model_reply.suggestions:
             kind, value = raw["kind"], raw["value"]
-            # 课程动作只能指向本轮允许的课程；其它建议丢弃，不编造。
-            if kind != "INTEREST" and value not in course_by_code:
+            # 课程动作必须指向最终保留的课程卡片，避免页面收到没有答案依据的动作。
+            if kind != "INTEREST" and value not in accepted_course_codes:
                 dropped_items += 1
                 continue
             suggestions.append(AdviceChatSuggestion(suggestionId=new_id("suggestion"), **raw))

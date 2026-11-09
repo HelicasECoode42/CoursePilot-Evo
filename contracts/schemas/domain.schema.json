@@ -1022,7 +1022,7 @@
             "maxLength": 120
           },
           "minItems": 0,
-          "maxItems": 200
+          "maxItems": 500
         },
         "requiredCredits": {
           "anyOf": [
@@ -1175,7 +1175,7 @@
             "$ref": "#/$defs/Issue"
           },
           "minItems": 0,
-          "maxItems": 200
+          "maxItems": 503
         }
       },
       "required": [
@@ -2570,19 +2570,24 @@
           "maximum": 2
         },
         "maxInputTokens": {
-          "const": 8000
+          "type": "integer",
+          "minimum": 1
         },
         "maxOutputTokens": {
-          "const": 4000
+          "type": "integer",
+          "minimum": 1
         },
         "maxToolCalls": {
-          "const": 6
+          "type": "integer",
+          "minimum": 1
         },
         "maxModelCalls": {
-          "const": 3
+          "type": "integer",
+          "minimum": 1
         },
         "deadlineMs": {
-          "const": 45000
+          "type": "integer",
+          "minimum": 1
         },
         "repeatCount": {
           "type": "integer",

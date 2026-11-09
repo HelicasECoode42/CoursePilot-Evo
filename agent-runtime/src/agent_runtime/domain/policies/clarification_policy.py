@@ -21,6 +21,14 @@ class ClarificationPolicy:
                 allowFreeText=False,
                 requiredFor=["teacher_vs_schedule"],
             )
+        if resolved.missing == ("priorityOrder",):
+            return Question(
+                questionId="goal:priority",
+                text="请按重要程度排列你已经选好的选课目标。",
+                choices=[],
+                allowFreeText=True,
+                requiredFor=["priorityOrder"],
+            )
         return Question(
             questionId="goal:missing",
             text="请补充你的选课目标（例如：高绩点、少签到、指定老师等）。",

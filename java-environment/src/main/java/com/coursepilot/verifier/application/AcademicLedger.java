@@ -17,6 +17,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
+import java.math.BigDecimal;
 
 /**
  * 把一份学业记录（Transcript 聚合）折算成「每个类别已修多少学分、哪些地方不能确定」。
@@ -39,15 +40,14 @@ import java.util.function.Function;
  */
 final class AcademicLedger {
 
-    private final Map<String, Double> earned = new HashMap<>();
-    private final Map<String, Double> inProgress = new HashMap<>();
+    private final Map<String, BigDecimal> earned = new HashMap<>();
+    private final Map<String, BigDecimal> inProgress = new HashMap<>();
     private final Set<String> inProgressUnknownCredits = new HashSet<>();
     private final Map<String, Set<String>> courseCodes = new HashMap<>();
     private final Set<String> hardUnknownCategories = new HashSet<>();
     private final Set<String> pendingCategories = new HashSet<>();
     private boolean hardUnknownAll;
     private boolean pendingAll;
-    private boolean hasPassed;
     private final List<AuditDtos.Issue> issues = new ArrayList<>();
     /** 没有学业记录：所有要求都无法确定。 */
     private final boolean noRecord;
@@ -107,7 +107,6 @@ final class AcademicLedger {
     }
 
     private void addPassed(TranscriptCourse row, Function<String, Optional<Course>> catalog) {
-        hasPassed = true;
         String code = row.getCourseCode();
         Optional<Course> course = catalog.apply(code);
         String category = categoryOf(code, course);
@@ -123,16 +122,16 @@ final class AcademicLedger {
         courseCodes.computeIfAbsent(category, k -> new TreeSet<>()).add(code);
 
         // 两边都必须是包装类型：混用 double 会在学分为 null 时拆箱抛 NPE。
-        Double credits = row.getEarnedCredits() != null
-            ? Double.valueOf(row.getEarnedCredits().doubleValue())
-            : course.map(Course::getCredits).orElse(school.creditsOfCourse(code));
+        BigDecimal credits = row.getEarnedCredits() != null
+            ? row.getEarnedCredits()
+            : course.map(Course::getCredits).map(BigDecimal::valueOf).orElse(school.creditsOfCourse(code));
         if (credits == null) {
             hardUnknownCategories.add(category);
             issues.add(new AuditDtos.Issue("CREDITS_UNKNOWN",
                 "课程 " + code + " 学分未知", "completedCourses", false));
             return;
         }
-        earned.merge(category, credits, Double::sum);
+        earned.merge(category, credits, BigDecimal::add);
     }
 
     private void addPending(String code, Function<String, Optional<Course>> catalog) {
@@ -159,12 +158,12 @@ final class AcademicLedger {
         if (category == null) {
             return;
         }
-        Double credits = course.map(Course::getCredits).orElse(school.creditsOfCourse(code));
+        BigDecimal credits = course.map(Course::getCredits).map(BigDecimal::valueOf).orElse(school.creditsOfCourse(code));
         if (credits == null) {
             inProgressUnknownCredits.add(category);
             return;
         }
-        inProgress.merge(category, credits, Double::sum);
+        inProgress.merge(category, credits, BigDecimal::add);
     }
 
     /** 相应要求的状态。 */
@@ -174,7 +173,7 @@ final class AcademicLedger {
             return AuditDtos.State.UNKNOWN;
         }
         // 已修学分只增不减：未声明完整时，已满足的要求依然满足。
-        if (earned(category) >= req.getRequiredCredits()) {
+        if (earnedDecimal(category).compareTo(BigDecimal.valueOf(req.getRequiredCredits())) >= 0) {
             return AuditDtos.State.SATISFIED;
         }
         // 未声明完整：漏录的课可能正好补足缺口，未满足的要求不能判确定缺口。
@@ -185,7 +184,11 @@ final class AcademicLedger {
     }
 
     double earned(String category) {
-        return earned.getOrDefault(category, 0.0);
+        return earnedDecimal(category).doubleValue();
+    }
+
+    BigDecimal earnedDecimal(String category) {
+        return earned.getOrDefault(category, BigDecimal.ZERO);
     }
 
     /** 该类别在读学分；学分有未知的在读课时为 null。 */
@@ -193,14 +196,12 @@ final class AcademicLedger {
         if (inProgressUnknownCredits.contains(category)) {
             return null;
         }
-        return inProgress.getOrDefault(category, 0.0);
+        return inProgress.getOrDefault(category, BigDecimal.ZERO).doubleValue();
     }
 
     List<String> courseCodes(String category) {
         return List.copyOf(courseCodes.getOrDefault(category, Set.of()));
     }
-
-    boolean hasPassed() { return hasPassed; }
 
     List<AuditDtos.Issue> issues() { return List.copyOf(issues); }
 }

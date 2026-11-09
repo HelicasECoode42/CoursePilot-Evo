@@ -185,11 +185,6 @@ export interface CoursePilotApiClient {
     idempotencyKey: string,
     signal?: AbortSignal,
   ): Promise<SchoolProgressImportResult>;
-  importSchoolProgress(
-    body: SchoolProgressImportRequest,
-    idempotencyKey: string,
-    signal?: AbortSignal,
-  ): Promise<SchoolProgressImportResult>;
   getSchoolProgress(
     signal?: AbortSignal,
   ): Promise<SchoolProgressImportResult | null>;
@@ -1013,14 +1008,6 @@ export class HttpApiClient implements CoursePilotApiClient {
       );
     }
     return envelope.data as unknown as SchoolProgressImportResult;
-  }
-
-  async importSchoolProgress(
-    body: SchoolProgressImportRequest,
-    idempotencyKey: string,
-    signal?: AbortSignal,
-  ): Promise<SchoolProgressImportResult> {
-    return this.saveSchoolProgress(body, idempotencyKey, signal);
   }
 
   async getSchoolProgress(

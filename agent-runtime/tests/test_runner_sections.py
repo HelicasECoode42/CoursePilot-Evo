@@ -118,8 +118,8 @@ class _Model:
     def __init__(self, items: list[PlanItem]) -> None:
         self._items = items
 
-    def generate(self, *, context, messages, tool_schemas):
-        del context, messages, tool_schemas
+    def generate(self, *, context, messages):
+        del context, messages
         return ModelReply(items=list(self._items))
 
 
@@ -326,8 +326,8 @@ class _CapturingModel:
         self._items = items
         self.facts: dict | None = None
 
-    def generate(self, *, context, messages, tool_schemas):
-        del context, tool_schemas
+    def generate(self, *, context, messages):
+        del context
         for message in messages:
             content = message.get("content", "")
             if content.startswith(FACTS_MESSAGE_PREFIX):
@@ -500,8 +500,8 @@ def test_rationale_for_a_dropped_pick_does_not_fail_the_run(
     from agent_runtime.api.schemas.answer import CourseRationale
 
     class _RationaleModel:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             return ModelReply(
                 items=[
                     PlanItem(courseCode="CS101", teacherKey=None, classId=None),
@@ -709,7 +709,7 @@ def test_required_course_not_offered_is_named_and_not_placed(
     assert "DB201" in message
 
 
-def test_school_in_progress_course_is_not_a_candidate_when_record_differs(
+def test_school_in_progress_status_is_ignored_when_record_differs(
     planning_request: PlanningRequest,
 ) -> None:
     tools = _CatalogTools(
@@ -729,7 +729,7 @@ def test_school_in_progress_course_is_not_a_candidate_when_record_differs(
     _run_with_model(_request(planning_request), tools, model)
 
     assert model.facts is not None
-    assert "ALG" not in model.facts["courseCodes"]
+    assert "ALG" in model.facts["courseCodes"]
     assert "MINE" in model.facts["courseCodes"]
 
 

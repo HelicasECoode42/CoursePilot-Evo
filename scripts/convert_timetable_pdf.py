@@ -10,7 +10,7 @@ Pipeline (local, private data only):
      course code (numbering is computed before any filter, so ids are stable).
   4. meetingTextRaw is the original time text (whitespace removed only). Java re-parses it.
      parseStatus is PARSED only for blocks the Java TimeParser grammar accepts.
-  5. Output: OfferingImport batches (<= 2000 offerings each), a sidecar JSON with
+  5. Output: one whole-semester OfferingImport (<= 7000 offerings), a sidecar JSON with
      provenance and the teacher 工号 candidates, a manifest, and a stratified
      verification CSV.
 
@@ -49,8 +49,8 @@ DEFAULT_GE_DIR = ROOT / "data/raw/2026-11-school"
 
 TERM_ID = "2026-2027-1"
 MARKER = "2026-2027"
-BATCH_SIZE = 2000
-PART_PREFIX = "official-2026-27-fall-part"
+OFFERING_LIMIT = 7000
+PAYLOAD_NAME = "official-2026-27-fall.json"
 CAMPUSES = ["宝山", "嘉定", "延长", "金山", "奉贤", "徐汇", "杨浦", "虹口", "松江"]
 DAY_MAP = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 7, "天": 7}
 SECTION_CAP = 64
@@ -536,30 +536,26 @@ def build(args: argparse.Namespace) -> dict:
             "parseFlags": r["flags"],
         })
 
-    # batches
-    for old in glob.glob(str(out_dir / f"{PART_PREFIX}*.json")):
+    # The backend publishes one semester snapshot per import. Keep the semester
+    # together so later queries cannot see only one arbitrary batch snapshot.
+    if len(offerings) > OFFERING_LIMIT:
+        raise SystemExit(f"整学期班次数量 {len(offerings)} 超过导入上限 {OFFERING_LIMIT}")
+    for old in glob.glob(str(out_dir / "official-2026-27-fall-part*.json")):
         Path(old).unlink()
-    parts = []
-    total_parts = max(1, (len(offerings) + BATCH_SIZE - 1) // BATCH_SIZE)
     captured = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).replace(microsecond=0).isoformat()
     max_week = max((m["weeks"][-1] for o in offerings for m in o["meetings"]), default=16)
     max_section = max((m["sectionEnd"] for o in offerings for m in o["meetings"]), default=12)
     calendar = {"weeks": max(16, max_week), "sectionsPerDay": max(12, max_section)}
-    for i in range(total_parts):
-        chunk = offerings[i * BATCH_SIZE:(i + 1) * BATCH_SIZE]
-        if not chunk:
-            break
-        payload = {
-            "schemaVersion": "1.0",
-            "termId": TERM_ID,
-            "sourceKind": args.source_kind,
-            "capturedAt": captured,
-            "calendar": calendar,
-            "offerings": chunk,
-        }
-        path = out_dir / f"{PART_PREFIX}{i + 1}.json"
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        parts.append({"file": path.name, "offerings": len(chunk)})
+    payload = {
+        "schemaVersion": "1.0",
+        "termId": TERM_ID,
+        "sourceKind": args.source_kind,
+        "capturedAt": captured,
+        "calendar": calendar,
+        "offerings": offerings,
+    }
+    payload_path = out_dir / PAYLOAD_NAME
+    payload_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     (out_dir / "official-2026-27-fall-sidecar.json").write_text(
         json.dumps(sidecar, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
@@ -626,7 +622,7 @@ def build(args: argparse.Namespace) -> dict:
         "parseStatus": dict(status_counter),
         "javaParseableOutput": java_ok,
         "parseFlagCounts": dict(flag_counter),
-        "parts": parts,
+        "payload": {"file": payload_path.name, "offerings": len(offerings)},
         "csCurriculumCoverage": cs_stats,
         "generalEdCoverage": ge_stats,
         "validation": {},
@@ -655,7 +651,7 @@ def validate(out_dir: Path, schema_path: Path, source_kind: str) -> dict:
     strict = make(schema)
     temp = make(patched)
     result: dict = {"sourceKindEnumInContract": enum_path, "patchedEnumForValidation": patched_enum, "files": {}}
-    for path in sorted(glob.glob(str(out_dir / f"{PART_PREFIX}*.json"))):
+    for path in sorted(glob.glob(str(out_dir / PAYLOAD_NAME))):
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         errs_strict = [e.message for e in strict.iter_errors(data)]
         errs_patched = [e.message for e in temp.iter_errors(data)]
@@ -674,7 +670,7 @@ def main() -> None:
     ap.add_argument("--out-dir", default=str(DEFAULT_OUT))
     ap.add_argument("--schema", default=str(DEFAULT_SCHEMA))
     ap.add_argument("--source-kind", default="OFFICIAL_DOCUMENT",
-                    help="OfferingImport.sourceKind; OFFICIAL_DOCUMENT is not in the contract enum yet")
+                    help="OfferingImport.sourceKind; OFFICIAL_DOCUMENT denotes converted official timetable files")
     ap.add_argument("--all", action="store_true", help="export every offering row")
     ap.add_argument("--college", action="append", default=[],
                     help="export rows whose 开课学院 contains this text (repeatable)")
@@ -687,7 +683,7 @@ def main() -> None:
     ap.add_argument("--with-teacher-keys", action="store_true",
                     help="also set teacherKey to the first 工号 (default: null, 工号 kept in sidecar)")
     ap.add_argument("--seed", type=int, default=20261102)
-    ap.add_argument("--validate-only", action="store_true", help="only validate existing part files")
+    ap.add_argument("--validate-only", action="store_true", help="only validate the existing payload")
     args = ap.parse_args()
 
     if args.validate_only:
@@ -701,7 +697,7 @@ def main() -> None:
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     summary = {k: manifest[k] for k in (
         "rowsExtracted", "rowsBad", "exactDuplicatesRemoved", "labelCollisionsKeptWithDistinctIds",
-        "offeringsAllUnique", "offeringsOutput", "parseStatus", "javaParseableOutput", "parts",
+        "offeringsAllUnique", "offeringsOutput", "parseStatus", "javaParseableOutput", "payload",
         "csCurriculumCoverage", "generalEdCoverage")}
     summary["parseFlagCounts"] = manifest["parseFlagCounts"]
     summary["validation"] = manifest["validation"]

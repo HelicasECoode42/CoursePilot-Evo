@@ -9,7 +9,7 @@ Budget 只管一次运行：BudgetTracker 在 PlanningRunner.run 里新建、运
 from __future__ import annotations
 
 import threading
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -143,6 +143,55 @@ def test_tracked_session_count_is_bounded() -> None:
     led.reserve("session:a", 1, 1).release()  # 已在跟踪的仍然放行
     with pytest.raises(BudgetExceeded, match="会话数"):
         led.reserve("session:c", 1, 1)
+
+
+def test_expiring_session_releases_tracking_slot_and_preserves_daily_spend() -> None:
+    led = _ledger(max_tracked_sessions=1, max_daily_tokens=1000)
+    led.reserve("session:old", 20, 5).settle(12, 3)
+    assert led.daily_used() == 15
+
+    led.expire_session("session:old")
+    assert led.spent("session:old") == (0, 0)
+    led.reserve("session:new", 20, 5).settle(1, 1)
+    assert led.daily_used() == 17
+
+
+def test_expiring_session_keeps_inflight_daily_reservation_until_settlement() -> None:
+    led = _ledger(max_tracked_sessions=1, max_daily_tokens=100)
+    held = led.reserve("session:old", 60, 0)
+    led.expire_session("session:old")
+    with pytest.raises(BudgetExceeded, match="今日全站"):
+        led.reserve("session:new", 50, 0)
+
+    held.settle(7, 0)
+    assert led.spent("session:old") == (0, 0)
+    assert led.daily_used() == 7
+    led.reserve("session:new", 50, 0).release()
+
+
+def test_new_session_creation_releases_expired_ledger_slot() -> None:
+    app = create_app(
+        Settings(
+            max_tracked_sessions=1,
+            session_max_input_tokens=100,
+            session_max_output_tokens=50,
+            model_daily_token_cap=1000,
+        ),
+        tool_client=FakeToolClient(),
+    )
+    client = TestClient(app)
+    old = client.post("/api/v1/sessions").json()["data"]
+    app.state.spend_ledger.record(old["sessionId"], 20, 5)
+    store = app.state.session_store
+    token_hash = store._hash(old["sessionToken"])
+    old_id, _ = store._by_hash[token_hash]
+    store._by_hash[token_hash] = (old_id, datetime.now(UTC) - timedelta(seconds=1))
+
+    new = client.post("/api/v1/sessions").json()["data"]
+    assert new["sessionId"] != old["sessionId"]
+    assert app.state.spend_ledger.spent(old["sessionId"]) == (0, 0)
+    assert app.state.spend_ledger.daily_used() == 25
+    app.state.spend_ledger.reserve(new["sessionId"], 100, 50).release()
 
 
 def test_daily_cap_is_shared_across_sessions() -> None:

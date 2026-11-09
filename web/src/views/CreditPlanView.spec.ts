@@ -314,6 +314,9 @@ describe("凑学分选课页", () => {
 
   it("keeps duplicate school category nodes as references and keeps candidate totals on Java audit", async () => {
     const { wrapper } = await mountView();
+    attachOfferingSnapshot();
+    markEveryOfferingKnown();
+    await flushPromises();
     usePlanningStore().$patch({
       schoolProgress: {
         receipt: {
@@ -460,6 +463,9 @@ describe("凑学分选课页", () => {
 
   it("shows completion suggestions when a gap remains", async () => {
     const { wrapper } = await mountView();
+    attachOfferingSnapshot();
+    markEveryOfferingKnown();
+    await flushPromises();
     expect(wrapper.text()).toContain("学分组合（还差 6 学分）");
     expect(wrapper.text()).toContain("编译原理 + 机器学习导论");
     expect(wrapper.text()).toContain("E2 · E4");
@@ -469,6 +475,26 @@ describe("凑学分选课页", () => {
     await box.get("input").setValue(true);
     await flushPromises();
     expect(wrapper.text()).not.toContain("学分组合（还差 0 学分）");
+  });
+
+  it("keeps courses with unknown offering status out of current-term combinations", async () => {
+    const { wrapper } = await mountView();
+    attachOfferingSnapshot();
+    vi.mocked(api.summarizeOfferings).mockResolvedValue({
+      items: [{ courseCode: "E2", sectionCount: 1, teacherTexts: [] }],
+      unknownCourseCodes: ["E4", "E3", "E6", "AI01"],
+      status: "OK",
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("开课情况无法确认");
+    expect(wrapper.text()).not.toContain("学分组合（还差 6 学分）");
+    expect(wrapper.text()).not.toContain("编译原理 + 机器学习导论");
+    expect(
+      wrapper
+        .findAll("label.credits-check")
+        .some((label) => label.text().includes("机器学习导论")),
+    ).toBe(true);
   });
 
   it("does not count an UNKNOWN school status as passed or remove the course from the credit candidates", async () => {
@@ -521,6 +547,9 @@ describe("凑学分选课页", () => {
 
   it("adds a suggested group to the selection when asked", async () => {
     const { wrapper } = await mountView();
+    attachOfferingSnapshot();
+    markEveryOfferingKnown();
+    await flushPromises();
     const group = wrapper
       .findAll("li")
       .find((li) => li.text().includes("编译原理 + 机器学习导论"))!;
@@ -538,6 +567,9 @@ describe("凑学分选课页", () => {
       nextCursor: null,
     });
     const { wrapper } = await mountView({ gap: 21 });
+    attachOfferingSnapshot();
+    markEveryOfferingKnown();
+    await flushPromises();
     expect(wrapper.text()).toContain("还差 21 学分");
     expect(wrapper.text()).toContain("学分组合（还差 21 学分）");
     expect(wrapper.text()).not.toContain("个组合");
@@ -612,6 +644,18 @@ describe("凑学分选课页", () => {
         },
       ],
       selectedOfferingSnapshotId: OFFERING_SNAPSHOT,
+    });
+  }
+
+  function markEveryOfferingKnown() {
+    vi.mocked(api.summarizeOfferings).mockResolvedValue({
+      items: catalog.map((course) => ({
+        courseCode: course.courseCode,
+        sectionCount: 1,
+        teacherTexts: [],
+      })),
+      unknownCourseCodes: [],
+      status: "OK",
     });
   }
 

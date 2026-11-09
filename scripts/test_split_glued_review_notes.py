@@ -11,7 +11,17 @@ class SplitRules(unittest.TestCase):
     def test_splits_on_roman_two_and_cleans_artifacts(self):
         got, split = s.split_excerpt("上课有点催眠。Ⅱ水水水ⅡI 老师挺好，课讲的不太清楚。Ⅱ水中贵族，选他 游泳健将Ⅱ自学口Ⅱ")
         self.assertTrue(split)
-        self.assertEqual(got, ["上课有点催眠。", "水水水", "老师挺好，课讲的不太清楚。", "水中贵族，选他游泳健将", "自学"])
+        self.assertEqual(got, ["上课有点催眠。", "水水水", "老师挺好，课讲的不太清楚。", "水中贵族，选他游泳健将", "自学口"])
+
+    def test_preserves_normal_text_口_around_separator(self):
+        got, split = s.split_excerpt("接口Ⅱ口头")
+        self.assertTrue(split)
+        self.assertEqual(got, ["接口", "口头"])
+
+    def test_removes_standalone_ocr_口_next_to_separator(self):
+        got, split = s.split_excerpt("前段 口Ⅱ 口 后段")
+        self.assertTrue(split)
+        self.assertEqual(got, ["前段", "后段"])
 
     def test_drops_fragments_shorter_than_two_chars(self):
         got, split = s.split_excerpt("好Ⅱ很好的老师")

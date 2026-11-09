@@ -25,7 +25,7 @@ describe("未知项文案", () => {
     const a = explainUnknownIssue(
       issue(
         "PENDING_COURSE",
-        "课程 08305011 在修或结果未知，学科基础课 类别的缺口不能确定",
+        "课程 08305011 结果未知，学科基础课 类别的缺口不能确定",
       ),
       names,
     );

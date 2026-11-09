@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.math.BigDecimal;
 
 /**
  * 把学业核对结果摆成契约的 AuditResult。
@@ -67,7 +68,7 @@ public class AuditResultAssembler {
         // 并在 unknowns 里说明，消费方不能把它当成真实版本。
         int recordRevision = transcript == null ? 1 : transcript.getRevision();
         // 学校报告按主体取最近一次导入；学业记录的完整性 = 手动声明 或 学校导入读全。
-        SchoolReport school = schoolReports.latest(academicRecordId);
+        SchoolReport school = schoolReports.latest(academicRecordId, curriculumSnapshotId);
         boolean transcriptComplete = school.completes(transcript);
         AuditDtos.TranscriptCompleteSource completeSource = !transcriptComplete ? null
             : school.fullyRead() ? AuditDtos.TranscriptCompleteSource.SCHOOL_IMPORT_FULL
@@ -123,15 +124,15 @@ public class AuditResultAssembler {
             if (schoolCategory.isPresent()) {
                 // 学校报告同名类别已读全：采用学校口径，不再因本地课程缺漏判 UNKNOWN。
                 var sc = schoolCategory.get();
-                double remaining = sc.remaining();
+                BigDecimal remaining = sc.remaining();
                 items.add(new AuditDtos.AuditItem(
                     requirementId(req),
                     category,
                     ledger.courseCodes(category),
-                    sc.required(),
-                    sc.earned(),
-                    Math.max(0.0, remaining),
-                    remaining <= 0 ? AuditDtos.State.SATISFIED : AuditDtos.State.UNSATISFIED,
+                    sc.required().doubleValue(),
+                    sc.earned().doubleValue(),
+                    Math.max(0.0, remaining.doubleValue()),
+                    remaining.signum() <= 0 ? AuditDtos.State.SATISFIED : AuditDtos.State.UNSATISFIED,
                     sourceRefIds(req, curriculumSnapshotId),
                     AuditDtos.Source.SCHOOL_REPORT,
                     ledger.inProgressCredits(category)));
@@ -139,9 +140,9 @@ public class AuditResultAssembler {
             }
             AuditDtos.State state = ledger.stateFor(req);
             // UNKNOWN 的要求不给确定缺口：null 表示无法确定（契约 gapCredits 可为 null）。
-            Double gap = state == AuditDtos.State.UNKNOWN
-                ? null
-                : Math.max(0.0, req.getRequiredCredits() - ledger.earned(category));
+            Double gap = state == AuditDtos.State.UNKNOWN ? null
+                : BigDecimal.valueOf(req.getRequiredCredits()).subtract(ledger.earnedDecimal(category))
+                    .max(BigDecimal.ZERO).doubleValue();
             items.add(new AuditDtos.AuditItem(
                 requirementId(req),
                 category,

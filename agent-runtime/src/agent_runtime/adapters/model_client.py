@@ -68,7 +68,7 @@ class ModelTimeout(RuntimeError):
 
 
 class ModelUpstreamError(RuntimeError):
-    """Provider 429 or 5xx. Retryable system error, never an invalid payload."""
+    """Provider HTTP failure. Only rate limiting and server failures are retryable."""
 
     def __init__(self, message: str, *, status_code: int) -> None:
         super().__init__(message)
@@ -118,7 +118,6 @@ class ModelAdapter(Protocol):
         *,
         context: ExecutionContext,
         messages: list[dict[str, str]],
-        tool_schemas: list[dict],
     ) -> ModelReply: ...
 
 
@@ -151,9 +150,8 @@ class FakeModelAdapter:
         *,
         context: ExecutionContext,
         messages: list[dict[str, str]],
-        tool_schemas: list[dict],
     ) -> ModelReply:
-        del context, tool_schemas
+        del context
         if self._fail_times > 0:
             self._fail_times -= 1
             raise ModelInvalidOutput("模型输出不是可用的候选 JSON")
@@ -235,7 +233,7 @@ class HttpModelAdapter:
         if response.status_code >= 500:
             raise ModelUpstreamError("模型端点不可用", status_code=response.status_code)
         if response.status_code >= 400:
-            raise ModelInvalidOutput("模型端点拒绝请求")
+            raise ModelUpstreamError("模型端点拒绝请求", status_code=response.status_code)
         try:
             body = response.json()
         except ValueError as exc:
@@ -281,9 +279,7 @@ class HttpModelAdapter:
         *,
         context: ExecutionContext,
         messages: list[dict[str, str]],
-        tool_schemas: list[dict],
     ) -> ModelReply:
-        del tool_schemas
         payload = {
             "model": self._model_id,
             "temperature": self._temperature,
@@ -418,8 +414,6 @@ class HttpModelAdapter:
             _log_advice_chat_diagnostic(diagnostic)
             exc.diagnostics = diagnostic
             raise
-        input_tokens = _usage_tokens(raw)[0]
-        output_tokens = _usage_tokens(raw)[1]
         try:
             data = json.loads(_extract_json_object(content))
         except json.JSONDecodeError as exc:

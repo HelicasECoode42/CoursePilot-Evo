@@ -86,6 +86,9 @@ def _school_report_gaps(school_progress: dict[str, object] | None) -> list[objec
     """School-report remaining-credit categories; empty when the report is not usable."""
     if not school_progress:
         return []
+    report_gaps = school_progress.get("reportGapCategories")
+    if isinstance(report_gaps, list):
+        return report_gaps
     progress = school_progress.get("progress")
     if not isinstance(progress, dict):
         return []
@@ -145,19 +148,47 @@ class PlanningRunner:
         self._plans = plan_store
 
     def run(self, request: PlanningRequest, context: ExecutionContext) -> PlanningAnswer:
-        task_id = new_id("task")
-        trace_id = new_id("trace")
+        budget = BudgetTracker(self._budget)
         trace = TracePort(
-            task_id=task_id,
-            trace_id=trace_id,
+            task_id=new_id("task"),
+            trace_id=new_id("trace"),
             harness_version=self._harness.version,
             curriculum_snapshot_id=request.curriculumSnapshotId,
             offering_snapshot_id=request.offeringSnapshotId,
         )
-        budget = BudgetTracker(self._budget)
-        started = datetime.now(UTC)
+        try:
+            return self._run(request, context, budget, trace)
+        except Exception as exc:
+            # Preserve usage explicitly reported by the model adapter.
+            if getattr(exc, "input_tokens", None) is None:
+                exc.input_tokens = budget.input_tokens
+            if getattr(exc, "output_tokens", None) is None:
+                exc.output_tokens = budget.output_tokens
+            code = str(getattr(exc, "issue_code", None) or type(exc).__name__.upper())[:80]
+            trace.emit("ERROR", error_code=code)
+            if self._results is not None:
+                try:
+                    self._results.save_failure(
+                        events=trace.events,
+                        manifest=build_run_manifest(
+                            context=context, identity=self._run_identity, budget=self._budget
+                        ),
+                        error_code=code,
+                    )
+                except Exception:
+                    exc.add_note("Failed to persist the failed-run record")
+            raise
 
-        trace.emit("USER_INPUT", input_digest=digest(request.promptText))
+    def _run(
+        self,
+        request: PlanningRequest,
+        context: ExecutionContext,
+        budget: BudgetTracker,
+        trace: TracePort,
+    ) -> PlanningAnswer:
+        started = datetime.now(UTC)
+        user_input = trace.emit("USER_INPUT", input_digest=digest(request.promptText))
+        task_id, trace_id = user_input.taskId, user_input.traceId
         previous = self._previous_plan(request.previousPlanId, context.subject_id)
 
         resolved = self._intent_resolver.resolve(request)
@@ -309,6 +340,22 @@ class PlanningRunner:
                     )
                 )
                 selected.add(constraint.courseCode)
+        # 「必须保留这位教师」同时是课程钉：课程必须进方案，否则模型漏选会让整份
+        # 回答降级为 UNABLE_TO_VERIFY（docs/04 §6：指定教师绑定 courseCode+teacherKey+MUST）。
+        # 优先考虑（PREFER）不钉课程，只影响班次排序。
+        for pair in request.intent.pinnedTeacherCoursePairs:
+            if pair.mode != "MUST":
+                continue
+            if pair.courseCode in selected or pair.courseCode in facts.taken_course_codes:
+                continue
+            items.append(
+                PlanItem(
+                    courseCode=pair.courseCode,
+                    teacherKey=pair.teacherKey,
+                    classId=None,
+                )
+            )
+            selected.add(pair.courseCode)
         # Pinned courses first, then placed required courses, then the model's picks in
         # their own order (stable sort).
         items.sort(
@@ -322,6 +369,18 @@ class PlanningRunner:
         )
         if len(items) > 30:
             raise ModelInvalidOutput("推荐课程和学生所选课程合计超过 30 门")
+        # 学生显式选的「课程+教师」是请求里的可信来源（前端选项本身来自 Java）。
+        # 教师选项接口按页返回，本轮只取到第一页；不能因为没翻到那一页就把学生
+        # 明确要求保留的教师判成「未知 / 未确认教授该课」，否则 MUST 会被误拒。
+        trusted_pairs = {
+            (pair.courseCode, pair.teacherKey) for pair in request.intent.pinnedTeacherCoursePairs
+        }
+        if trusted_pairs:
+            facts = replace(
+                facts,
+                teacher_keys=facts.teacher_keys | {teacher for _, teacher in trusted_pairs},
+                teacher_course_pairs=facts.teacher_course_pairs | trusted_pairs,
+            )
         items, facts, section_issues = self._assign_sections(
             request,
             items,
@@ -524,34 +583,33 @@ class PlanningRunner:
             if exc.status_code != 404:
                 raise
 
-        school_result_matches_record = (
-            school_result is not None
-            and school_result.academicRecord.academicRecordId == request.academicRecordId
-        )
         school_result_matches_curriculum = (
             school_result is not None
             and school_result.academicRecord.curriculumSnapshotId == request.curriculumSnapshotId
+        )
+        # academicRecordId is stable across edits. Read the current Java revision
+        # even when the report embeds the same id; the report snapshot can lag it.
+        record = cast(
+            AcademicRecord,
+            self._call_tool(
+                "getAcademicRecord",
+                None,
+                context,
+                budget,
+                trace,
+                params={"recordId": request.academicRecordId},
+            ),
+        )
+        school_result_matches_record = (
+            school_result is not None
+            and school_result.academicRecord.academicRecordId == record.academicRecordId
+            and school_result.academicRecord.revision == record.revision
         )
         school_progress_issue_code = None
         if school_result is not None and not school_result_matches_record:
             school_progress_issue_code = "SCHOOL_PROGRESS_RECORD_MISMATCH"
         elif school_result is not None and not school_result_matches_curriculum:
             school_progress_issue_code = "SCHOOL_PROGRESS_SNAPSHOT_MISMATCH"
-
-        if school_result_matches_record and school_result_matches_curriculum:
-            record = school_result.academicRecord
-        else:
-            record = cast(
-                AcademicRecord,
-                self._call_tool(
-                    "getAcademicRecord",
-                    None,
-                    context,
-                    budget,
-                    trace,
-                    params={"recordId": request.academicRecordId},
-                ),
-            )
         courses = cast(
             list[Course],
             self._call_tool(
@@ -563,27 +621,18 @@ class PlanningRunner:
                 params={"curriculumSnapshotId": request.curriculumSnapshotId, "limit": 200},
             ),
         )
-        pinned = {
-            constraint.courseCode
-            for constraint in request.intent.hardConstraints
-            if constraint.kind == "PIN_COURSE" and constraint.courseCode is not None
-        }
+        pinned = set(self._pinned_codes(request))
         # 学校报告只在与本轮培养方案和学业记录一致时作为事实；其缺口与 Java 审计分开使用。
-        report_snapshot = (
-            school_result.snapshot
-            if school_result is not None
-            and school_result_matches_record
-            and school_result_matches_curriculum
-            else None
-        )
-        # Taken status comes from the school report even when its record id differs from
-        # this request: a course the student is taking is never a candidate.
+        report_snapshot = school_result.snapshot if school_result_matches_curriculum else None
+        # School course statuses are tied to the embedded record. Reuse them only
+        # when that record is the one explicitly selected for this run; report gaps
+        # remain available when the curriculum snapshot matches.
         scope = build_course_scope(
             courses,
             record.completedCourses,
             school_taken=(
                 school_taken_codes(school_result.snapshot.courses)
-                if school_result is not None
+                if school_result_matches_record and school_result_matches_curriculum
                 else ()
             ),
             school_nodes=report_snapshot.nodes if report_snapshot is not None else (),
@@ -596,34 +645,38 @@ class PlanningRunner:
             {course.courseCode for course in record.completedCourses if course.outcome == "UNKNOWN"}
         )
         school_progress: dict[str, object] | None = None
-        if school_result_matches_record and school_result_matches_curriculum:
+        school_report_gap_categories: list[dict[str, str]] = []
+        if school_result_matches_curriculum:
             snapshot = school_result.snapshot
-            school_progress = {
-                "capturedAt": snapshot.capturedAt.isoformat(),
-                "source": snapshot.source,
-                "nodes": [
-                    {
-                        "nodeId": node.nodeId,
-                        "parentId": node.parentId,
-                        "name": node.name,
-                        "requiredCredits": (
-                            None if node.requiredCredits is None else str(node.requiredCredits)
-                        ),
-                        "earnedCredits": (
-                            None if node.earnedCredits is None else str(node.earnedCredits)
-                        ),
-                        "remainingCredits": (
-                            None if node.remainingCredits is None else str(node.remainingCredits)
-                        ),
-                    }
-                    for node in snapshot.nodes
-                ],
-                # 学校报告中仍有剩余学分的类别（只按类别名精确匹配目录类别）。
-                "gapCategories": [
-                    {"category": leaf.name, "remainingCredits": leaf.remaining_credits}
-                    for leaf in scope.gap_leaves
-                ],
-            }
+            school_report_gap_categories = [
+                {"category": leaf.name, "remainingCredits": leaf.remaining_credits}
+                for leaf in scope.gap_leaves
+            ]
+            if school_result_matches_record:
+                school_progress = {
+                    "capturedAt": snapshot.capturedAt.isoformat(),
+                    "source": snapshot.source,
+                    "gapCategories": school_report_gap_categories,
+                    "nodes": [
+                        {
+                            "nodeId": node.nodeId,
+                            "parentId": node.parentId,
+                            "name": node.name,
+                            "requiredCredits": (
+                                None if node.requiredCredits is None else str(node.requiredCredits)
+                            ),
+                            "earnedCredits": (
+                                None if node.earnedCredits is None else str(node.earnedCredits)
+                            ),
+                            "remainingCredits": (
+                                None
+                                if node.remainingCredits is None
+                                else str(node.remainingCredits)
+                            ),
+                        }
+                        for node in snapshot.nodes
+                    ],
+                }
         options = cast(
             list[TeacherCourseOption],
             self._call_tool(
@@ -752,6 +805,7 @@ class PlanningRunner:
                 ),
                 "issueCode": school_progress_issue_code,
                 "progress": school_progress,
+                "reportGapCategories": school_report_gap_categories,
                 "uncertainCourseCodes": uncertain_course_codes,
                 "inProgressCourseCodes": sorted(
                     course.courseCode
@@ -1114,12 +1168,22 @@ class PlanningRunner:
 
     @staticmethod
     def _pinned_codes(request: PlanningRequest) -> frozenset[str]:
-        """Courses the student selected (PIN_COURSE hard constraints)."""
-        return frozenset(
+        """学生钉住的课程：PIN_COURSE 硬约束 + MUST 强度的教师绑定。
+
+        「必须保留这位教师」的语义是课程和教师都保留，所以 MUST 教师绑定也算课程钉：
+        模型漏选时课程仍进方案，交给 Java 核验，不静默丢教师、也不整份失败。
+        """
+        codes = {
             constraint.courseCode
             for constraint in request.intent.hardConstraints
             if constraint.kind == "PIN_COURSE" and constraint.courseCode is not None
+        }
+        codes.update(
+            pair.courseCode
+            for pair in request.intent.pinnedTeacherCoursePairs
+            if pair.mode == "MUST"
         )
+        return frozenset(codes)
 
     @staticmethod
     def _offering_issues(offering: OfferingCheck | None, pinned: frozenset[str]) -> list[Issue]:
@@ -1280,7 +1344,15 @@ class PlanningRunner:
         visible = facts.visible_course_facts[: limits.max_course_facts]
         visible_codes = {fact.course_code for fact in visible}
         payload: dict[str, object] = {
-            "schoolProgress": school_progress,
+            "schoolProgress": (
+                {
+                    key: value
+                    for key, value in school_progress.items()
+                    if key != "reportGapCategories"
+                }
+                if school_progress is not None
+                else None
+            ),
             # 学校报告的剩余学分，与下面 Java 审计 unknowns 是两个来源，不得合并。
             "schoolReportGaps": _school_report_gaps(school_progress),
             "academicRecordOutcomeUnknownCourseCodes": (
@@ -1419,7 +1491,7 @@ class PlanningRunner:
         budget.record_model_call()
         budget.check_deadline()
         try:
-            reply = self._model.generate(context=context, messages=messages, tool_schemas=[])
+            reply = self._model.generate(context=context, messages=messages)
         except ModelInvalidOutput as exc:
             # The failed call still consumed provider tokens; charge them before failing.
             budget.record_tokens(exc.input_tokens, exc.output_tokens)
@@ -1473,6 +1545,8 @@ class PlanningRunner:
         trace: TracePort,
         context: ExecutionContext,
     ) -> PlanningAnswer:
+        if context.planning_context is not None:
+            answer = answer.model_copy(update={"planningContext": context.planning_context})
         trace.emit("FINAL_DELIVERED", output_ref=answer.taskId)
         if self._results is not None:
             self._results.save(

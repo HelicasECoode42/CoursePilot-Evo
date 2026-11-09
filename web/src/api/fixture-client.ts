@@ -252,8 +252,8 @@ const DEMO_ANSWER: PlanningAnswer = {
   planningContext: {
     targetTerm: "NEXT_SEMESTER",
     timetableReferenceSnapshotId: FIXTURE_OFFERING_SNAPSHOT_ID,
-    timetableReferenceTermId: "2026-2027-1",
-    timetableSourceValidation: "UNVERIFIED",
+    timetableReferenceTermId: "2025-FALL",
+    timetableSourceValidation: "SYNTHETIC",
   },
   recommendations: [
     {
@@ -914,14 +914,6 @@ export class FixtureApiClient implements CoursePilotApiClient {
       501,
       "NOT_IMPLEMENTED",
     );
-  }
-
-  async importSchoolProgress(
-    body: SchoolProgressImportRequest,
-    idempotencyKey: string,
-    signal?: AbortSignal,
-  ): Promise<SchoolProgressImportResult> {
-    return this.saveSchoolProgress(body, idempotencyKey, signal);
   }
 
   async getSchoolProgress(

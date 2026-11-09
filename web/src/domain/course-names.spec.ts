@@ -3,7 +3,6 @@ import type { Course } from "../contracts";
 import {
   buildCourseFactIndex,
   buildCourseNameIndex,
-  describeCourse,
   describeSelectedCourse,
   limitCourseCodes,
 } from "./course-names";
@@ -41,16 +40,6 @@ describe("课程名查表", () => {
       course("01014125", "微积分(1-3)"),
     ]);
     expect(index["01014125"]).toBe("微积分(1-3)");
-  });
-
-  it("查不到名字就只给课程号，不编一个名字出来", () => {
-    expect(describeCourse("UNKNOWN", () => null)).toBe("UNKNOWN");
-  });
-
-  it("查得到就拼成「课程号 · 课程名」", () => {
-    expect(describeCourse("CS101", () => "Java 程序设计")).toBe(
-      "CS101 · Java 程序设计",
-    );
   });
 });
 

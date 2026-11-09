@@ -269,6 +269,14 @@ describe("个人控制台", () => {
     expect(wrapper.text()).not.toContain("已核验");
   });
 
+  it("培养方案缺少名称时说明名称未提供，不提示重新连接学业资料", async () => {
+    const { wrapper, store } = await mountDashboard();
+    store.$patch({ curricula: [{ ...curriculum, displayName: null }] });
+    await flushPromises();
+    expect(wrapper.text()).toContain("培养方案名称暂未提供");
+    expect(wrapper.text()).not.toContain("先连接学业资料，再开始规划");
+  });
+
   it("把无法确认的要求和还差的要求分开，不并进已满足", async () => {
     const { wrapper } = await mountDashboard();
     const text = wrapper.text();

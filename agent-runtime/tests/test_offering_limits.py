@@ -111,8 +111,8 @@ class _Model:
     def __init__(self, items: list[PlanItem]) -> None:
         self._items = items
 
-    def generate(self, *, context, messages, tool_schemas):
-        del context, messages, tool_schemas
+    def generate(self, *, context, messages):
+        del context, messages
         return ModelReply(items=list(self._items))
 
 

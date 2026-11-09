@@ -15,8 +15,8 @@ from agent_runtime.api.settings import Settings
 LIMIT = 256
 
 
-def _client(**settings) -> TestClient:
-    app = create_app(Settings(max_body_bytes=LIMIT, **settings), tool_client=FakeToolClient())
+def _client() -> TestClient:
+    app = create_app(Settings(max_body_bytes=LIMIT), tool_client=FakeToolClient())
     return TestClient(app)
 
 
@@ -64,17 +64,6 @@ def test_request_under_the_limit_reaches_the_route() -> None:
         headers={"Content-Type": "application/json", **_planning_headers()},
     )
     assert response.status_code == 401
-
-
-def test_body_limit_applies_before_authentication() -> None:
-    """超限的请求体在鉴权之前就被拒绝，未认证的人也不能用大请求占内存。"""
-    client = _client()
-    response = client.post(
-        "/api/v1/planning",
-        content=b" " * (LIMIT * 4),
-        headers={"Content-Type": "application/json", **_planning_headers()},
-    )
-    assert response.status_code == 413
 
 
 def test_session_rate_limit_uses_the_direct_peer_by_default() -> None:

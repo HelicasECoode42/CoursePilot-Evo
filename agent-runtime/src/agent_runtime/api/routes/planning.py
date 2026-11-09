@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -89,8 +90,12 @@ def plan(
             offering_snapshot_id=body.offeringSnapshotId,
             model_id=settings.model_id,
             temperature=settings.temperature,
-            deadline=datetime.now(UTC) + timedelta(milliseconds=45000),
+            deadline=datetime.now(UTC) + timedelta(milliseconds=settings.deadline_ms),
             harness_version=harness.version,
+        )
+        context = replace(
+            context,
+            planning_context=_planning_context(tool_client, context, body.offeringSnapshotId),
         )
         # 发起模型调用前原子地预留一次运行的最大用量（单次运行的输入/输出上限）：
         # 检查和预留在同一把锁里，并发请求不会同时通过检查。
@@ -98,26 +103,43 @@ def plan(
         reservation = spend_ledger.reserve(
             subject_id, settings.max_input_tokens, settings.max_output_tokens
         )
+        answer = None
         try:
-            try:
-                answer = runner.run(body, context)
-            except Exception as exc:
-                # 失败也可能已经花过 token：异常上带了实际用量就按实际结算，否则整笔释放。
-                reservation.settle(
-                    getattr(exc, "input_tokens", None), getattr(exc, "output_tokens", None)
-                )
-                raise
+            answer = runner.run(body, context)
+            if answer.planningContext != context.planning_context:
+                answer = answer.model_copy(update={"planningContext": context.planning_context})
+            payload = envelope(x_request_id, "OK", answer).model_dump(mode="json")
+        except Exception as exc:
+            input_tokens = getattr(exc, "input_tokens", None)
+            output_tokens = getattr(exc, "output_tokens", None)
+            if answer is not None:
+                if input_tokens is None:
+                    input_tokens = answer.usage.inputTokens
+                    exc.input_tokens = input_tokens
+                if output_tokens is None:
+                    output_tokens = answer.usage.outputTokens
+                    exc.output_tokens = output_tokens
+            # Before generation there is no usage to charge; after generation the
+            # answer usage survives any metadata/archive failure.
+            reservation.settle(input_tokens, output_tokens)
+            raise
+        else:
             reservation.settle(answer.usage.inputTokens, answer.usage.outputTokens)
-            answer = answer.model_copy(
-                update={
-                    "planningContext": _planning_context(
-                        tool_client, context, body.offeringSnapshotId
-                    )
-                }
-            )
         finally:
             # 已结算时是空操作；取消等其它 BaseException 也不会留下占用的预留。
             reservation.release()
-        return envelope(x_request_id, "OK", answer).model_dump(mode="json")
+        return payload
 
-    return idempotency.run(subject_id, "planning", idempotency_key, body_digest, produce)
+    return idempotency.run(
+        subject_id,
+        "planning",
+        idempotency_key,
+        body_digest,
+        produce,
+        # Once a provider reports usage, replaying the same key must not pay twice.
+        # Failures before a model call (no known usage) retain the existing retry path.
+        cache_failure=lambda exc: (
+            getattr(exc, "input_tokens", None) is not None
+            or getattr(exc, "output_tokens", None) is not None
+        ),
+    )

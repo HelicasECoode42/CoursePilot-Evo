@@ -125,9 +125,13 @@ def test_import_requires_session_and_persists_before_success() -> None:
 def test_import_rejects_unknown_fields_and_invalid_outcome() -> None:
     client = TestClient(create_app(Settings(), tool_client=SchoolProgressTools()))
     token = client.post("/api/v1/sessions").json()["data"]["sessionToken"]
-    headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "school-key-1"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Idempotency-Key": "school-key-1",
+        "X-Request-Id": "req:school-invalid",
+    }
     body = _body()
-    body["snapshot"]["nodes"][1]["nodeId"] = "node:parent"
+    body["snapshot"]["nodes"][1]["unexpected"] = True
     response = client.put("/api/v1/school-progress", json=body, headers=headers)
     assert response.status_code == 422
 

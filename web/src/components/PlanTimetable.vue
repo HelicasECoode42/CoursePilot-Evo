@@ -17,6 +17,7 @@ import {
   SCHEDULE_DAYS,
   SCHEDULE_SECTIONS,
   WEEKDAY_NAMES,
+  slotKey,
 } from "../domain/schedule-grid";
 
 const props = withDefaults(
@@ -46,16 +47,16 @@ const view = computed(() =>
 );
 const nameOf = (courseCode: string) => props.courseNames[courseCode] ?? null;
 const cellsEmptyInView = computed(
-  () => view.value.placed.length > 0 && view.value.cells.size === 0,
+  () => view.value.placedCount > 0 && view.value.cells.size === 0,
 );
 
 const isReal = computed(() => props.scope === "REAL_TIMETABLE");
 const hasAnything = computed(
-  () => view.value.placed.length > 0 || view.value.gaps.length > 0,
+  () => view.value.placedCount > 0 || view.value.gaps.length > 0,
 );
 
 function cellEntries(day: number, section: number) {
-  return view.value.cells.get(`${day}-${section}`) ?? [];
+  return view.value.cells.get(slotKey(day, section)) ?? [];
 }
 
 /** 格子里截断后，完整信息放在悬停提示里。 */
@@ -86,7 +87,7 @@ function dayLabel(day: number): string {
     </p>
 
     <div
-      v-if="view.placed.length"
+      v-if="view.placedCount"
       class="timetable-weeks"
       role="group"
       aria-label="周次范围"
@@ -108,7 +109,7 @@ function dayLabel(day: number): string {
     </p>
 
     <div class="timetable-layout">
-      <div v-if="view.placed.length" class="timetable-scroll">
+      <div v-if="view.placedCount" class="timetable-scroll">
         <table class="timetable">
           <caption class="sr-only">
             一周课表，列为星期，行为节次
@@ -128,7 +129,9 @@ function dayLabel(day: number): string {
                 v-for="day in SCHEDULE_DAYS"
                 :key="day"
                 :class="{
-                  'timetable-cell--multi': cellEntries(day, section).length > 1,
+                  'timetable-cell--multi': view.overlapCells.has(
+                    slotKey(day, section),
+                  ),
                 }"
               >
                 <ul
@@ -137,7 +140,7 @@ function dayLabel(day: number): string {
                 >
                   <li
                     v-for="entry in cellEntries(day, section)"
-                    :key="entry.courseCode + entry.classId"
+                    :key="entry.key"
                     class="timetable-chip"
                     :title="chipTitle(entry)"
                   >
@@ -246,7 +249,7 @@ function dayLabel(day: number): string {
   white-space: nowrap;
 }
 
-/* 同一格有两门以上课，即时间重叠：整格标红，并给出文字标记（不只靠颜色）。 */
+/* 同一格内不同班次的上课周次重叠时标红。 */
 .timetable-cell--multi {
   background: #fff4f2;
   box-shadow: inset 0 0 0 1px #efc4bd;

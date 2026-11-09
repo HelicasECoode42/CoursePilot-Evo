@@ -34,7 +34,17 @@ def create_session(
     try:
         session_id, token, expires_at = store.create()
     except SessionStoreFull as exc:
+        _release_expired_tracking(request, store)
         # 不是客户端的错，但也只能让它稍后再试；不静默返回一个假会话。
         raise RateLimitedError("服务当前的会话数已满，请稍后再试") from exc
+    _release_expired_tracking(request, store)
     data = SessionResult(sessionId=session_id, sessionToken=token, expiresAt=expires_at)
     return envelope(new_id("req"), "OK", data).model_dump(mode="json")
+
+
+def _release_expired_tracking(request: Request, store: SessionStore) -> None:
+    ledger = getattr(request.app.state, "spend_ledger", None)
+    if ledger is None:
+        return
+    for session_id in store.take_expired_sessions():
+        ledger.expire_session(session_id)

@@ -25,7 +25,7 @@ class AuditItem(DomainModel):
     requirementId: Id
     # 类别名（必修 / 通识 …）。没有它前端只能显示「培养要求 1」。
     category: Annotated[str, StringConstraints(min_length=1, max_length=100)] | None
-    courseCodes: list[Id] = Field(max_length=200)
+    courseCodes: list[Id] = Field(max_length=500)
     requiredCredits: Credits | None
     earnedCredits: Credits | None
     gapCredits: Credits | None
@@ -45,4 +45,5 @@ class AuditResult(DomainModel):
     transcriptCompleteSource: TranscriptCompleteSource | None = None
     requirements: list[AuditItem] = Field(max_length=200)
     suggestedCourseCodes: list[Id] = Field(max_length=200)
-    unknowns: list[Issue] = Field(max_length=200)
+    # One issue per recorded course, plus three audit-level notices.
+    unknowns: list[Issue] = Field(max_length=503)

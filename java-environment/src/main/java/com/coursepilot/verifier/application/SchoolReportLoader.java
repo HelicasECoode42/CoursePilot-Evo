@@ -3,6 +3,7 @@ package com.coursepilot.verifier.application;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.coursepilot.verifier.persistence.repo.SchoolProgressSnapshotRepository;
+import com.coursepilot.verifier.web.dto.RecordDtos;
 import com.coursepilot.verifier.web.dto.SchoolProgressDtos;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,10 +21,15 @@ public class SchoolReportLoader {
     }
 
     @Transactional(readOnly = true)
-    SchoolReport latest(String subjectId) {
+    SchoolReport latest(String subjectId, String curriculumSnapshotId) {
         return snapshots.findFirstBySubjectIdOrderByImportedAtDesc(subjectId)
             .map(entity -> {
                 try {
+                    RecordDtos.AcademicRecord record = mapper.readValue(entity.getAcademicRecordJson(),
+                        RecordDtos.AcademicRecord.class);
+                    if (!curriculumSnapshotId.equals(record.curriculumSnapshotId())) {
+                        return SchoolReport.NONE;
+                    }
                     return SchoolReport.from(mapper.readValue(entity.getSnapshotJson(),
                         SchoolProgressDtos.Snapshot.class));
                 } catch (JsonProcessingException e) {

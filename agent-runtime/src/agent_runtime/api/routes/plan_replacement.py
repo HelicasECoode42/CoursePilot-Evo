@@ -46,7 +46,6 @@ from agent_runtime.application.plan_replacement import (
     PlanNotInSession,
     PlanReplacement,
     ReplacementResult,
-    ReusedVerification,
     UnknownClass,
 )
 from agent_runtime.application.plan_store import SessionPlanStore
@@ -78,12 +77,6 @@ def _reject(error: Exception) -> None:
         # omitted because the client never sent offeringSnapshotId.
         raise InvalidInputError(
             "这份方案没有班次快照，不能替换班次",
-        ) from error
-    if isinstance(error, ReusedVerification):
-        raise InvalidInputError(
-            "核验结果复用了旧判决编号，已拒绝",
-            field="verifierResultId",
-            code="VERIFICATION_REUSED",
         ) from error
     raise error
 
@@ -239,7 +232,6 @@ def replace_session_plan(
             UnknownClass,
             CourseNotInPlan,
             OfferingSnapshotMissing,
-            ReusedVerification,
         ) as exc:
             _reject(exc)
             raise
@@ -275,7 +267,7 @@ def remove_session_plan_course(
                 course_code=body.courseCode,
                 context=context,
             )
-        except (PlanNotInSession, CourseNotInPlan, ReusedVerification) as exc:
+        except (PlanNotInSession, CourseNotInPlan) as exc:
             _reject(exc)
             raise
         return envelope(x_request_id, "OK", _removal_payload(result)).model_dump(mode="json")
@@ -319,7 +311,6 @@ def add_session_plan_course(
             CourseAlreadyTaken,
             PlanFull,
             ClassNeedsSnapshot,
-            ReusedVerification,
         ) as exc:
             _reject_add(exc)
             raise

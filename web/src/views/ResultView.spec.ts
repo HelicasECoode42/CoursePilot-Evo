@@ -275,6 +275,54 @@ describe("result page course search and replacement", () => {
   const mountPage = () =>
     mount(ResultView, { global: { plugins: [router, pinia] } });
 
+  it("explains UNABLE_TO_VERIFY instead of showing a blank page", async () => {
+    const result = answer();
+    result.decision = "UNABLE_TO_VERIFY";
+    result.recommendations = [];
+    result.unknowns = [
+      {
+        code: "MUST_TEACHER_NOT_PRESERVED",
+        message: "必须保留课程 08306099 与指定教师 10009466",
+        field: "teacherKey",
+        retryable: false,
+      },
+    ];
+    store.$patch({ planningResult: result });
+
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const text = wrapper.text();
+    expect(text).toContain("这次没有生成方案");
+    expect(text).toContain("必须保留");
+    expect(text).toContain("已选课程");
+    expect(text).not.toContain("这次没有可展示的方案");
+  });
+
+  it("offers the AI course assistant on the result page for adding courses", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("想加课，但不知道加什么");
+    expect(wrapper.text()).toContain("确认采用的课程会进入待选草稿");
+  });
+
+  it("keeps chat advice available and offers regeneration after adopting a suggestion", async () => {
+    store.$patch({
+      planningResult: null,
+      adoptedAdviceSuggestions: ["advice-1"],
+    });
+    const submit = vi.spyOn(store, "submitPlan").mockResolvedValue();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("课程助手");
+    const action = buttonByText(wrapper, "用更新后的草稿重新生成方案");
+    expect(action).toBeDefined();
+    await action!.trigger("click");
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
   it("shows course-specific reasons and exploration steps", async () => {
     const result = answer();
     result.recommendations[0].courseRationales = [

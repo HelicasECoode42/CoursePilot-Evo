@@ -293,7 +293,7 @@ def register_error_handlers(app: FastAPI) -> None:
             code="MODEL_UNAVAILABLE",
             message=_bounded(str(exc)),
             field=None,
-            retryable=_transient(503),
+            retryable=exc.status_code >= 500,
         )
         return _json(request, 503, "ERROR", [issue])
 
@@ -324,7 +324,7 @@ def register_error_handlers(app: FastAPI) -> None:
             field = diagnostics.get("field_path")
             safe_field = field if isinstance(field, str) else None
         else:
-            message = _bounded(str(exc))
+            message = str(exc)
             safe_field = None
         issue = Issue(
             code="MODEL_INVALID_OUTPUT",

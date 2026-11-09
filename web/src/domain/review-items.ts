@@ -8,18 +8,19 @@ import type { ReviewNote } from "../contracts";
  * 原文是用户/学生写的，只做去残留和去 PDF 换行空格，不改写措辞。
  */
 const SEPARATOR_RE = /Ⅱ|‖|\|\||｜｜|丨|』/;
-const EDGE_ARTIFACTS = "口丨｜|」「『』 \t\u3000";
 const CJK_GAP_RE = /(?<=[\u3000-鿿＀-￯])\s+(?=[\u3000-鿿＀-￯])/g;
 const MIN_SEGMENT_LENGTH = 2;
 export const UNNAMED_TEACHER_LABEL = "未标明老师";
 
-function trimArtifacts(text: string, splitPart: boolean): string {
+function trimArtifacts(
+  text: string,
+  afterSeparator: boolean,
+  beforeSeparator: boolean,
+): string {
   let s = text.trim();
-  // 分隔符旁孤立的 OCR 字母，如 "ⅡI 老师…"
-  if (splitPart) s = s.replace(/^[IⅠ]\s+/, "");
-  while (s.length > 0 && EDGE_ARTIFACTS.includes(s[0]!)) s = s.slice(1);
-  while (s.length > 0 && EDGE_ARTIFACTS.includes(s[s.length - 1]!))
-    s = s.slice(0, -1);
+  // 只去除紧邻分隔符的独立 OCR 残留，保留「口头」「接口」等正文。
+  if (afterSeparator) s = s.replace(/^[IⅠ口](?:\s+|$)/, "");
+  if (beforeSeparator) s = s.replace(/(?:^|\s+)口$/, "");
   return s.replace(CJK_GAP_RE, "").trim();
 }
 
@@ -27,10 +28,12 @@ function trimArtifacts(text: string, splitPart: boolean): string {
 export function splitReviewExcerpt(excerpt: string): string[] {
   const parts = excerpt.split(SEPARATOR_RE);
   const cleaned = parts
-    .map((part, index) => trimArtifacts(part, index > 0))
+    .map((part, index) =>
+      trimArtifacts(part, index > 0, index < parts.length - 1),
+    )
     .filter((part) => part.length >= MIN_SEGMENT_LENGTH);
   if (cleaned.length > 0) return cleaned;
-  const whole = trimArtifacts(excerpt, false);
+  const whole = trimArtifacts(excerpt, false, false);
   return whole.length > 0 ? [whole] : [];
 }
 

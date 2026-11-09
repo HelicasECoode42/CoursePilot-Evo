@@ -24,7 +24,11 @@ const emit = defineEmits<{ load: [] }>();
 /** 展开「查看评价原文」时才请求；已经读过就不再发请求。 */
 function onLoadToggle(event: globalThis.Event) {
   const target = event.target as { open?: boolean } | null;
-  if (target?.open === true && !props.reviewStatus) emit("load");
+  if (
+    target?.open === true &&
+    (props.reviewStatus == null || props.reviewStatus === "error")
+  )
+    emit("load");
 }
 /** 读取后仍对不上的编号：说明原文没找到，而不是继续显示「尚未加载」。 */
 const missingRefs = computed(() =>
@@ -118,6 +122,9 @@ const SOURCE_LABEL: Record<ReviewNote["sourceKind"], string> = {
           role="alert"
         >
           读取评价原文失败：{{ reviewError || "原因未知，请稍后重试。" }}
+          <button class="linkbtn" type="button" @click="emit('load')">
+            重新读取评价原文
+          </button>
         </p>
         <p v-else-if="reviewStatus === 'ready'">
           评价库中没有找到这 {{ missingRefs.length }} 条记录的原文（编号见下）。
@@ -151,7 +158,12 @@ const SOURCE_LABEL: Record<ReviewNote["sourceKind"], string> = {
       "
       class="microcopy"
     >
-      另有 {{ uncachedEvidenceRefs.length }} 条已引用评价尚未显示原文。
+      <template v-if="reviewStatus === 'ready'">
+        本次读取未找到另 {{ uncachedEvidenceRefs.length }} 条已引用评价的原文。
+      </template>
+      <template v-else>
+        另有 {{ uncachedEvidenceRefs.length }} 条已引用评价尚未显示原文。
+      </template>
       <details @toggle="onLoadToggle">
         <summary>查看未显示记录的来源</summary>
         <p v-if="reviewStatus === 'loading'" role="status">正在读取评价原文…</p>
@@ -161,6 +173,9 @@ const SOURCE_LABEL: Record<ReviewNote["sourceKind"], string> = {
           role="alert"
         >
           读取评价原文失败：{{ reviewError || "原因未知，请稍后重试。" }}
+          <button class="linkbtn" type="button" @click="emit('load')">
+            重新读取评价原文
+          </button>
         </p>
         <ul>
           <li v-for="ref in uncachedEvidenceRefs" :key="ref.reviewNoteId">

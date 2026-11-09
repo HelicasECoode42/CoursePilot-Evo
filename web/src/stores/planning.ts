@@ -235,8 +235,13 @@ export function createPlanningStore(
      * 唯一改变选中记录的写法：清掉旧核对与请求草稿。
      * 让在途请求作废由调用方负责（先调 beginRecordRequest），这里不碰版本号。
      */
-    function setSelectedRecord(recordId: string | null) {
+    function setSelectedRecord(
+      recordId: string | null,
+      revisionChanged = false,
+    ) {
+      const previousRecordId = selectedRecordId.value;
       selectedRecordId.value = recordId;
+      if (previousRecordId !== recordId || revisionChanged) clearAdviceChat();
       audit.value = null;
       auditStatus.value = "idle";
       auditError.value = "";
@@ -311,10 +316,15 @@ export function createPlanningStore(
       const requestVersion = ++adviceVersion;
       const sessionAtStart = sessionId.value;
       const curriculumAtStart = body.curriculumSnapshotId;
+      const recordAtStart = selectedRecord.value;
+      const recordIdAtStart = recordAtStart?.academicRecordId ?? null;
+      const recordRevisionAtStart = recordAtStart?.revision ?? null;
       const isCurrentRequest = () =>
         adviceVersion === requestVersion &&
         sessionId.value === sessionAtStart &&
-        selectedCurriculumId.value === curriculumAtStart;
+        selectedCurriculumId.value === curriculumAtStart &&
+        (selectedRecord.value?.academicRecordId ?? null) === recordIdAtStart &&
+        (selectedRecord.value?.revision ?? null) === recordRevisionAtStart;
       adviceKeyState = keyState;
       adviceBusy.value = true;
       adviceError.value = "";
@@ -1186,6 +1196,9 @@ export function createPlanningStore(
       try {
         const list = await client.listSessionRecords(signal);
         if (!isCurrentRecordRequest(version)) return;
+        const previousRecord = records.value.find(
+          (item) => item.academicRecordId === selectedRecordId.value,
+        );
         records.value = list.items;
         // 刷新恢复时保留原先选中的记录；不在列表里才退回第一条。
         // 只有真的换了记录才调用 setSelectedRecord：它会清空当前方案结果，
@@ -1195,8 +1208,15 @@ export function createPlanningStore(
         );
         const nextRecordId =
           kept?.academicRecordId ?? list.items[0]?.academicRecordId ?? null;
-        if (nextRecordId !== selectedRecordId.value) {
-          setSelectedRecord(nextRecordId);
+        const nextRecord = list.items.find(
+          (item) => item.academicRecordId === nextRecordId,
+        );
+        const revisionChanged =
+          previousRecord !== undefined &&
+          nextRecord !== undefined &&
+          previousRecord.revision !== nextRecord.revision;
+        if (nextRecordId !== selectedRecordId.value || revisionChanged) {
+          setSelectedRecord(nextRecordId, revisionChanged);
         }
         recordsStatus.value = "ready";
       } catch (error) {
@@ -1296,6 +1316,7 @@ export function createPlanningStore(
           signal,
         );
         if (!isCurrentRecordRequest(version)) return false;
+        schoolProgressKeyState = null;
         if (
           result.academicRecord.curriculumSnapshotId !== curriculumSnapshotId
         ) {
@@ -1304,6 +1325,10 @@ export function createPlanningStore(
             "服务返回的学业记录关联了其他培养方案，未应用到当前核对。";
           return false;
         }
+        const previousRecord = records.value.find(
+          (item) =>
+            item.academicRecordId === result.academicRecord.academicRecordId,
+        );
         schoolProgress.value = result;
         schoolProgressStatus.value = "ready";
         records.value = [
@@ -1313,7 +1338,11 @@ export function createPlanningStore(
               item.academicRecordId !== result.academicRecord.academicRecordId,
           ),
         ];
-        setSelectedRecord(result.academicRecord.academicRecordId);
+        setSelectedRecord(
+          result.academicRecord.academicRecordId,
+          previousRecord !== undefined &&
+            previousRecord.revision !== result.academicRecord.revision,
+        );
         recordsStatus.value = "ready";
         await runAudit();
         return true;
@@ -1370,13 +1399,20 @@ export function createPlanningStore(
           signal,
         );
         if (!isCurrentRecordRequest(version)) return false;
+        const previousRecord = records.value.find(
+          (item) => item.academicRecordId === saved.academicRecordId,
+        );
         records.value = [
           saved,
           ...records.value.filter(
             (item) => item.academicRecordId !== saved.academicRecordId,
           ),
         ];
-        setSelectedRecord(saved.academicRecordId);
+        setSelectedRecord(
+          saved.academicRecordId,
+          previousRecord !== undefined &&
+            previousRecord.revision !== saved.revision,
+        );
         recordsStatus.value = "ready";
         return true;
       } catch (error) {

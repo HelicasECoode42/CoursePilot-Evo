@@ -77,9 +77,6 @@ function fakeClient(
     saveSchoolProgress: vi.fn(async () => {
       throw new Error("not used in this test");
     }),
-    importSchoolProgress: vi.fn(async () => {
-      throw new Error("not used in this test");
-    }),
     getSchoolProgress: vi.fn(async () => null),
     saveSessionRecord: vi.fn(async (input) => ({
       academicRecordId: "record-1",
@@ -221,6 +218,51 @@ describe("planning session store", () => {
     expect(store.adoptAdviceSuggestion(answer, "s-prefer")).toBe(true);
     expect(store.draft.preferredCourseCodes).toEqual(["CS201"]);
     expect(store.draft.selectedCourseCodes).toEqual([]);
+  });
+
+  it("drops chat context when the selected academic record keeps its ID but advances revision", async () => {
+    const answer: AdviceChatAnswer = {
+      schemaVersion: "1.0",
+      reply: "旧记录下的建议",
+      question: null,
+      courses: [],
+      suggestions: [],
+      schoolProgress: null,
+      unknowns: [],
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        toolCalls: 1,
+        elapsedMs: 1,
+      },
+    };
+    const record = (revision: number): AcademicRecord => ({
+      academicRecordId: "record-same-id",
+      revision,
+      curriculumSnapshotId: curriculum.snapshotId,
+      completedCourses: [],
+      transcriptComplete: false,
+      sourceKind: "USER_IMPORT",
+      createdAt: "2026-10-01T00:00:00Z",
+    });
+    const client = fakeClient({
+      listSessionRecords: vi.fn(async () => ({ items: [record(1)] })),
+      adviceChat: vi.fn(async () => answer),
+    });
+    const store = createPlanningStore(client)();
+    await store.startSession();
+    await store.loadRecords();
+    expect(await store.sendAdviceMessage("给我选课建议")).toBe(true);
+    expect(store.adviceMessages).toHaveLength(2);
+
+    vi.mocked(client.listSessionRecords).mockResolvedValue({
+      items: [record(2)],
+    });
+    await store.loadRecords();
+
+    expect(store.selectedRecordId).toBe("record-same-id");
+    expect(store.selectedRecord?.revision).toBe(2);
+    expect(store.adviceMessages).toEqual([]);
   });
 
   it("retries a failed identical chat request with the same idempotency key", async () => {

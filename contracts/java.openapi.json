@@ -1636,7 +1636,7 @@
                                 "$ref": "./schemas/domain.schema.json#/$defs/CourseOffering"
                               },
                               "minItems": 0,
-                              "maxItems": 200
+                              "maxItems": 1000
                             }
                           },
                           "required": [

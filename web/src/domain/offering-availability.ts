@@ -6,29 +6,10 @@
  * 两者不能混为一谈。
  */
 
-import type { CourseOffering } from "../contracts";
-
 export type OfferingAvailability =
   | { state: "OFFERED"; sections: number }
   | { state: "NOT_OFFERED" }
   | { state: "UNKNOWN"; reason: string };
-
-/**
- * 业务状态为 OK 时，按 classId 去重数班次。空数组在 OK 下就是「所选快照里没有这门课」。
- * 调用方在业务状态为 UNKNOWN 时不要调用它，应直接给 UNKNOWN。
- */
-export function availabilityFromOfferings(
-  items: readonly CourseOffering[],
-  courseCode: string,
-): OfferingAvailability {
-  const classIds = new Set(
-    items
-      .filter((item) => item.courseCode === courseCode)
-      .map((item) => item.classId),
-  );
-  if (classIds.size === 0) return { state: "NOT_OFFERED" };
-  return { state: "OFFERED", sections: classIds.size };
-}
 
 /** 由批量班次数得到开课情况：0 班次是确认未开，不是无法确认。 */
 export function availabilityFromSectionCount(

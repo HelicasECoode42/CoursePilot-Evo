@@ -12,9 +12,8 @@ from datetime import UTC, date, datetime
 class Budget:
     """Single budget entry for enforcement and RunManifest.
 
-    Defaults match docs/04 section 3 and the RunManifest consts in
-    ``domain.schema.json``. ``build_run_manifest`` reads this object, so the
-    recorded caps stay the ones the runner enforced.
+    Defaults match docs/04 section 3. ``build_run_manifest`` reads this object
+    so the recorded caps stay the ones the runner enforced.
     """
 
     max_input_tokens: int = 8000
@@ -222,6 +221,7 @@ class SessionSpendLedger:
         self._lock = threading.Lock()
         self._spent: dict[str, tuple[int, int]] = {}
         self._inflight: dict[str, tuple[int, int]] = {}
+        self._retired: set[str] = set()
         self._day: date | None = None
         self._daily_used = 0
         self._daily_inflight = 0
@@ -274,6 +274,21 @@ class SessionSpendLedger:
             self._roll_day()
             return self._daily_used
 
+    def expire_session(self, session_id: str) -> None:
+        """Release per-session tracking while retaining process daily accounting.
+
+        An in-flight request may outlive its session token. Its reservation remains
+        in the daily in-flight total and is marked retired so settlement still
+        charges the daily total without recreating a per-session tracking slot.
+        """
+        with self._lock:
+            self._spent.pop(session_id, None)
+            if session_id in self._inflight:
+                self._retired.add(session_id)
+            else:
+                self._inflight.pop(session_id, None)
+                self._retired.discard(session_id)
+
     def _settle(
         self,
         session_id: str,
@@ -291,7 +306,12 @@ class SessionSpendLedger:
             else:
                 self._inflight[session_id] = left
             self._daily_inflight -= reserved_in + reserved_out
-            self._charge(session_id, input_tokens, output_tokens)
+            if session_id in self._retired:
+                self._charge_daily(input_tokens, output_tokens)
+                if session_id not in self._inflight:
+                    self._retired.discard(session_id)
+            else:
+                self._charge(session_id, input_tokens, output_tokens)
 
     def _charge(self, session_id: str, input_tokens: int | None, output_tokens: int | None) -> None:
         """记账。None 表示没有可记的用量（例如假模型不报 token），不记。调用方须持有锁。"""
@@ -302,7 +322,11 @@ class SessionSpendLedger:
             spent_in + (input_tokens or 0),
             spent_out + (output_tokens or 0),
         )
-        self._daily_used += (input_tokens or 0) + (output_tokens or 0)
+        self._charge_daily(input_tokens, output_tokens)
+
+    def _charge_daily(self, input_tokens: int | None, output_tokens: int | None) -> None:
+        if input_tokens is not None or output_tokens is not None:
+            self._daily_used += (input_tokens or 0) + (output_tokens or 0)
 
     def _roll_day(self) -> None:
         """UTC 日期变化时清零当日已用量。仍在途的预留保留，结算时从中扣除。调用方须持有锁。"""

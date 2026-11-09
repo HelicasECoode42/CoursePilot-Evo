@@ -145,15 +145,19 @@ class PlanReplacement:
     ) -> list[MustAvoidCheck]:
         """Ask Java whether each candidate class breaks a hard time constraint.
 
-        Each candidate is validated alone against the saved hard constraints.
+        Each candidate is validated alone against the saved hard time constraints.
         Java does the time math. This only maps its CONSTRAINT_BLOCK_* findings
-        to CONFLICT / UNKNOWN / CLEAR. A plan without hard constraints needs no
+        to CONFLICT / UNKNOWN / CLEAR. A plan without hard time constraints needs no
         Java call and gets no checks.
         """
         plan = self._require_plan(session_id, previous_plan_id)
-        if not plan.hard_constraints or plan.offering_snapshot_id is None:
+        constraints = [
+            item.model_copy(deep=True)
+            for item in plan.hard_constraints
+            if item.kind in ("BLOCK_DAY", "BLOCK_SECTION", "BLOCK_SLOT")
+        ]
+        if not constraints or plan.offering_snapshot_id is None:
             return []
-        constraints = [item.model_copy(deep=True) for item in plan.hard_constraints]
         checks: list[MustAvoidCheck] = []
         for offering in offerings:
             candidate = PlanItem(

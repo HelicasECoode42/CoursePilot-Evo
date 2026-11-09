@@ -88,7 +88,7 @@ describe("CourseReviewBasis", () => {
     expect(wrapper.emitted("load")).toHaveLength(1);
   });
 
-  it("shows why loading the originals failed, not a generic pending line", () => {
+  it("shows why loading the originals failed and offers a retry action", async () => {
     const wrapper = mount(CourseReviewBasis, {
       props: {
         ...base,
@@ -103,6 +103,34 @@ describe("CourseReviewBasis", () => {
     });
     expect(wrapper.text()).toContain("读取评价原文失败：暂时无法完成请求");
     expect(wrapper.text()).not.toContain("尚未加载");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "重新读取评价原文")!
+      .trigger("click");
+    expect(wrapper.emitted("load")).toHaveLength(1);
+  });
+
+  it("retries loading after the student closes and reopens a failed evidence section", async () => {
+    const wrapper = mount(CourseReviewBasis, {
+      props: {
+        ...base,
+        reviewBasisStatus: "HAS_EVIDENCE",
+        reviewNoteIds: ["review-1"],
+        reviewEvidenceRefs: [
+          { reviewNoteId: "review-1", sourceRefId: "winter-pdf:p3:l8" },
+        ],
+        reviewStatus: "error",
+        reviewError: "网络中断",
+      },
+    });
+    const details = wrapper
+      .findAll("details")
+      .find((item) => item.text().includes("查看评价原文"))!;
+    details.element.open = false;
+    await details.trigger("toggle");
+    details.element.open = true;
+    await details.trigger("toggle");
+    expect(wrapper.emitted("load")).toHaveLength(1);
   });
 
   it("says the originals were not found once a load has finished without them", () => {
@@ -149,6 +177,38 @@ describe("CourseReviewBasis", () => {
       },
     });
     expect(wrapper.text()).toContain("示例评价原文（虚构）");
+  });
+
+  it("reports missing originals when a successful response contains only part of the cited evidence", () => {
+    const wrapper = mount(CourseReviewBasis, {
+      props: {
+        ...base,
+        reviewBasisStatus: "HAS_EVIDENCE",
+        reviewNoteIds: ["review-1", "review-2"],
+        reviewEvidenceRefs: [
+          { reviewNoteId: "review-1", sourceRefId: "source:1" },
+          { reviewNoteId: "review-2", sourceRefId: "source:2" },
+        ],
+        reviewStatus: "ready",
+        reviewNotes: [
+          {
+            reviewNoteId: "review-1",
+            courseCode: "CS101",
+            teacherKey: null,
+            termId: null,
+            sourceKind: "SYNTHETIC",
+            publishedAt: null,
+            sourceUrl: null,
+            excerpt: "虚构评价原文",
+            dimensions: ["WORKLOAD"],
+            matchStatus: "COURSE_ONLY",
+            sourceRefId: "source:1",
+          },
+        ],
+      },
+    });
+    expect(wrapper.text()).toContain("本次读取未找到另 1 条已引用评价的原文");
+    expect(wrapper.text()).toContain("source:2");
   });
 });
 

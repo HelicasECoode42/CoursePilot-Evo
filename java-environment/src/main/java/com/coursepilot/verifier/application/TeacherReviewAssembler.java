@@ -44,6 +44,8 @@ public class TeacherReviewAssembler {
 
     /** 契约 TeacherCourseOption.classIds 的上限；超出时只截断列表，sectionCount 仍为全量。 */
     private static final int MAX_CLASS_IDS = 200;
+    /** 详情通过 searchReviews 分页读取；选项只携带前 200 条评价引用。 */
+    private static final int MAX_REVIEW_IDS = 200;
     /** 候选开课快照的扫描上限，远大于实际的已发布开课快照数量。 */
     private static final int OFFERING_SNAPSHOT_SCAN = 200;
 
@@ -195,7 +197,7 @@ public class TeacherReviewAssembler {
     private TeacherCourseOption bindingOption(TeacherCourse t, String courseName) {
         List<ReviewNote> matched = reviewRepo.findByCourseCodeAndTeacherKeyOrderByReviewNoteIdAsc(
             t.getCourseCode(), t.getTeacherKey());
-        List<String> reviewIds = matched.stream().map(ReviewNote::getReviewNoteId).toList();
+        List<String> reviewIds = matched.stream().limit(MAX_REVIEW_IDS).map(ReviewNote::getReviewNoteId).toList();
         boolean hasHistory = matched.stream().anyMatch(n -> n.getTermId() != null);
 
         // 班次只按「课程 + 教师显示名」对应到开课记录。教师在开课表里是自由文本，没有教师主键。
@@ -203,6 +205,7 @@ public class TeacherReviewAssembler {
             .filter(o -> t.getTeacherDisplayName().equals(o.getTeacher()))
             .map(CourseOffering::getOfferingId)
             .sorted()
+            .limit(MAX_CLASS_IDS)
             .toList();
 
         return TeacherCourseOption.binding(
@@ -217,6 +220,7 @@ public class TeacherReviewAssembler {
 
     private List<String> reviewIdsOf(String courseCode, String teacherKey) {
         return reviewRepo.findByCourseCodeAndTeacherKeyOrderByReviewNoteIdAsc(courseCode, teacherKey).stream()
+            .limit(MAX_REVIEW_IDS)
             .map(ReviewNote::getReviewNoteId)
             .toList();
     }
@@ -294,7 +298,7 @@ public class TeacherReviewAssembler {
             n.getSourceRefId() == null ? "review:" + n.getReviewNoteId() : n.getSourceRefId());
     }
 
-    /** 匹配状态现算：没有教师即课程级；有教师且存在同课程绑定才算已匹配；其余为未核验。 */
+    /** 保留导入时的保守匹配标记，其他记录按当前课程和教师绑定计算。 */
     private MatchStatus matchStatus(ReviewNote n) {
         if ("UNVERIFIED".equals(n.getImportedMatchStatus())) return MatchStatus.UNVERIFIED;
         if ("COURSE_ONLY".equals(n.getImportedMatchStatus())) return MatchStatus.COURSE_ONLY;

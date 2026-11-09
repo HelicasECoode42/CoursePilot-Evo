@@ -21,6 +21,10 @@ uv run python scripts/self_check.py
 
 ## 变更记录
 
+- 学业核对输出支持单份记录中的最多 500 个课程编号及 503 条未知说明（逐课程说明加核对级提示）。教师选项附带最多 200 个班次编号和前 200 条评价引用。开课快照的班次数以 `sectionCount` 为准，完整评价通过 `searchReviews` 分页读取。
+- Java 核验响应必须同时包含 `TIMETABLE` 和 `CURRICULUM` 两个分项。Python 在接收 Java 响应时检查两项，受控假工具也返回两项。
+- 运行记录中的预算字段记录实际部署配置，默认值由 Python 设置提供。班次查询与时间预览的响应上限和单课程查询一致。
+
 - `GET /api/v1/offerings` 的 `limit` 上限在指定 `courseCode` 时由 100 提高到 1000、默认返回该课全部班次（未指定课程时仍为默认 20、上限 100）。接口没有游标，返回条数恰为 1000 视为可能不完整。Python 的 `listOfferings` 调用（planner 班次核对、班次替换、学期班次汇总）按单课请求 1000 条，不再沿用 Java 默认的 20 条。响应形状未变。
 - 新增 `POST /api/v1/session-plans/add-course`（`addSessionPlanCourse`，请求 `SessionPlanCourseAddRequest`：`previousPlanId`、`courseCode`，可选 `classId`），响应复用 `SessionPlanEditResult`（非空，带 Java 对整份新方案的 `verification`）。拒绝：课程已在方案中、标为 PASSED/IN_PROGRESS（422 `COURSE_ALREADY_TAKEN`）、方案已满 30 门（422 `PLAN_FULL`）、课程不在培养快照或开课快照（404）、指定班次不属于该课程（404）、方案无班次快照却指定班次（422）。`PlanningAnswer` 增加可选 `planningContext`（`PlanningContext`）：`targetTerm` 恒为 `NEXT_SEMESTER`，`timetableReferenceSnapshotId` / `timetableReferenceTermId` / `timetableSourceValidation` 取自方案所用开课快照；快照未知时三者为 null。旧消费者无需改动。
 

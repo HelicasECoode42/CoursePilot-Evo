@@ -174,7 +174,7 @@ def judge(svc: dict, values: dict, probe: bool = True) -> dict:
         return result
     result["status"] = "UNREACHABLE"
     result["detail"] = f"TCP {host}:{port} 不可达"
-    result["next"] = svc["cmd_source"] if svc["start_cmd"] is None else f"启动 {svc['module']}（{svc['cmd_source']}）"
+    result["next"] = f"启动 {svc['module']}（{svc['cmd_source']}）"
     return result
 
 

@@ -24,9 +24,9 @@ class SchoolReportTreeTest {
         node("pubChild", "pub", "公共基础课", 54, 54, 0)), List.of()));
 
     SchoolReport.Category c = report.category("公共基础课").orElseThrow();
-    assertEquals(98.0, c.required());
-    assertEquals(97.0, c.earned());
-    assertEquals(1.0, c.remaining());
+    assertEquals(new BigDecimal("98"), c.required());
+    assertEquals(new BigDecimal("97"), c.earned());
+    assertEquals(new BigDecimal("1"), c.remaining());
   }
 
   @Test

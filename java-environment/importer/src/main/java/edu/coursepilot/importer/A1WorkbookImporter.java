@@ -276,7 +276,9 @@ public final class A1WorkbookImporter {
         if (isPlaceholder(memberCode)) {
           // 占位编号（如 008532xx）：工作簿说明编号待确认，这里保留每门课，只记录待确认。
           issues.add(new ImportIssue(COURSE_CODE_PENDING, track, r + 1, 3));
-          if (!placeholderKeys.add(memberCode + "\n" + name + "\n" + term)) {
+          // Persisted membership identity is (snapshot, courseCode, name); term is metadata.
+          // Reject repeated identities even when the workbook gives them different terms.
+          if (!placeholderKeys.add(memberCode + "\n" + name)) {
             issues.add(new ImportIssue(DUPLICATE_COURSE, track, r + 1, 3));
           }
         } else {

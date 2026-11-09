@@ -89,7 +89,7 @@ describe("buildTimetable 未排进课表的原因", () => {
       expect(compactWeeksText([])).toBe("");
     });
 
-    it("only keeps meetings whose weeks overlap the chosen half, and keeps details whole", () => {
+    it("only keeps meetings whose weeks overlap the chosen half, and keeps the placement count", () => {
       const first: Meeting = {
         dayOfWeek: 1,
         sectionStart: 1,
@@ -126,11 +126,25 @@ describe("buildTimetable 未排进课表的原因", () => {
       expect(front.cells.has("1-1")).toBe(true);
       expect(front.cells.has("2-3")).toBe(false);
       expect(front.gaps).toEqual([]);
-      expect(front.placed[0].weeksText).toBe("第1–16周");
+      expect(front.placedCount).toBe(1);
 
       const back = buildTimetable(sources, {}, { weekView: "LAST_8" });
       expect(back.cells.has("1-1")).toBe(false);
       expect(back.cells.get("2-3")?.[0].weeks).toEqual(last.weeks);
+
+      const second = {
+        ...sources[0],
+        courseCode: "CS103",
+        classId: "CS103-01",
+        offering: { ...offering, meetings: [{ ...first, weeks: last.weeks }] },
+      };
+      const disjoint = buildTimetable([...sources, second]);
+      expect(disjoint.cells.get("1-1")).toHaveLength(2);
+      expect(disjoint.overlapCells.has("1-1")).toBe(false);
+      second.offering.meetings = [first];
+      expect(buildTimetable([...sources, second]).overlapCells.has("1-1")).toBe(
+        true,
+      );
     });
   });
 });

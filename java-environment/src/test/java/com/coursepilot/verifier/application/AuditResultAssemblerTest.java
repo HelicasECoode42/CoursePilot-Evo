@@ -76,6 +76,24 @@ class AuditResultAssemblerTest {
   }
 
   @Test
+  @DisplayName("学分按十进制累计：0.10 + 0.70 + 0.10 满足 0.90")
+  void decimalCreditsDoNotCreateBinaryFloatingPointGap() {
+    requirementRepo.save(new Requirement(PLAN, "通识", 0.90));
+    course("D1", "通识甲", 0.10, "通识");
+    course("D2", "通识乙", 0.70, "通识");
+    course("D3", "通识丙", 0.10, "通识");
+    transcript(true,
+        row("D1", 0.10, TranscriptCourse.Outcome.PASSED, 1),
+        row("D2", 0.70, TranscriptCourse.Outcome.PASSED, 1),
+        row("D3", 0.10, TranscriptCourse.Outcome.PASSED, 1));
+
+    AuditDtos.AuditItem item = onlyItem(assembler.assemble(PLAN, STUDENT));
+    assertEquals(AuditDtos.State.SATISFIED, item.state());
+    assertEquals(0.90, item.earnedCredits());
+    assertEquals(0.0, item.gapCredits());
+  }
+
+  @Test
   @DisplayName("学分不够：UNSATISFIED，缺口是差额")
   void unsatisfied() {
     requirementRepo.save(new Requirement(PLAN, "专选", 24.0));

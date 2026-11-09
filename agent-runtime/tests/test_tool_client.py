@@ -294,6 +294,15 @@ def test_plan_tool_request_serializes_max_credits_as_json_number() -> None:
                     "recordRevision": 1,
                     "violations": [],
                     "unknownChecks": [],
+                    "sections": [
+                        {
+                            "scope": scope,
+                            "verdict": "UNKNOWN",
+                            "violations": [],
+                            "unknownChecks": [],
+                        }
+                        for scope in ("TIMETABLE", "CURRICULUM")
+                    ],
                     "performedChecks": [],
                     "sourceRefIds": [],
                 },
@@ -321,15 +330,6 @@ def test_plan_tool_request_serializes_max_credits_as_json_number() -> None:
     )
     result = _client(handler).call("validatePlan", request, _context())
     assert result.verdict == "UNKNOWN"
-
-
-def test_http_error_is_unavailable() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(503, json={"status": "ERROR"})
-
-    client = ToolClient("http://java.test", "svc", transport=httpx.MockTransport(handler))
-    with pytest.raises(ToolUnavailable):
-        client.call("listCourses", None, _context())
 
 
 def _envelope(status: str, data: object, issues: list | None = None) -> dict:

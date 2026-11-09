@@ -17,7 +17,7 @@ public interface CurriculumCourseRepository extends JpaRepository<CurriculumCour
           and (:query is null
             or lower(cc.course.courseCode) like lower(concat('%', :query, '%'))
             or lower(cc.name) like lower(concat('%', :query, '%')))
-        order by cc.course.courseCode
+        order by cc.course.courseCode, cc.name, cc.id
         """,
         countQuery = """
         select count(cc) from CurriculumCourse cc

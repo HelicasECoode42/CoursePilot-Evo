@@ -445,6 +445,61 @@ describe("按年级生成的空结果", () => {
   });
 });
 
+describe("学业资料 · 获得学分", () => {
+  it("非通过状态禁用获得学分输入，切换为非通过时清空已有学分", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = usePlanningStore();
+    store.$patch({
+      sessionStatus: "ready",
+      sessionId: "session-test",
+      selectedCurriculumId: "curr-test",
+      selectedRecordId: "rec-test",
+      recordsStatus: "ready",
+      records: [
+        {
+          academicRecordId: "rec-test",
+          revision: 1,
+          curriculumSnapshotId: "curr-test",
+          completedCourses: [
+            {
+              courseCode: "CS101",
+              earnedCredits: 3,
+              outcome: "PASSED",
+              completedTerm: null,
+            },
+          ],
+          transcriptComplete: false,
+          sourceKind: "USER_IMPORT",
+          createdAt: "2026-10-30T00:00:00Z",
+        },
+      ],
+    });
+    vi.spyOn(store, "loadRecords").mockResolvedValue();
+    vi.spyOn(store, "loadSchoolProgress").mockResolvedValue();
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/records", component: RecordsView }],
+    });
+    await router.push("/records");
+    await router.isReady();
+    const wrapper = mount(RecordsView, {
+      global: { plugins: [pinia, router] },
+    });
+    await flushPromises();
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "修改已填写课程")!
+      .trigger("click");
+    const outcome = wrapper.get<HTMLSelectElement>("#outcome-0");
+    const credits = wrapper.get<HTMLInputElement>("#credits-0");
+    expect(credits.element.disabled).toBe(false);
+    await outcome.setValue("FAILED");
+    expect(credits.element.disabled).toBe(true);
+    expect(credits.element.value).toBe("");
+  });
+});
+
 describe("学业资料 · 学校报告后的课程名与核对摘要", () => {
   it("记录和核对摘要用学校导入的课程名，并能一键去勾选「记录已完整」", async () => {
     const pinia = createPinia();

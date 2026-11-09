@@ -104,6 +104,20 @@ class SchoolReportAuditTest {
   }
 
   @Test
+  @DisplayName("培养方案不匹配的学校报告不参与核对")
+  void schoolReportFromDifferentCurriculumIsIgnored() {
+    requirementRepo.save(new Requirement(PLAN, "体育", 6.0));
+    saveSchool(STUDENT, "[" + NODE_PE + "]", course("PE10", "pe", "PASSED", 2), "plan-other");
+    transcript(false, row("PE1", 2.0, TranscriptCourse.Outcome.PASSED, 1));
+
+    AuditDtos.AuditResult result = assembler.assemble(PLAN, STUDENT);
+    AuditDtos.AuditItem item = onlyItem(result);
+    assertEquals(AuditDtos.Source.LOCAL, item.source());
+    assertEquals(AuditDtos.State.UNKNOWN, item.state());
+    assertFalse(result.transcriptComplete());
+  }
+
+  @Test
   @DisplayName("课程不在课程库，但学校报告给出类别：按学校类别归类，本地类别也能满足")
   void courseOutsideCatalogIsClassifiedBySchoolLink() {
     requirementRepo.save(new Requirement(PLAN, "实践", 2.0));
@@ -136,6 +150,24 @@ class SchoolReportAuditTest {
     AuditDtos.AuditItem item = onlyItem(result);
     assertEquals(AuditDtos.State.UNSATISFIED, item.state(), "完整后未满足即为确定缺口");
     assertEquals(7.0, item.gapCredits());
+  }
+
+  @Test
+  @DisplayName("学校类别缺少任一学分字段时不视为读全")
+  void missingEarnedCreditsPreventCompleteness() {
+    requirementRepo.save(new Requirement(PLAN, "体育", 6.0));
+    String node = "{\"nodeId\":\"pe\",\"parentId\":null,\"schoolNodeId\":\"1\",\"leaf\":true,"
+        + "\"name\":\"体育\",\"requiredCredits\":6,\"earnedCredits\":null,\"remainingCredits\":4}";
+    saveSchool(STUDENT, "[" + node + "]", course("PE11", "pe", "PASSED", 2));
+    transcript(false, row("PE11", 2.0, TranscriptCourse.Outcome.PASSED, 1));
+
+    AuditDtos.AuditResult result = assembler.assemble(PLAN, STUDENT);
+    assertFalse(result.transcriptComplete());
+    assertNull(result.transcriptCompleteSource());
+    AuditDtos.AuditItem item = onlyItem(result);
+    assertEquals(AuditDtos.Source.LOCAL, item.source());
+    assertEquals(AuditDtos.State.UNKNOWN, item.state());
+    assertNull(item.gapCredits());
   }
 
   @Test
@@ -174,11 +206,16 @@ class SchoolReportAuditTest {
   }
 
   private void saveSchool(String subject, String nodesJson, String coursesJson) {
+    saveSchool(subject, nodesJson, coursesJson, PLAN);
+  }
+
+  private void saveSchool(String subject, String nodesJson, String coursesJson, String reportCurriculumId) {
     String snapshotJson = "{\"format\":\"coursepilot-shu-academic-progress\",\"version\":1,"
         + "\"capturedAt\":\"2026-10-29T00:00:00Z\",\"source\":\"synthetic fixture\","
         + "\"nodes\":" + nodesJson + ",\"courses\":[" + coursesJson + "]}";
     schoolSnapshots.save(new SchoolProgressSnapshot(UUID.randomUUID().toString(), subject,
-        UUID.randomUUID().toString().replace("-", ""), Instant.now(), snapshotJson, "{}"));
+        UUID.randomUUID().toString().replace("-", ""), Instant.now(), snapshotJson,
+        "{\"curriculumSnapshotId\":\"" + reportCurriculumId + "\"}"));
   }
 
   private static String course(String code, String nodeId, String outcome, int credits) {

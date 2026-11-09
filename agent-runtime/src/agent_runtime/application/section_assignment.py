@@ -122,8 +122,6 @@ def _blocked_reason(parsed: Sequence[CourseOffering], blocks: Sequence[SlotBlock
             continue
         if any(block.hits(meeting) for offering in parsed for meeting in offering.meetings):
             hit.append(block)
-    if not hit:
-        return REASON_BLOCKED
     return f"{REASON_BLOCKED}：" + "、".join(describe_block(block) for block in hit)
 
 
@@ -149,7 +147,6 @@ class CourseNeed:
 
 @dataclass(frozen=True)
 class CourseOptions:
-    course_code: str
     options: tuple[SectionOption, ...]
     reason: str | None  # set when there are no options; None when options exist
 
@@ -189,17 +186,17 @@ def course_options(
     """Eligible sections for one course, best first. Empty options carry the reason."""
     own = [offering for offering in offerings if offering.courseCode == need.course_code]
     if not own:
-        return CourseOptions(need.course_code, (), REASON_NO_OFFERING)
+        return CourseOptions((), REASON_NO_OFFERING)
 
     wanted = need.must_teacher_key or need.item_teacher_key
     if wanted is not None:
         own = [offering for offering in own if offering.teacherKey == wanted]
         if not own:
-            return CourseOptions(need.course_code, (), REASON_TEACHER_NO_OFFERING)
+            return CourseOptions((), REASON_TEACHER_NO_OFFERING)
 
     parsed = [offering for offering in own if offering.parseStatus == "PARSED"]
     if not parsed:
-        return CourseOptions(need.course_code, (), REASON_UNPARSED)
+        return CourseOptions((), REASON_UNPARSED)
 
     free = [
         offering
@@ -207,7 +204,7 @@ def course_options(
         if not any(block.hits(meeting) for meeting in offering.meetings for block in blocks)
     ]
     if not free:
-        return CourseOptions(need.course_code, (), _blocked_reason(parsed, blocks))
+        return CourseOptions((), _blocked_reason(parsed, blocks))
 
     seen: set[str] = set()
     options: list[SectionOption] = []
@@ -236,7 +233,7 @@ def course_options(
         return (not_preferred, option.soft_hits, -option.review_count, option.class_id)
 
     options.sort(key=order)
-    return CourseOptions(need.course_code, tuple(options), None)
+    return CourseOptions(tuple(options), None)
 
 
 def conflict_names(

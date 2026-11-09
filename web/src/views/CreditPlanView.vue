@@ -320,7 +320,7 @@ function offeredOnly(plan: CategoryCreditPlan): CategoryCreditPlan {
   return {
     ...plan,
     countable: plan.countable.filter(
-      (course) => availabilityOf(course.courseCode)?.state !== "NOT_OFFERED",
+      (course) => availabilityOf(course.courseCode)?.state === "OFFERED",
     ),
   };
 }
@@ -1281,13 +1281,6 @@ const suggestionCourseLimit = MAX_SUGGESTION_COURSES;
   display: block;
   font-size: 0.75rem;
   font-weight: 400;
-}
-
-.credits-ledger {
-  font-weight: 600;
-  color: #164f55;
-  margin: 0.25rem 0 0.5rem;
-  overflow-wrap: anywhere;
 }
 
 .credits-block {

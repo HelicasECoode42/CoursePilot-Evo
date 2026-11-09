@@ -94,10 +94,14 @@ describe("buildSavedPlan", () => {
   });
 
   it("copies meetings so later edits to the input do not change the saved copy", () => {
-    const saved = plan("saved-copy");
-    INPUT.courses[0].meetings[0].weeks.push(99);
+    const input = structuredClone(INPUT);
+    const saved = buildSavedPlan(
+      input,
+      "saved-copy",
+      new Date("2026-11-03T08:00:00Z"),
+    );
+    input.courses[0].meetings[0].weeks.push(99);
     expect(saved.courses[0].meetings[0].weeks).toEqual([1, 2]);
-    INPUT.courses[0].meetings[0].weeks.pop();
   });
 });
 

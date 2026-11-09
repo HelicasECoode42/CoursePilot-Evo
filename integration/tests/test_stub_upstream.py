@@ -118,7 +118,7 @@ def test_records_file_hashes_each_exchange(stub, tmp_path):
 
 
 def test_snapshot_and_planning_answer_pass_the_domain_schema(stub):
-    jsonschema = pytest.importorskip("jsonschema")
+    pytest.importorskip("jsonschema")
     from check_stub import schema_validator
 
     url, _state = stub
@@ -130,7 +130,6 @@ def test_snapshot_and_planning_answer_pass_the_domain_schema(stub):
     assert validate_snapshot(items[0]) == []
     answer = TRANSPORT.request("POST", url + "/api/v1/planning", auth(url), {"schemaVersion": "1.0"}).payload["data"]
     assert validate_answer(answer) == []
-    assert jsonschema.__name__ == "jsonschema"
 
 
 def test_cors_headers_are_echoed_for_local_origins(stub):

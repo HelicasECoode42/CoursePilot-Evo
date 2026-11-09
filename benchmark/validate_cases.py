@@ -134,8 +134,6 @@ def validate_collection(cases_root: Path, gold_root: Path):
     v_ref = source_ref_validator()
     results, errors, warnings = [], [], []
     for path in sorted(cases_root.glob("*.json")):
-        if path.name == "README.md":
-            continue
         cid, raw, gold, errs, warns = validate_one(path, gold_root, v_prompt, v_gold, v_ref)
         results.append(
             {

@@ -49,55 +49,6 @@ export function sectionTone(
   return "pending";
 }
 
-export interface SectionLine {
-  key: string;
-  kind: "violation" | "unknown";
-  text: string;
-}
-
-/**
- * 分项里要列出的每一行。violations 原样给 Java 文案；
- * unknownChecks 经 explain 翻译（调用方传入 unknown-explain 的包装，带课程名与快照上下文）。
- */
-export function sectionLines(
-  section: PlanSection,
-  explain: (issue: Issue) => string,
-): SectionLine[] {
-  // 同一条未知项（代码与显示文字都相同）只列一次：Java 可能对同一约束给出多条相同判决。
-  const seen = new Set<string>();
-  const once = (code: string, text: string): boolean => {
-    const fingerprint = `${code}\u0000${text}`;
-    if (seen.has(fingerprint)) return false;
-    seen.add(fingerprint);
-    return true;
-  };
-  const violations: SectionLine[] = section.violations.flatMap(
-    (issue, index) =>
-      once(issue.code, issue.message)
-        ? [
-            {
-              key: `v${index}:${issue.code}`,
-              kind: "violation",
-              text: issue.message,
-            },
-          ]
-        : [],
-  );
-  const unknowns: SectionLine[] = section.unknownChecks.flatMap(
-    (issue, index) => {
-      // 未建模规则只说条数，不列原表位置（位置是给工程核对用的）。
-      const text =
-        issue.code === UNMODELED_RULES_CODE
-          ? unmodeledRuleLine(issue)
-          : explain(issue);
-      return once(issue.code, text)
-        ? [{ key: `u${index}:${issue.code}`, kind: "unknown", text }]
-        : [];
-    },
-  );
-  return [...violations, ...unknowns];
-}
-
 /** 未建模规则的条数：取自 Java 文案「有 N 条规则」，取不到按 1 条算。 */
 export function unmodeledRuleCount(issue: Issue): number {
   const match = issue.message.match(/有 (\d+) 条规则/);

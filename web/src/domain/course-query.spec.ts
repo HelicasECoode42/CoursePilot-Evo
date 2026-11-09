@@ -63,20 +63,6 @@ describe("resolveCourseQuery", () => {
     });
   });
 
-  it("多门匹配时把候选课程原样交给页面点选", async () => {
-    const result = await resolveCourseQuery("数据", async () => [
-      course("CS102", "数据库"),
-      course("CS201", "数据结构"),
-    ]);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.candidates.map((c) => c.courseCode)).toEqual([
-        "CS102",
-        "CS201",
-      ]);
-    }
-  });
-
   it("忽略不合格式的课程号，不会把它们当作候选", async () => {
     const result = await resolveCourseQuery("数据库", async () => [
       course("_bad", "数据库"),

@@ -100,7 +100,7 @@ def test_shared_model_transport_caps_generate_and_chat_at_30_seconds() -> None:
         transport=httpx.MockTransport(handler),
     )
     context = replace(_context(), deadline=datetime.now(UTC) + timedelta(seconds=90))
-    adapter.generate(context=context, messages=[], tool_schemas=[])
+    adapter.generate(context=context, messages=[])
     adapter.generate_chat(context=context, messages=[])
 
     assert observed_timeouts == [30.0, 30.0]
@@ -207,7 +207,7 @@ def test_http_model_parses_json_items() -> None:
         2000,
         transport=httpx.MockTransport(handler),
     )
-    reply = adapter.generate(context=_context(), messages=[structured_intent], tool_schemas=[])
+    reply = adapter.generate(context=_context(), messages=[structured_intent])
     assert reply.items is not None
     assert reply.items[0].courseCode == "CS101"
     assert reply.input_tokens == 21
@@ -242,7 +242,7 @@ def test_http_model_extracts_json_from_fenced_text() -> None:
         2000,
         transport=httpx.MockTransport(handler),
     )
-    reply = adapter.generate(context=_context(), messages=[], tool_schemas=[])
+    reply = adapter.generate(context=_context(), messages=[])
     assert reply.items is not None
     assert reply.items[0].courseCode == "MATH201"
 
@@ -264,7 +264,7 @@ def test_http_model_schema_invalid_item_is_invalid_output() -> None:
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(ModelInvalidOutput, match="不符合契约：缺少必填字段"):
-        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+        adapter.generate(context=_context(), messages=[])
 
 
 def test_http_model_timeout_is_not_invalid_output() -> None:
@@ -281,7 +281,7 @@ def test_http_model_timeout_is_not_invalid_output() -> None:
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(ModelTimeout):
-        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+        adapter.generate(context=_context(), messages=[])
 
 
 def test_http_model_empty_items_is_not_invalid_output() -> None:
@@ -300,7 +300,7 @@ def test_http_model_empty_items_is_not_invalid_output() -> None:
         2000,
         transport=httpx.MockTransport(handler),
     )
-    reply = adapter.generate(context=_context(), messages=[], tool_schemas=[])
+    reply = adapter.generate(context=_context(), messages=[])
     assert reply.items == []
     assert reply.clarify is None
 
@@ -319,7 +319,7 @@ def test_http_model_rate_limit_is_not_invalid_output() -> None:
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(ModelUpstreamError) as caught:
-        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+        adapter.generate(context=_context(), messages=[])
     assert caught.value.status_code == 429
 
 
@@ -337,7 +337,7 @@ def test_http_model_server_error_is_not_invalid_output() -> None:
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(ModelUpstreamError) as caught:
-        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+        adapter.generate(context=_context(), messages=[])
     assert caught.value.status_code == 503
 
 
@@ -365,7 +365,7 @@ def test_http_model_invalid_json_logs_only_finish_reason_and_usage(
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(ModelInvalidOutput) as caught:
-        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+        adapter.generate(context=_context(), messages=[])
 
     assert caught.value.input_tokens == 78
     assert caught.value.output_tokens == 1000
@@ -433,7 +433,7 @@ def test_http_model_missing_content_records_only_safe_response_metadata(
         transport=httpx.MockTransport(handler),
     )
     with pytest.raises(ModelInvalidOutput) as caught:
-        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+        adapter.generate(context=_context(), messages=[])
 
     diagnostic = caught.value.diagnostics
     assert diagnostic["shape"] == shape
@@ -477,7 +477,7 @@ def test_http_model_sends_max_tokens_so_the_provider_truncates() -> None:
         777,
         transport=httpx.MockTransport(handler),
     )
-    adapter.generate(context=_context(), messages=[], tool_schemas=[])
+    adapter.generate(context=_context(), messages=[])
     assert seen["max_tokens"] == 777, "请求体必须带 max_tokens，否则供应商侧不截断"
 
 
@@ -505,7 +505,7 @@ def test_system_prompt_spells_out_the_choice_object_shape() -> None:
         2000,
         transport=httpx.MockTransport(handler),
     )
-    adapter.generate(context=_context(), messages=[], tool_schemas=[])
+    adapter.generate(context=_context(), messages=[])
     system_prompt = seen["messages"][0]["content"]  # type: ignore[index]
     assert '"value"' in system_prompt and '"label"' in system_prompt
     assert "不能是字符串" in system_prompt
@@ -549,7 +549,7 @@ def test_truncated_json_is_not_reported_as_invalid_output() -> None:
         }
     )
     with pytest.raises(ModelOutputTruncated) as caught:
-        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+        adapter.generate(context=_context(), messages=[])
     message = str(caught.value)
     assert "输出预算截断" in message
     # 要给出那个要改的数，不然看了也不知道改哪里。
@@ -567,7 +567,7 @@ def test_truncated_empty_content_is_also_truncation_not_missing_content() -> Non
         }
     )
     with pytest.raises(ModelOutputTruncated):
-        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+        adapter.generate(context=_context(), messages=[])
 
 
 def test_unparseable_json_without_length_stays_invalid_output() -> None:
@@ -579,5 +579,5 @@ def test_unparseable_json_without_length_stays_invalid_output() -> None:
         }
     )
     with pytest.raises(ModelInvalidOutput) as caught:
-        adapter.generate(context=_context(), messages=[], tool_schemas=[])
+        adapter.generate(context=_context(), messages=[])
     assert not isinstance(caught.value, ModelOutputTruncated)

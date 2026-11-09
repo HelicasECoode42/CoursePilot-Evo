@@ -912,7 +912,11 @@ async function goToCredits() {
               </div>
               <div class="course-field">
                 <label class="field-label" :for="`credits-${index}`"
-                  >获得学分（自动填入，可修改）</label
+                  >获得学分（{{
+                    course.outcome === "PASSED"
+                      ? "自动填入，可修改"
+                      : "仅已通过课程填写"
+                  }}）</label
                 >
                 <input
                   :id="`credits-${index}`"
@@ -922,6 +926,7 @@ async function goToCredits() {
                   maxlength="6"
                   placeholder="留空表示未知"
                   :value="course.earnedCredits ?? ''"
+                  :disabled="course.outcome !== 'PASSED'"
                   @input="
                     updateCourse(index, {
                       earnedCredits: parseCredits(

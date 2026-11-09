@@ -48,5 +48,6 @@ def test_harness_loader_ignores_non_whitelisted_files(tmp_path: Path) -> None:
     (tmp_path / "AGENTS.md").write_text("v1", encoding="utf-8")
     (tmp_path / "secret.txt").write_text("not part of the harness", encoding="utf-8")
     loader = HarnessLoader(tmp_path)
-    snapshot = loader.load()
-    assert snapshot.version.startswith("harness:")
+    version = loader.load().version
+    (tmp_path / "secret.txt").write_text("changed outside the whitelist", encoding="utf-8")
+    assert loader.load().version == version

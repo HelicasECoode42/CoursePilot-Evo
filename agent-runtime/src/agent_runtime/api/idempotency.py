@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Lock
@@ -29,6 +30,18 @@ class _Entry:
     failure: Exception | None = None
 
 
+def _detached_failure(failure: Exception) -> Exception:
+    try:
+        return copy.copy(failure)
+    except TypeError:
+        # ToolRejected and ModelUpstreamError require constructor arguments
+        # that are represented as attributes instead of exception args.
+        failure_type = type(failure)
+        detached = failure_type.__new__(failure_type, *failure.args)
+        detached.__dict__.update(failure.__dict__)
+        return detached
+
+
 class IdempotencyStore:
     """Key = (session, endpoint, key), matching docs/04 section 3.
 
@@ -52,7 +65,9 @@ class IdempotencyStore:
             if entry.in_progress:
                 raise RequestInProgress
             if entry.failure is not None:
-                raise entry.failure
+                # Re-raise a detached copy. Keeping and repeatedly raising the
+                # original exception retains request traceback frames in memory.
+                raise _detached_failure(entry.failure)
             return entry.payload
 
     def complete(
@@ -81,7 +96,10 @@ class IdempotencyStore:
         slot = (session_id, endpoint, key)
         with self._lock:
             self._entries[slot] = _Entry(
-                digest=body_digest, payload=None, in_progress=False, failure=failure
+                digest=body_digest,
+                payload=None,
+                in_progress=False,
+                failure=_detached_failure(failure),
             )
 
     def run(

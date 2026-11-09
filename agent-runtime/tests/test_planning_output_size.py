@@ -126,8 +126,8 @@ class _LongReplyModel:
     def __init__(self) -> None:
         self.messages: list[dict[str, str]] = []
 
-    def generate(self, *, context, messages, tool_schemas):
-        del context, tool_schemas
+    def generate(self, *, context, messages):
+        del context
         self.messages = messages
         return ModelReply(
             items=[PlanItem(courseCode=code, teacherKey=None, classId=None) for code in MANY_CODES],
@@ -225,7 +225,7 @@ def test_truncated_reply_over_http_is_reported_as_truncation() -> None:
         harness_version="harness:v0",
     )
     with pytest.raises(ModelOutputTruncated) as caught:
-        adapter.generate(context=context, messages=[], tool_schemas=[])
+        adapter.generate(context=context, messages=[])
     assert caught.value.output_tokens == 4000
 
 

@@ -147,7 +147,7 @@ public class PlanValidationService {
                 "curriculumSnapshotId");
         }
         checkClassAssignments(items, offerings, f);
-        checkTime(items, classIds, analysis, timeVerified, f);
+        checkTime(classIds, analysis, timeVerified, f);
         for (int i = 0; i < req.hardConstraints().size(); i++) {
             Constraint c = req.hardConstraints().get(i);
             switch (c.kind()) {
@@ -242,7 +242,7 @@ public class PlanValidationService {
      * 时间冲突。SIMULATION 下用 ConflictChecker 的明细判断，把相撞的两门课点名；
      * 其他范围下没有已验证班次，冲突未核验，记入 unknownChecks。
      */
-    private void checkTime(List<PlanItem> items, List<String> classIds,
+    private void checkTime(List<String> classIds,
                            ConflictChecker.Analysis analysis, boolean timeVerified, Findings f) {
         if (!timeVerified) {
             f.unknown(Section.TIMETABLE, "TIMETABLE_UNVERIFIED",

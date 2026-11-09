@@ -175,6 +175,8 @@ function setStrength(option: TeacherCourseOption, mode: TeacherMode) {
     savePicks(picks.value.filter((pick) => !samePair(pick)));
     return;
   }
+  // 历史资料或所选快照里没有班次的选项不能新增，但已选中的仍可在上面取消。
+  if (!canPick(option)) return;
   store.setTeacherPickDisplayName(
     option.courseCode,
     option.teacherKey,
@@ -204,8 +206,40 @@ function failureMessage(error: unknown): string {
 }
 
 function classCountText(option: TeacherCourseOption): string {
-  const count = option.sectionCount ?? option.classIds.length;
-  return count > 0 ? `${count} 个班次` : "暂无班次资料";
+  const count = currentSectionCount(option);
+  if (count > 0) return `${count} 个班次`;
+  return option.factSource === "OFFERING_SNAPSHOT"
+    ? "该快照里没有班次"
+    : "仅有历史资料";
+}
+
+/**
+ * 该教师选项是否落在「当前所选开课快照」里、且确实有班次。
+ *
+ * 教师能搜到（来自历史评价/绑定）不代表这门课现在可选：只有来自开课快照
+ * （OFFERING_SNAPSHOT）、快照就是当前选中的那份、且班次数 > 0，才允许设为
+ * 「必须保留 / 优先考虑」。否则选出来的 MUST 在规划里无法保留，会让整份规划失败。
+ */
+function currentSectionCount(option: TeacherCourseOption): number {
+  if (option.factSource !== "OFFERING_SNAPSHOT") return 0;
+  const snapshotId = option.offeringSnapshotId ?? null;
+  if (snapshotId === null) return 0;
+  const selected = store.selectedOfferingSnapshot?.snapshotId ?? null;
+  if (selected !== null && snapshotId !== selected) return 0;
+  return option.sectionCount ?? option.classIds.length;
+}
+
+/** 能不能把这个「课程+教师」用于教师偏好。 */
+function canPick(option: TeacherCourseOption): boolean {
+  return currentSectionCount(option) > 0;
+}
+
+/** 不能选时给学生看的原因：区分「历史资料」与「所选快照没班次」。 */
+function unpickableReason(option: TeacherCourseOption): string {
+  if (option.factSource !== "OFFERING_SNAPSHOT") {
+    return "仅有历史资料，所选开课表里没有这位教师的班次，不能设为必须保留或优先考虑。";
+  }
+  return "所选开课快照里没有这位教师的班次，不能设为必须保留或优先考虑。";
 }
 
 /**
@@ -696,6 +730,9 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                 {{ availabilityText(option) }} ·
                 {{ classCountText(option) }}
               </small>
+              <small v-if="!canPick(option)" class="microcopy">
+                {{ unpickableReason(option) }}
+              </small>
             </span>
 
             <span
@@ -707,6 +744,8 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                 type="button"
                 :aria-pressed="pickOf(option)?.mode === 'MUST'"
                 :aria-label="`${option.teacherDisplayName} ${MODE_LABEL.MUST}`"
+                :disabled="!canPick(option)"
+                :title="canPick(option) ? undefined : unpickableReason(option)"
                 @click="setStrength(option, 'MUST')"
               >
                 {{ MODE_LABEL.MUST }}
@@ -715,6 +754,8 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                 type="button"
                 :aria-pressed="pickOf(option)?.mode === 'PREFER'"
                 :aria-label="`${option.teacherDisplayName} ${MODE_LABEL.PREFER}`"
+                :disabled="!canPick(option)"
+                :title="canPick(option) ? undefined : unpickableReason(option)"
                 @click="setStrength(option, 'PREFER')"
               >
                 {{ MODE_LABEL.PREFER }}

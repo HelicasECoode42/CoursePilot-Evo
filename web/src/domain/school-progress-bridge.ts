@@ -16,7 +16,7 @@
 export type BridgeOutcome =
   | { kind: "ignored" }
   | { kind: "ready"; message: string }
-  | { kind: "saved"; message: string }
+  | { kind: "saved" }
   | { kind: "failed"; message: string };
 
 export type BridgeDeps = {
@@ -111,10 +111,7 @@ export function createSchoolProgressBridge(
           await deps.save((data as { payload?: unknown }).payload);
           deps.post({ type: "CP_IMPORT_ACCEPTED", requestId, ok: true });
           pending = "";
-          return {
-            kind: "saved",
-            message: "学校学业进度已保存，课程明细已更新到学业记录。",
-          };
+          return { kind: "saved" };
         } catch (error) {
           deps.post({ type: "CP_IMPORT_ACCEPTED", requestId, ok: false });
           return {

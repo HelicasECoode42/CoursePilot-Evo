@@ -205,6 +205,25 @@ class A1WorkbookImporterTest {
   }
 
   @Test
+  void placeholderIdentityIgnoresSuggestedTerm() throws Exception {
+    var draft =
+        new A1WorkbookImporter()
+            .prepare(
+                detailWorkbook(
+                    new String[][] {
+                      {"占位课程", "008532xx", "核心课程", "3", "第一学年", "课程明细"},
+                      {"占位课程", "008532xx", "核心课程", "3", "第二学年", "课程明细"}
+                    }),
+                "cs-general");
+
+    assertFalse(draft.publishable());
+    assertEquals(2, draft.entries().size());
+    assertTrue(
+        draft.blockingIssues().stream()
+            .anyMatch(issue -> issue.code() == ImportModels.IssueCode.DUPLICATE_COURSE));
+  }
+
+  @Test
   void rejectsNonXlsxInputBeforeReadingWorkbook() throws Exception {
     Path wrong = tempDir.resolve("curriculum.xls");
     Files.writeString(wrong, "not an xlsx");

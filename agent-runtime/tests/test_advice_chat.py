@@ -276,7 +276,22 @@ def test_explicit_record_id_does_not_reuse_mismatched_school_progress():
                                     "remainingCredits": 3,
                                 }
                             ],
-                            "courses": [],
+                            "courses": [
+                                {
+                                    "nodeId": "node:1",
+                                    "courseCode": "CS301",
+                                    "name": "人工智能",
+                                    "credits": 3,
+                                    "outcome": "PASSED",
+                                    "completedYear": None,
+                                    "completedTerm": None,
+                                    "grade": None,
+                                    "makeup": None,
+                                    "retake": None,
+                                    "suggestedYear": None,
+                                    "suggestedTerm": None,
+                                }
+                            ],
                         },
                         "academicRecord": {
                             "academicRecordId": "record:school",
@@ -290,10 +305,10 @@ def test_explicit_record_id_does_not_reuse_mismatched_school_progress():
                     }
                 )
             if tool == "getAcademicRecord":
-                assert params["recordId"] == "record:selected"
+                assert params["recordId"] == "record:school"
                 return AcademicRecord(
-                    academicRecordId="record:selected",
-                    revision=1,
+                    academicRecordId="record:school",
+                    revision=2,
                     curriculumSnapshotId="curr:1",
                     completedCourses=[],
                     transcriptComplete=False,
@@ -302,7 +317,7 @@ def test_explicit_record_id_does_not_reuse_mismatched_school_progress():
                 )
             return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
 
-    request = _request().model_copy(update={"academicRecordId": "record:selected"})
+    request = _request().model_copy(update={"academicRecordId": "record:school"})
     model = ChatModel()
     answer = AdviceChatService(tool_client=ProgressTools(), model_adapter=model).run(
         request, _context()
@@ -310,6 +325,9 @@ def test_explicit_record_id_does_not_reuse_mismatched_school_progress():
     assert answer.schoolProgress is None
     assert any(issue.code == "SCHOOL_PROGRESS_RECORD_MISMATCH" for issue in answer.unknowns)
     assert '"schoolProgress": null' in model.messages[0]["content"]
+    facts = _model_facts(model)
+    assert {item["courseCode"] for item in facts["availableCourses"]} >= {"CS301"}
+    assert facts["schoolReportGaps"] == [{"category": "专业选修", "remainingCredits": "3"}]
 
 
 def test_chat_http_idempotent_replay_does_not_call_model_twice():
@@ -557,6 +575,7 @@ def test_invalid_suggestions_are_dropped_and_valid_ones_kept():
             {"kind": "INTEREST", "label": "补充兴趣", "value": "机器人方向"},
             {"kind": "SELECT_COURSE", "label": "不存在", "value": "CS999"},
             {"kind": "PREFER_COURSE", "label": "加入偏好", "value": "CS301"},
+            {"kind": "SELECT_COURSE", "label": "未出现在课程卡片", "value": "CS302"},
         ],
     )
     answer = AdviceChatService(tool_client=tools, model_adapter=model).run(_request(), _context())

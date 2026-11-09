@@ -45,13 +45,21 @@ from web_checks import (
 START_HINT = "cd web && npm ci && npm run dev（127.0.0.1:5173）"
 
 
-def service_states(plan_only: bool) -> tuple[dict[str, str], dict[str, str]]:
+def service_states(args: argparse.Namespace) -> tuple[dict[str, str], dict[str, str]]:
     values, _sources, _file = resolve(None)
-    return values, {svc["name"]: judge(svc, values, probe=not plan_only)["status"] for svc in SERVICES}
+    if args.web_url is not None:
+        values["CP_WEB_BASE_URL"] = args.web_url
+    if args.api_url is not None:
+        values["CP_API_BASE_URL"] = args.api_url
+    problems = errors(validate(values))
+    if problems:
+        print(f"配置校验未通过（{len(problems)} 条 error）：{problems[0][1]} {problems[0][2]}")
+        return values, {}
+    return values, {svc["name"]: judge(svc, values, probe=not args.plan)["status"] for svc in SERVICES}
 
 
 def start_controlled_stub(
-    args: argparse.Namespace, values: dict, scenario: str = "planning_unknown"
+    args: argparse.Namespace, scenario: str = "planning_unknown"
 ) -> tuple[bool, str | None, object | None]:
     """--with-stub：在系统分配的独立端口启动受控假响应，避免占用真实 API 端口。"""
     if not args.with_stub or args.plan:
@@ -93,17 +101,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    values, states = service_states(args.plan)
-    problems = errors(validate(values))
-    if problems:
-        print(f"配置校验未通过（{len(problems)} 条 error）：{problems[0][1]} {problems[0][2]}")
+    values, states = service_states(args)
+    if not states:
         return 1
 
-    web_url = args.web_url or values["CP_WEB_BASE_URL"]
+    web_url = values["CP_WEB_BASE_URL"]
     api_reachable = states.get("api") == "READY"
-    stub_ready, stub_url, stub_server = start_controlled_stub(args, values)
+    stub_ready, stub_url, stub_server = start_controlled_stub(args)
     path_stub_ready, path_stub_url, path_stub_server = (
-        start_controlled_stub(args, values, "normal") if args.with_stub and not args.plan else (True, None, None)
+        start_controlled_stub(args, "normal") if args.with_stub and not args.plan else (True, None, None)
     )
     driver = pick_driver(args.driver, channel=args.browser_channel)
     available, why = driver.available()

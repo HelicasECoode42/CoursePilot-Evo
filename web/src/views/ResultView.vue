@@ -94,6 +94,8 @@ import { addCourseMessage } from "../domain/add-course";
 import { planningContextLine } from "../domain/planning-context";
 import CourseReviewBasis from "../components/CourseReviewBasis.vue";
 import ReviewSummary from "../components/ReviewSummary.vue";
+import AdviceChat from "../components/AdviceChat.vue";
+import type { CourseFact, CourseFactLookup } from "../domain/course-names";
 import { usePlanningStore } from "../stores/planning";
 
 const store = usePlanningStore();
@@ -459,6 +461,16 @@ const courseReviews = ref<
 >({});
 const courseNamesStatus = ref<"idle" | "loading" | "ready" | "error">("idle");
 let courseNamesVersion = 0;
+
+/** 给结果页的 AI 对话补课程名与学分；读不到就返回 null，组件只显示课程号。 */
+const lookupCourseFact: CourseFactLookup = (courseCode) => {
+  const name = courseNames.value[courseCode];
+  if (!name) return null;
+  return {
+    name,
+    credits: courseCredits.value[courseCode] ?? null,
+  } satisfies CourseFact;
+};
 const MAX_COURSE_PAGES = 20;
 
 async function loadCourseNames(curriculumSnapshotId: string) {
@@ -1508,6 +1520,10 @@ const demoNote = computed<string | null>(() => {
 async function goBackToQuestions() {
   await router.push("/plan/questions/ready");
 }
+
+async function regenerateWithAdoptedAdvice() {
+  await store.submitPlan();
+}
 </script>
 
 <template>
@@ -1533,7 +1549,11 @@ async function goBackToQuestions() {
     </p>
 
     <p v-else-if="!result" class="notice notice--warning" role="note">
-      还没有提交规划请求。回到上一页检查资料后再提交。
+      {{
+        store.adoptedAdviceSuggestions.length
+          ? "选课草稿已更新，请确认条件后重新生成方案。"
+          : "还没有提交规划请求。回到上一页检查资料后再提交。"
+      }}
     </p>
 
     <template v-else>
@@ -1641,9 +1661,57 @@ async function goBackToQuestions() {
         </p>
       </div>
 
+      <div
+        v-else-if="
+          result.decision === 'UNABLE_TO_VERIFY' && planEntries.length === 0
+        "
+        class="option-section"
+      >
+        <h2 class="sub-label">这次没有生成方案</h2>
+        <p class="microcopy">
+          下面的条件没能满足或无法确认，系统没有给出方案，也没有悄悄换掉你的条件。
+        </p>
+        <ul
+          v-if="result.unknowns.length"
+          class="summary-list"
+          aria-label="没能生成方案的原因"
+        >
+          <li
+            v-for="issue in result.unknowns"
+            :key="issue.code + issue.message"
+          >
+            {{ explainUnknown(issue) }}
+          </li>
+        </ul>
+        <p v-else class="microcopy">服务端没有返回具体原因。</p>
+        <p class="microcopy">
+          可以回到问卷放宽相应条件后重新生成：例如把「必须保留」改成「优先考虑」，或把要保留的课程也加入「已选课程」。
+        </p>
+        <details class="debug-id">
+          <summary>排查编号与详情</summary>
+          <ul v-if="result.unknowns.length">
+            <li
+              v-for="issue in result.unknowns"
+              :key="`detail-${issue.code}-${issue.message}`"
+            >
+              <strong>{{ issue.code }}</strong>
+              <span v-if="issue.field"> · 字段：{{ issue.field }}</span>
+              <p>{{ issue.message }}</p>
+            </li>
+          </ul>
+        </details>
+      </div>
+
       <div v-else-if="planEntries.length" class="result-plans">
         <div class="result-head">
           <p class="result-context">{{ planningContext }}</p>
+          <p
+            v-if="result.decision === 'UNABLE_TO_VERIFY'"
+            class="notice notice--warning"
+            role="note"
+          >
+            部分条件无法确认；下面只展示已经能给出课程建议的部分，不能当作整份方案通过。
+          </p>
           <div class="result-note" role="note">
             <p class="result-note__line">
               {{
@@ -2357,7 +2425,48 @@ async function goBackToQuestions() {
           </details>
         </section>
       </div>
+
+      <p v-else class="notice notice--warning" role="status">
+        这次没有可展示的方案。可以回到问卷检查条件后重新生成。
+      </p>
     </template>
+
+    <section
+      class="advice-panel no-print"
+      aria-labelledby="result-advice-title"
+    >
+      <h2 id="result-advice-title" class="sub-label">
+        想加课，但不知道加什么？
+      </h2>
+      <p class="microcopy">
+        可以问 AI
+        课程助手。它只从当前培养方案的课程里给建议，评价和缺口只作参考；确认采用的课程会进入待选草稿。
+      </p>
+      <AdviceChat :lookup-course="lookupCourseFact" />
+      <div
+        v-if="!result && store.adoptedAdviceSuggestions.length"
+        class="advice-panel__next"
+      >
+        <button
+          class="button button--primary"
+          type="button"
+          :disabled="store.submitStatus === 'submitting'"
+          @click="regenerateWithAdoptedAdvice"
+        >
+          {{
+            store.submitStatus === "submitting"
+              ? "正在重新生成…"
+              : "用更新后的草稿重新生成方案"
+          }}
+        </button>
+        <p v-if="store.handoffMissing.length" class="microcopy" role="status">
+          还需补充：{{ store.handoffMissing.join("、") }}。
+        </p>
+        <ul v-if="store.handoffHints.length" class="microcopy" role="status">
+          <li v-for="hint in store.handoffHints" :key="hint">{{ hint }}</li>
+        </ul>
+      </div>
+    </section>
 
     <SavedPlansPanel class="no-print" :revision="savedRevision" />
 
@@ -2401,6 +2510,18 @@ async function goBackToQuestions() {
 
 .result-plans {
   margin-top: 8px;
+}
+
+.advice-panel {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.advice-panel__next {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+  margin-top: 1rem;
 }
 
 .plan-block {

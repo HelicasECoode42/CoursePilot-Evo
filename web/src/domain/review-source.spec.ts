@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { reviewSourceLabel } from "./review-source";
 
 it("显示可读来源并保留准确页行", () => {
-  expect(reviewSourceLabel("faculty-pdf:p012:l005")).toBe(
+  expect(reviewSourceLabel("faculty-pdf:p012:l005-s01")).toBe(
     "计算机学院评价资料 · 第12页第5行",
   );
   expect(reviewSourceLabel("winter-pdf:2.4:p031-p032:l005-l013")).toBe(
