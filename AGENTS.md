@@ -1,12 +1,12 @@
 # CoursePilot-Evo：开发 Agent 规范
 
-当前除文档/接口契约、仓库检查工具和独立 HTML 示例外，Java 核验服务、Python 网关与 Vue 页面都已有可运行实现，但只有学业核对一条链路实测打通；各模块完成度见各自 TRD。先读 README、docs/15-team-baseline-and-batches.md、docs/16-engineering-and-debugging.md、contracts/README.md、docs/04-infrastructure-workflow.md，再读负责模块 TRD。代码与现状如实报告，不把计划/fixture 写成真实能力。
+当前除文档/接口契约、仓库检查工具和独立 HTML 示例外，Java 核验服务、Python 网关与 Vue 页面都已有可运行实现，但只有学业核对一条链路实测打通；各模块完成度见各自 TRD。先读 README、contracts/README.md、docs/03-trd.md，再读负责模块 TRD。代码与现状如实报告，不把计划/fixture 写成真实能力。
 
 ## 所有权和调用
 
 A 导入/来源/黄金输入；B Java 存储/Audit/唯一 TimeParser/Verifier；C Python 唯一生产/评测 Runner/API 网关；D 隔离题集/评分/演化；E Vue 页面/集成。Web只调Python，Python只通过 typed HTTP 取Java事实，Java不调LLM。不复制学分/时间规则，不另造评测Agent。
 
-公共字段以 contracts 为准，行为以04契约为准，接口变更同步Schema/fixture/提供者/消费者/TRD。原始教学计划与插件仅在本地data/raw，不推公开仓库；未知规则自动阻断，首个模板基线独立核对。
+公共字段以 contracts 为准，行为以 docs/03-trd.md 与模块 TRD 为准，接口变更同步Schema/fixture/提供者/消费者/TRD。原始教学计划与插件仅在本地data/raw，不推公开仓库；未知规则自动阻断，首个模板基线独立核对。
 
 ## 真实性与数据
 

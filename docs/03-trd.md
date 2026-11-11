@@ -1,16 +1,16 @@
 # 总体 TRD v1.0｜CoursePilot-Evo
 
-先读[团队业务总览](15-team-baseline-and-batches.md)中的业务流程和对象关系。本页维护技术结构、接口映射和时序；个人完整业务职责写在[模块 TRD](05-team-and-sub-trds.md)，排期只在[周交付安排](19-delivery-plan.md)。
+先读团队业务总览中的业务流程和对象关系。本页维护技术结构、接口映射和时序；个人完整业务职责写在[模块 TRD](05-team-and-sub-trds.md)，排期只在[周交付安排](19-delivery-plan.md)。
 
 | 项 | 基线 |
 | --- | --- |
 | 状态 | 可执行设计与接口契约；三端均有可运行实现，仅学业核对链路实测打通 |
-| 产品 | [PRD](02-prd.md)、[需求维度](14-student-choice-research-and-ux.md) |
+| 产品 | [PRD](02-prd.md)、需求维度 |
 | 技术 | Vue 3/Vite/Router；Python 3.11+/FastAPI/Pydantic；Java 21/Spring Boot/MySQL/Flyway |
 | 字段真源 | [OpenAPI/JSON Schema](../contracts/README.md) |
-| 行为真源 | [公共接口契约](04-infrastructure-workflow.md) |
-| 实现安排 | [开发大纲](15-team-baseline-and-batches.md)、[A–E 子 TRD](05-team-and-sub-trds.md) |
-| 代码与协作 | [工程规范](16-engineering-and-debugging.md)、[协作规范](12-github-collaboration.md) |
+| 行为真源 | 公共接口契约 |
+| 实现安排 | 开发大纲、[A–E 子 TRD](05-team-and-sub-trds.md) |
+| 代码与协作 | 工程规范、协作规范 |
 
 ## 1. 范围与所有权
 
