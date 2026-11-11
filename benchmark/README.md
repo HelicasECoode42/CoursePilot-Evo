@@ -51,7 +51,7 @@ CP_BENCHMARK_ENABLE_REAL_MODEL=true python benchmark/real_model_baseline.py \
 
 采集器把 smoke 输入绑定到 Java 演示种子主体 `S001` 与培养方案快照 `PLAN_CS_2025`（可用 `--subject-id`、`--curriculum-snapshot-id` 覆盖），不创建会话或学业记录。若目标服务没有对应的种子快照/记录，失败会保留在逐例记录中。报告保留运行清单、每例 `COMPLETED` / `FAILED`、运行耗时、决策类型、未知项代码、推荐数量及 provider 返回的 token 用量；不保存用户提示或回答文本。当前输入没有人工真值，`assessmentStatus` 固定为 `NOT_ASSESSED_NO_HUMAN_LABELS`，因此该报告只能说明模型调用接线、失败情况和延迟，不能计算正确率、宣称质量改善或用于晋级。Java/模型调用失败会保留为失败记录，进程返回非零。该入口不使用 evolution 或 held-out 题目和答案。
 
-G1 培养要求；G2 hard/soft 偏好；G3 规划/冲突/replan；G4 缺信息时澄清与拒绝编造。每组目标 5 evolution + 5 held-out，五周最低可缩至 3+3 并说明局限。真值由双人对照原数据人工标注；Evolver 不得读取答案/held-out/评分器。记录客观分数、平均输入/输出 Token、工具调用、耗时与版本 lineage。详见 `../docs/07-benchmark-protocol.md`。
+G1 培养要求；G2 hard/soft 偏好；G3 规划/冲突/replan；G4 缺信息时澄清与拒绝编造。每组目标 5 evolution + 5 held-out，五周最低可缩至 3+3 并说明局限。真值由双人对照原数据人工标注；Evolver 不得读取答案/held-out/评分器。记录客观分数、平均输入/输出 Token、工具调用、耗时与版本 lineage。详见上文约束。
 
 ## 数据快照（D1 登记）
 

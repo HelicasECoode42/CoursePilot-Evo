@@ -4,7 +4,7 @@ title: "[任务] "
 body:
   - type: markdown
     attributes:
-      value: "先阅读 docs/18-team-progress-guide.md。创建后加入 Project，填写周次、模块、优先级、Assignees 和计划复核人。草案不要当成已派发任务。"
+      value: "创建后加入 Project，填写周次、模块、优先级、Assignees 和计划复核人。草案不要当成已派发任务。"
   - type: textarea
     id: outcome
     attributes:

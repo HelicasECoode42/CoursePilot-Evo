@@ -1,6 +1,6 @@
 # E 模块：学生网页与老师报告（业务说明与 TRD）
 
-负责人：**HelicasECoode42**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前 E1 学生目标引导页面与 E2 学业资料／核对／规划结果已实现（E2 尚未整体接真实 Python/Java）；教师比较（E-F3）与老师报告（E-F6）仍未通过真实后端验收。结果页仅支持固定的 `tradeoff:teacher-vs-schedule` 澄清回填；通用模型澄清仍缺契约字段映射。E1 范围和限制见[实现说明](../../web/README.md)、[本次实施方案](../20-e1-and-disclosure-implementation.md)与[Web任务核对记录](../21-web-task-status.md)；排期见[本期任务](../19-delivery-plan.md)。
+负责人：**HelicasECoode42**。先读团队总览，再读本页业务功能，实施时查下半页接口与规则。当前 E1 学生目标引导页面与 E2 学业资料／核对／规划结果已实现（E2 尚未整体接真实 Python/Java）；教师比较（E-F3）与老师报告（E-F6）仍未通过真实后端验收。结果页仅支持固定的 `tradeoff:teacher-vs-schedule` 澄清回填；通用模型澄清仍缺契约字段映射。E1 范围和限制见[实现说明](../../web/README.md)、本次实施方案与Web任务核对记录；排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 
@@ -181,7 +181,7 @@ loading 期间禁重复执行按钮但允许阅读/返回；响应绑定 task/re
 
 ### 契约变更与完成标准
 
-字段以 [contracts](../../contracts/README.md) 为真源，行为以 [公共契约](../04-infrastructure-workflow.md) 为准。提交提供者/消费者 DTO、正反例和受影响测试；Schema 破坏性变更升版本，不能边跑 Benchmark 边改。调试和提交要求见 [工程规范](../16-engineering-and-debugging.md)。
+字段以 [contracts](../../contracts/README.md) 为真源，行为以 公共契约 为准。提交提供者/消费者 DTO、正反例和受影响测试；Schema 破坏性变更升版本，不能边跑 Benchmark 边改。调试和提交要求见 工程规范。
 
 任务完成至少包含：实现目录、输入/输出、正常和失败证据、限制；fixture 不算真实接入，HTML 不算生产前端，手工改 Prompt 不算 RSI。每次 PR 使用仓库模板自查，接口 PR 由相邻模块复核。
 

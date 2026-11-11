@@ -1,6 +1,6 @@
 # 发给队友的 HTML 交接规范
 
-请把本文件与 [coursepilot-guided-demo.html](coursepilot-guided-demo.html) 一起发给队友。HTML 无外部依赖，可直接用浏览器打开；它展示交互方向，不是生产前端或可工作的 Agent。团队总安排见 [开发批次](../docs/15-team-baseline-and-batches.md)。
+请把本文件与 [coursepilot-guided-demo.html](coursepilot-guided-demo.html) 一起发给队友。HTML 无外部依赖，可直接用浏览器打开；它展示交互方向，不是生产前端或可工作的 Agent。团队总安排见 开发批次。
 
 ## 交互已经确认的方向
 
@@ -26,7 +26,7 @@
 
 建议组件：QuestionFrame、GoalQuestion、AcademicRecordPanel、TeacherCoursePicker、ReviewDetail、TimePreferencePicker、CandidateList。Vue Router 管问题和结果页，Pinia 保留答案。所有学生看到相同的问题，偏好可留空。
 
-API 与字段用 [共享契约](../docs/04-infrastructure-workflow.md)。前端汇总同一 PlanningRequest，消费 AuditResult 与 PlanningAnswer；来源、学分、时间合法性与演化评分由对应后端提供。单文件 JS 只作行为示例。
+API 与字段用 共享契约。前端汇总同一 PlanningRequest，消费 AuditResult 与 PlanningAnswer；来源、学分、时间合法性与演化评分由对应后端提供。单文件 JS 只作行为示例。
 
 学生页面使用学生能懂的词，例如“时间待确认”“这门课有往年评价”。Java、System 1/2、Trace、Harness、Benchmark、模型版本和 Token 报告放独立老师/开发者页面。
 
@@ -40,4 +40,4 @@ API 与字段用 [共享契约](../docs/04-infrastructure-workflow.md)。前端�
 6. 无可靠时间来源时不出现“真实课表无冲突”。
 7. 键盘能操作，焦点可见，详情关闭可返回，小屏内容不溢出。
 
-演示交互由 Node 内置测试核对分支清理、返回保留、单页双强度时间、显式优先级确认和虚构资料门禁；`python demo/check_html.py` 检查 HTML 标签、重复 ID 和内联脚本语法。它仍不是生产前端。实际浏览器桌面/手机与键盘验收见[Web任务核对记录](../docs/21-web-task-status.md)。
+演示交互由 Node 内置测试核对分支清理、返回保留、单页双强度时间、显式优先级确认和虚构资料门禁；`python demo/check_html.py` 检查 HTML 标签、重复 ID 和内联脚本语法。它仍不是生产前端。实际浏览器桌面/手机与键盘验收见Web任务核对记录。

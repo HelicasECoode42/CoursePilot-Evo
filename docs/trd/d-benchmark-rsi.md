@@ -1,6 +1,6 @@
 # D 模块：验收、评测与策略改进（业务说明与 TRD）
 
-负责人：**amorfatiii**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前只有案例与隔离评分的骨架：12 条 evolution 题面、39 个测试通过，评分器的语义匹配仍是关键词占位且 JavaVerifier 未接线。held-out、标注与评测 Runner 尚未落地（Runner 在未合入的 PR #36），`evo-harness/` 仍只有 README；排期见[本期任务](../19-delivery-plan.md)。
+负责人：**amorfatiii**。先读团队总览，再读本页业务功能，实施时查下半页接口与规则。当前只有案例与隔离评分的骨架：12 条 evolution 题面、39 个测试通过，评分器的语义匹配仍是关键词占位且 JavaVerifier 未接线。held-out、标注与评测 Runner 尚未落地（Runner 在未合入的 PR #36），`evo-harness/` 仍只有 README；排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 
@@ -112,7 +112,7 @@ sequenceDiagram
 
 ### 5. 指标和晋级
 
-[Benchmark 协议](../07-benchmark-protocol.md) 为 gate 真源。平均 token 不能将 unavailable 算零，报告有效样本覆盖率。模型不改但仍可能随机波动，parent/candidate 同重复次数；如果无可比成本不宣称效率提升。
+Benchmark 协议 为 gate 真源。平均 token 不能将 unavailable 算零，报告有效样本覆盖率。模型不改但仍可能随机波动，parent/candidate 同重复次数；如果无可比成本不宣称效率提升。
 
 候选没有严格改善或 held-out 质量退化则回滚。省 token 与质量同时看；删掉证据/澄清导致退化不能晋级。两轮不是强行写出成功 v1/v2：候选1失败后第二轮仍从稳定 v0 出发，lineage 记录分支。
 
@@ -137,6 +137,6 @@ case/模型输出视为不可信，不 exec；patch 只能改文本与受控配�
 
 ### 契约变更与完成标准
 
-字段以 [contracts](../../contracts/README.md) 为真源，行为以 [公共契约](../04-infrastructure-workflow.md) 为准。提交提供者/消费者 DTO、正反例和受影响测试；Schema 破坏性变更升版本，不能边跑 Benchmark 边改。调试和提交要求见 [工程规范](../16-engineering-and-debugging.md)。
+字段以 [contracts](../../contracts/README.md) 为真源，行为以 公共契约 为准。提交提供者/消费者 DTO、正反例和受影响测试；Schema 破坏性变更升版本，不能边跑 Benchmark 边改。调试和提交要求见 工程规范。
 
 任务完成至少包含：实现目录、输入/输出、正常和失败证据、限制；fixture 不算真实接入，HTML 不算生产前端，手工改 Prompt 不算 RSI。每次 PR 使用仓库模板自查，接口 PR 由相邻模块复核。
