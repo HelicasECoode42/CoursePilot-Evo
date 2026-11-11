@@ -122,12 +122,10 @@ cd web && npm ci && npm run dev:fixture
 
 | 你要做什么 | 入口 |
 | --- | --- |
-| 理解业务与分工 | [团队总览](docs/15-team-baseline-and-batches.md)、[模块 TRD 入口](docs/05-team-and-sub-trds.md)、[交付计划](docs/19-delivery-plan.md) |
+| 理解业务与分工 | [模块 TRD 入口](docs/05-team-and-sub-trds.md)、[交付计划](docs/19-delivery-plan.md) |
 | 各模块 TRD | [A 数据](docs/trd/a-data.md)、[B Java](docs/trd/b-verifier.md)、[C Agent](docs/trd/c-agent.md)、[D 评测](docs/trd/d-benchmark-rsi.md)、[E Web](docs/trd/e-web-integration.md) |
-| 页面与数据流 | [学生页面与数据流转](docs/27-student-experience-and-data-flow.md)、[AI 对话接口](docs/29-advice-chat-contract.md) |
-| 接口与规范 | [总体 TRD](docs/03-trd.md)、[行为契约](docs/04-infrastructure-workflow.md)、[OpenAPI/Schema](contracts/README.md)、[工程规范](docs/16-engineering-and-debugging.md) |
-| 协作 | [GitHub 协作](docs/12-github-collaboration.md)、[PR 模板](.github/pull_request_template.md)、[仓库维护](docs/24-repo-maintenance.md)、[看板](https://github.com/users/HelicasECoode42/projects/1) |
-| 图与评测 | [Mermaid 图](docs/diagrams/README.md)、[Benchmark 协议](docs/07-benchmark-protocol.md) |
+| 接口与规范 | [总体 TRD](docs/03-trd.md)、[OpenAPI/Schema](contracts/README.md) |
+| 协作 | [PR 模板](.github/pull_request_template.md)、[看板](https://github.com/users/HelicasECoode42/projects/1) |
 | 运行 HTTP 评测与复用旧 PR | [Benchmark 入口](benchmark/README.md)、[PR #36 / #40 代码复用](docs/35-pr36-pr40-reuse.md) |
 | 体验原型 | [交互式 HTML 示例](demo/coursepilot-guided-demo.html) |
 
