@@ -18,6 +18,7 @@ import com.coursepilot.verifier.web.UnknownSnapshot;
 import com.coursepilot.verifier.web.dto.AuditDtos.Issue;
 import com.coursepilot.verifier.web.dto.PlanDtos.Constraint;
 import com.coursepilot.verifier.web.dto.PlanDtos.PlanItem;
+import com.coursepilot.verifier.web.dto.PlanDtos.PlanSection;
 import com.coursepilot.verifier.web.dto.PlanDtos.PlanValidation;
 import com.coursepilot.verifier.web.dto.PlanDtos.PlanValidationRequest;
 import org.springframework.stereotype.Service;
@@ -40,8 +41,11 @@ import java.util.stream.Collectors;
  * 全部完成且无 violation → VALID。未知永远不能被当成通过。
  *
  * 范围（docs/04）：只有 mode=SIMULATION、offeringSnapshotId 非空、且每个班次都存在且 sourceKind=SYNTHETIC
- * 才是 SIMULATION；其余一律 COURSE_ONLY。REAL_TIMETABLE 目前没有任何已验证来源，本类永远不产出它。
+ * 才是 SIMULATION；mode=REAL 且班次快照 sourceValidation=VERIFIED（带学期、方案项都在该快照内）才是 REAL_TIMETABLE；
+ * 其余一律 COURSE_ONLY。已核验快照由人工抽样核验接口产生，上传者标签不会产生它。
  * COURSE_ONLY / 非 SIMULATION 下，所有时间相关检查（冲突、时间类硬约束）都记进 unknownChecks。
+ * 时间类硬约束另外按解析出的班次时间给出预览结论（CONSTRAINT_HIT_UNVERIFIED_SOURCE /
+ * CONSTRAINT_CLEAR_UNVERIFIED_SOURCE），它们同样只在 unknownChecks 里，不改变整份方案的 UNKNOWN 判决。
  *
  * 时间只经 ConflictChecker.analyze（唯一 TimeParser）得到，本类不解析客户端给的任何时间文本。
  */
@@ -128,23 +132,27 @@ public class PlanValidationService {
             && items.stream().allMatch(i -> i.classId() != null
                 && offerings.containsKey(i.classId())
                 && "SYNTHETIC".equals(offerings.get(i.classId()).getSourceKind()));
-        String scope = simulation ? "SIMULATION" : "COURSE_ONLY";
+        // REAL：班次快照已人工核验（VERIFIED）、学期非空，且每个方案项都落在该快照内，才是 REAL_TIMETABLE。
+        boolean realVerified = !simulation && isRealVerified(req, items, offerings);
+        String scope = simulation ? "SIMULATION" : realVerified ? "REAL_TIMETABLE" : "COURSE_ONLY";
+        // 时间类检查只有在班次来源已核验（模拟或真实）时才能真正执行。
+        boolean timeVerified = simulation || realVerified;
 
         Findings f = new Findings();
         // 未建模规则不参与核验，但必须显式带出：快照里有几条未建模规则，就带出一条说明。
         var unmodeled = unmodeledRules.findBySnapshot_SnapshotIdAndDispositionOrderBySourceRowAsc(
             req.curriculumSnapshotId(), CurriculumUnmodeledRule.Disposition.UNMODELED);
         if (!unmodeled.isEmpty()) {
-            f.unknown(UnmodeledRuleNotice.CODE, UnmodeledRuleNotice.message(unmodeled),
+            f.unknown(Section.CURRICULUM, UnmodeledRuleNotice.CODE, UnmodeledRuleNotice.message(unmodeled),
                 "curriculumSnapshotId");
         }
         checkClassAssignments(items, offerings, f);
-        checkTime(items, classIds, analysis, simulation, f);
+        checkTime(classIds, analysis, timeVerified, f);
         for (int i = 0; i < req.hardConstraints().size(); i++) {
             Constraint c = req.hardConstraints().get(i);
             switch (c.kind()) {
                 case BLOCK_DAY, BLOCK_SECTION, BLOCK_SLOT ->
-                    checkTimeConstraint(i, c, items, simulation, analysis, f);
+                    checkTimeConstraint(i, c, items, timeVerified, analysis, f);
                 case PIN_COURSE -> checkPinCourse(i, c, items, f);
                 case PIN_TEACHER_COURSE -> checkPinTeacherCourse(i, c, items, f);
                 case MAX_CREDITS -> checkMaxCredits(i, c, items, catalog, req.curriculumSnapshotId(), f);
@@ -152,8 +160,10 @@ public class PlanValidationService {
             }
         }
 
-        String verdict = !f.violations.isEmpty() ? "INVALID"
-            : !f.unknowns.isEmpty() ? "UNKNOWN" : "VALID";
+        List<PlanSection> sections = List.of(section(Section.TIMETABLE, f), section(Section.CURRICULUM, f));
+        // 总判决 = 两个分项里最差的一个（INVALID > UNKNOWN > VALID），与旧的单一判决口径一致。
+        String verdict = sections.stream().anyMatch(x -> "INVALID".equals(x.verdict())) ? "INVALID"
+            : sections.stream().anyMatch(x -> "UNKNOWN".equals(x.verdict())) ? "UNKNOWN" : "VALID";
 
         List<String> refs = new ArrayList<>();
         refs.add("curriculum:" + req.curriculumSnapshotId());
@@ -168,11 +178,38 @@ public class PlanValidationService {
             req.curriculumSnapshotId(),
             req.offeringSnapshotId(),
             transcript.getRevision(),
-            cap(f.violations),
-            cap(f.unknowns),
+            cap(f.issues(f.violations, null)),
+            cap(f.issues(f.unknowns, null)),
             List.copyOf(f.performed.size() > MAX_PERFORMED
                 ? f.performed.subList(0, MAX_PERFORMED) : f.performed),
-            List.copyOf(refs));
+            List.copyOf(refs),
+            sections);
+    }
+
+    /** 单个分项：只含该分项的 violations / unknownChecks，verdict 按同一规则从它自己的列表推出。 */
+    private static PlanSection section(Section s, Findings f) {
+        List<Issue> v = f.issues(f.violations, s);
+        List<Issue> u = f.issues(f.unknowns, s);
+        String verdict = !v.isEmpty() ? "INVALID" : !u.isEmpty() ? "UNKNOWN" : "VALID";
+        return new PlanSection(s.name(), verdict, cap(v), cap(u));
+    }
+
+    /**
+     * REAL_TIMETABLE 的判定：mode=REAL、班次快照为 OFFERING 且 sourceValidation=VERIFIED、
+     * 快照带学期，并且每个方案项的 classId 都存在于该快照中。缺任一条件都不算已核验。
+     */
+    private boolean isRealVerified(PlanValidationRequest req, List<PlanItem> items,
+                                   Map<String, CourseOffering> offerings) {
+        if (!"REAL".equals(req.mode()) || req.offeringSnapshotId() == null) return false;
+        CurriculumSnapshot snapshot = snapshots.findById(req.offeringSnapshotId()).orElse(null);
+        if (snapshot == null || snapshot.getKind() != CurriculumSnapshot.Kind.OFFERING
+            || snapshot.getSourceValidation() != CurriculumSnapshot.SourceValidation.VERIFIED
+            || snapshot.getTermId() == null) {
+            return false;
+        }
+        return items.stream().allMatch(i -> i.classId() != null
+            && offerings.containsKey(i.classId())
+            && req.offeringSnapshotId().equals(offerings.get(i.classId()).getSnapshotId()));
     }
 
     /** 班次存在性与班次归属课程。 */
@@ -180,15 +217,20 @@ public class PlanValidationService {
         boolean any = false;
         for (int i = 0; i < items.size(); i++) {
             PlanItem item = items.get(i);
-            if (item.classId() == null) continue;
-            any = true;
             String field = "items[" + i + "].classId";
+            if (item.classId() == null) {
+                // 每门方案课都必须落到一个班次，否则时间分项不能判为通过。
+                f.unknown(Section.TIMETABLE, "SECTION_UNASSIGNED",
+                    "课程 " + item.courseCode() + " 未指定班次，无法核验其时间与班次归属", field);
+                continue;
+            }
+            any = true;
             CourseOffering offering = offerings.get(item.classId());
             if (offering == null) {
-                f.unknown("CLASS_NOT_FOUND",
+                f.unknown(Section.TIMETABLE, "CLASS_NOT_FOUND",
                     "班次 " + item.classId() + " 不存在，无法核验课程 " + item.courseCode() + " 的时间与归属", field);
             } else if (!item.courseCode().equals(offering.getCourseCode())) {
-                f.violation("CLASS_COURSE_MISMATCH",
+                f.violation(Section.TIMETABLE, "CLASS_COURSE_MISMATCH",
                     "班次 " + item.classId() + " 属于课程 " + offering.getCourseCode()
                         + "，不是方案中的课程 " + item.courseCode(), field);
             }
@@ -200,10 +242,10 @@ public class PlanValidationService {
      * 时间冲突。SIMULATION 下用 ConflictChecker 的明细判断，把相撞的两门课点名；
      * 其他范围下没有已验证班次，冲突未核验，记入 unknownChecks。
      */
-    private void checkTime(List<PlanItem> items, List<String> classIds,
-                           ConflictChecker.Analysis analysis, boolean simulation, Findings f) {
-        if (!simulation) {
-            f.unknown("TIMETABLE_UNVERIFIED",
+    private void checkTime(List<String> classIds,
+                           ConflictChecker.Analysis analysis, boolean timeVerified, Findings f) {
+        if (!timeVerified) {
+            f.unknown(Section.TIMETABLE, "TIMETABLE_UNVERIFIED",
                 "没有已验证来源的班次（mode=REAL 或班次非 SYNTHETIC），时间冲突与时间类硬约束未核验，不能判为通过",
                 null);
             return;
@@ -211,13 +253,13 @@ public class PlanValidationService {
         for (String id : classIds) {
             String reason = analysis.unparseableReasons().get(id);
             if (reason != null) {
-                f.unknown("TIME_UNPARSEABLE",
+                f.unknown(Section.TIMETABLE, "TIME_UNPARSEABLE",
                     "班次 " + id + "（课程 " + courseOf(analysis, id) + "）时间无法解析：" + reason,
                     "items");
             }
         }
         for (ConflictChecker.ConflictPair p : analysis.conflicts()) {
-            f.violation("TIME_CONFLICT",
+            f.violation(Section.TIMETABLE, "TIME_CONFLICT",
                 "课程 " + courseOf(analysis, p.leftId()) + "（班次 " + p.leftId() + "）与课程 "
                     + courseOf(analysis, p.rightId()) + "（班次 " + p.rightId() + "）时间冲突",
                 null);
@@ -225,13 +267,12 @@ public class PlanValidationService {
         f.performed("时间冲突核对（同星期、节次、周次相交）");
     }
 
-    private void checkTimeConstraint(int i, Constraint c, List<PlanItem> items, boolean simulation,
+    private void checkTimeConstraint(int i, Constraint c, List<PlanItem> items, boolean timeVerified,
                                      ConflictChecker.Analysis analysis, Findings f) {
         String field = "hardConstraints[" + i + "]";
         String label = "第 " + i + " 条硬约束（" + c.kind() + "）";
-        if (!simulation) {
-            f.unknown("CONSTRAINT_UNVERIFIABLE",
-                label + "需要已验证的班次时间，当前没有可用来源，无法核验", field);
+        if (!timeVerified) {
+            checkTimeConstraintUnverified(i, c, items, analysis, f);
             return;
         }
         f.performed("硬约束 #" + i + " " + c.kind() + " 时间核对");
@@ -239,24 +280,24 @@ public class PlanValidationService {
             Applicability ap = appliesTo(c, item);
             if (ap == Applicability.NO) continue;
             if (ap == Applicability.UNKNOWN) {
-                f.unknown("CONSTRAINT_UNVERIFIABLE",
+                f.unknown(Section.TIMETABLE, "CONSTRAINT_UNVERIFIABLE",
                     label + "无法确定课程 " + item.courseCode() + " 的教师是否受约束，方案项未给教师", field);
                 continue;
             }
             if (item.classId() == null) {
-                f.unknown("CONSTRAINT_UNVERIFIABLE",
+                f.unknown(Section.TIMETABLE, "CONSTRAINT_UNVERIFIABLE",
                     label + "无法核验课程 " + item.courseCode() + "：方案项未指定班次", field);
                 continue;
             }
             List<MeetingTime> meetings = analysis.meetingsById().get(item.classId());
             if (meetings == null) {
-                f.unknown("CONSTRAINT_UNVERIFIABLE",
+                f.unknown(Section.TIMETABLE, "CONSTRAINT_UNVERIFIABLE",
                     label + "无法核验课程 " + item.courseCode() + "：班次 " + item.classId() + " 时间不可用", field);
                 continue;
             }
             for (MeetingTime m : meetings) {
                 if (hits(c, m)) {
-                    f.violation("CONSTRAINT_" + c.kind(),
+                    f.violation(Section.TIMETABLE, "CONSTRAINT_" + c.kind(),
                         "课程 " + item.courseCode() + "（班次 " + item.classId() + "）"
                             + DAY_NAMES.get(m.getDayOfWeek()) + "第" + m.getStartSection() + "-"
                             + m.getEndSection() + "节，命中" + label, field);
@@ -266,11 +307,67 @@ public class PlanValidationService {
         }
     }
 
+    /**
+     * 来源未核验时（COURSE_ONLY，或 mode=REAL 但快照未经人工核验）的时间类硬约束。
+     *
+     * 班次时间仍由 TimeParser 解析，能解析的班次照常判断是否命中约束，供网页预览使用：
+     * 命中记 CONSTRAINT_HIT_UNVERIFIED_SOURCE，全部适用班次都能解析且都未命中记 CONSTRAINT_CLEAR_UNVERIFIED_SOURCE，
+     * 无法判断（教师未知、班次缺失或时间无法解析）仍记 CONSTRAINT_UNVERIFIABLE。
+     * 三种结论都只进 unknownChecks：来源未核验时整份方案的判决仍是 UNKNOWN，不会因此判为通过或违规。
+     */
+    private void checkTimeConstraintUnverified(int i, Constraint c, List<PlanItem> items,
+                                               ConflictChecker.Analysis analysis, Findings f) {
+        String field = "hardConstraints[" + i + "]";
+        String label = "第 " + i + " 条硬约束（" + c.kind() + "）";
+        boolean applicable = false;
+        boolean undecided = false;
+        boolean hit = false;
+        for (PlanItem item : items) {
+            Applicability ap = appliesTo(c, item);
+            if (ap == Applicability.NO) continue;
+            applicable = true;
+            if (ap == Applicability.UNKNOWN) {
+                undecided = true;
+                f.unknown(Section.TIMETABLE, "CONSTRAINT_UNVERIFIABLE",
+                    label + "无法确定课程 " + item.courseCode() + " 的教师是否受约束，方案项未给教师", field);
+                continue;
+            }
+            if (item.classId() == null) {
+                undecided = true;
+                f.unknown(Section.TIMETABLE, "CONSTRAINT_UNVERIFIABLE",
+                    label + "无法核验课程 " + item.courseCode() + "：方案项未指定班次", field);
+                continue;
+            }
+            List<MeetingTime> meetings = analysis.meetingsById().get(item.classId());
+            if (meetings == null) {
+                undecided = true;
+                f.unknown(Section.TIMETABLE, "CONSTRAINT_UNVERIFIABLE",
+                    label + "无法核验课程 " + item.courseCode() + "：班次 " + item.classId() + " 时间不可用", field);
+                continue;
+            }
+            for (MeetingTime m : meetings) {
+                if (hits(c, m)) {
+                    hit = true;
+                    f.unknown(Section.TIMETABLE, "CONSTRAINT_HIT_UNVERIFIED_SOURCE",
+                        "课程 " + item.courseCode() + "（班次 " + item.classId() + "）"
+                            + DAY_NAMES.get(m.getDayOfWeek()) + "第" + m.getStartSection() + "-"
+                            + m.getEndSection() + "节，按未核验课表命中" + label
+                            + "（班次来源未核验，仅为预览，不能判为通过）", field);
+                    break;
+                }
+            }
+        }
+        if (applicable && !undecided && !hit) {
+            f.unknown(Section.TIMETABLE, "CONSTRAINT_CLEAR_UNVERIFIED_SOURCE",
+                label + "按未核验课表核对，未命中（班次来源未核验，仅为预览，不能判为通过）", field);
+        }
+    }
+
     private void checkPinCourse(int i, Constraint c, List<PlanItem> items, Findings f) {
         String field = "hardConstraints[" + i + "]";
         boolean present = items.stream().anyMatch(it -> c.courseCode().equals(it.courseCode()));
         if (!present) {
-            f.violation("PIN_COURSE_MISSING",
+            f.violation(Section.TIMETABLE, "PIN_COURSE_MISSING",
                 "方案未包含必选课程 " + c.courseCode() + "（第 " + i + " 条硬约束）", field);
         }
         f.performed("硬约束 #" + i + " PIN_COURSE 核对");
@@ -280,14 +377,14 @@ public class PlanValidationService {
         String field = "hardConstraints[" + i + "]";
         List<PlanItem> same = items.stream().filter(it -> c.courseCode().equals(it.courseCode())).toList();
         if (same.isEmpty()) {
-            f.violation("PIN_COURSE_MISSING",
+            f.violation(Section.TIMETABLE, "PIN_COURSE_MISSING",
                 "方案未包含必选课程 " + c.courseCode() + "（第 " + i + " 条硬约束，指定教师 " + c.teacherKey() + "）", field);
         } else if (same.stream().noneMatch(it -> c.teacherKey().equals(it.teacherKey()))) {
             if (same.stream().anyMatch(it -> it.teacherKey() == null)) {
-                f.unknown("PIN_TEACHER_UNKNOWN",
+                f.unknown(Section.TIMETABLE, "PIN_TEACHER_UNKNOWN",
                     "课程 " + c.courseCode() + " 的方案项未给教师，无法确认是否为第 " + i + " 条硬约束指定的教师", field);
             } else {
-                f.violation("PIN_TEACHER_MISMATCH",
+                f.violation(Section.TIMETABLE, "PIN_TEACHER_MISMATCH",
                     "课程 " + c.courseCode() + " 的方案教师与第 " + i + " 条硬约束要求的教师不符", field);
             }
         }
@@ -299,7 +396,7 @@ public class PlanValidationService {
         String field = "hardConstraints[" + i + "]";
         if (c.courseCode() != null) {
             // 按课程限定的学分上限语义未在契约里定义，不擅自套用成全方案上限。
-            f.unknown("CREDITS_SCOPE_UNSUPPORTED",
+            f.unknown(Section.CURRICULUM, "CREDITS_SCOPE_UNSUPPORTED",
                 "第 " + i + " 条硬约束按课程限定学分上限，本接口暂不核验", field);
             return;
         }
@@ -307,11 +404,11 @@ public class PlanValidationService {
         for (String code : items.stream().map(PlanItem::courseCode).distinct().toList()) {
             CurriculumCourse membership = catalog.get(code);
             if (membership == null || !hasUsableFacts(membership, snapshotId)) {
-                f.unknown("COURSE_FACTS_UNKNOWN",
+                f.unknown(Section.CURRICULUM, "COURSE_FACTS_UNKNOWN",
                     "课程 " + code + " 在培养快照 " + snapshotId
                         + " 中缺少可追溯的快照级属性或来源，无法核验第 " + i + " 条学分上限", field);
             } else if (membership.getCredits() == null) {
-                f.unknown("CREDITS_UNKNOWN",
+                f.unknown(Section.CURRICULUM, "CREDITS_UNKNOWN",
                     "课程 " + code + " 在培养快照 " + snapshotId + " 中学分未知，无法计入第 "
                         + i + " 条学分上限", field);
             } else {
@@ -321,7 +418,7 @@ public class PlanValidationService {
         BigDecimal limit = BigDecimal.valueOf(c.value());
         // 已知学分合计已超上限时结论确定，即使还有未知课程。
         if (total.compareTo(limit) > 0) {
-            f.violation("MAX_CREDITS_EXCEEDED",
+            f.violation(Section.CURRICULUM, "MAX_CREDITS_EXCEEDED",
                 "已知课程学分合计 " + total.stripTrailingZeros().toPlainString() + " 超过第 " + i
                     + " 条硬约束的上限 " + limit.stripTrailingZeros().toPlainString(), field);
         }
@@ -373,18 +470,31 @@ public class PlanValidationService {
         return out;
     }
 
-    /** 收集判决所需的三类结果。 */
+    /**
+     * 分项。TIMETABLE：班次归属、时间冲突、时间类硬约束与钉选课、班次来源核验。
+     * CURRICULUM：学分上限、未建模培养规则等毕业要求侧的结论。
+     */
+    enum Section { TIMETABLE, CURRICULUM }
+
+    private record Tagged(Section section, Issue issue) {}
+
+    /** 收集判决所需的结果；每条 violation / unknown 都带上所属分项，总列表保持插入顺序。 */
     private static final class Findings {
-        final List<Issue> violations = new ArrayList<>();
-        final List<Issue> unknowns = new ArrayList<>();
+        final List<Tagged> violations = new ArrayList<>();
+        final List<Tagged> unknowns = new ArrayList<>();
         final List<String> performed = new ArrayList<>();
 
-        void violation(String code, String message, String field) {
-            violations.add(new Issue(code, clip(message), field, false));
+        void violation(Section s, String code, String message, String field) {
+            violations.add(new Tagged(s, new Issue(code, clip(message), field, false)));
         }
 
-        void unknown(String code, String message, String field) {
-            unknowns.add(new Issue(code, clip(message), field, false));
+        void unknown(Section s, String code, String message, String field) {
+            unknowns.add(new Tagged(s, new Issue(code, clip(message), field, false)));
+        }
+
+        /** 取出 issue；section 为 null 时取全部。 */
+        List<Issue> issues(List<Tagged> list, Section s) {
+            return list.stream().filter(t -> s == null || t.section() == s).map(Tagged::issue).toList();
         }
 
         void performed(String description) {

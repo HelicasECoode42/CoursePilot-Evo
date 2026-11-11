@@ -68,10 +68,6 @@ describe("PlanTimetable", () => {
     expect(cellText(wrapper, 2, 1)).toContain("CS102-01");
     expect(cellText(wrapper, 3, 1)).toBe("");
     expect(cellText(wrapper, 1, 2)).toBe("");
-    expect(wrapper.find(".timetable-cards").text()).toContain(
-      "测试教师（合成）",
-    );
-    expect(wrapper.find(".timetable-cards").text()).toContain("第1–16周");
   });
 
   it("keeps UNPARSED and INVALID offerings out of the grid with a clear note", () => {
@@ -203,33 +199,123 @@ describe("PlanTimetable", () => {
   });
 });
 
-describe("PlanTimetable detail cards", () => {
-  it("shows the course name, real teacher and a human-readable time instead of raw meeting text", () => {
+describe("PlanTimetable unplaced courses", () => {
+  it("lists courses without a usable section under the grid, titled 未排进课表", () => {
     const wrapper = mount(PlanTimetable, {
       props: {
         scope: "REAL_TIMETABLE",
-        sources: [placed("CS102", offering("CS102", "CS102-01", [MON_1_2]))],
-        courseNames: { CS102: "程序设计基础（测试）" },
+        sources: [
+          placed("CS101", offering("CS101", "CS101-01", [MON_1_2])),
+          {
+            courseCode: "CS102",
+            classId: null,
+            offering: null,
+            missing: "NOT_SELECTED",
+          },
+        ],
       },
     });
-
-    const card = wrapper.get("li.timetable-card");
-    expect(card.text()).toContain("程序设计基础（测试）");
-    expect(card.text()).toContain("CS102");
-    expect(card.text()).toContain("测试教师（合成）");
-    expect(card.text()).toContain("周一 第1-2节 · 第1–16周");
-    expect(card.text()).toContain("CS102-01");
-    expect(card.text()).not.toContain("{第");
+    const list = wrapper.find(".timetable-gaps");
+    expect(list.find("h4").text()).toBe("未排进课表");
+    expect(list.text()).toContain(
+      "CS102：还没有选定班次，时间未知，未纳入课表。",
+    );
+    // 未排进课表列在格子之后，不再与课表并排。
+    expect(wrapper.find(".timetable-layout--split").exists()).toBe(false);
+    expect(wrapper.find(".timetable-scroll").exists()).toBe(true);
+    const grid = wrapper.find(".timetable-scroll").element;
+    expect(
+      grid.compareDocumentPosition(list.element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
-  it("falls back to the course code when no course name is known", () => {
+  it("does not split the layout when nothing is placed", () => {
     const wrapper = mount(PlanTimetable, {
       props: {
         scope: "REAL_TIMETABLE",
-        sources: [placed("CS102", offering("CS102", "CS102-01", [MON_1_2]))],
+        sources: [
+          {
+            courseCode: "CS102",
+            classId: null,
+            offering: null,
+            missing: "NOT_SELECTED",
+          },
+        ],
       },
     });
+    expect(wrapper.find(".timetable-gaps").exists()).toBe(true);
+    expect(wrapper.find(".timetable-layout--split").exists()).toBe(false);
+  });
 
-    expect(wrapper.get("li.timetable-card strong").text()).toBe("CS102");
+  it("格子显示课程名、老师与周次，不只显示课程号", () => {
+    const wrapper = mount(PlanTimetable, {
+      props: {
+        scope: "REAL_TIMETABLE",
+        courseNames: { CS102: "数据库" },
+        sources: [
+          placed(
+            "CS102",
+            offering("CS102", "CS102-01", [
+              {
+                dayOfWeek: 1,
+                sectionStart: 1,
+                sectionEnd: 2,
+                weeks: WEEKS.slice(0, 8),
+              },
+            ]),
+          ),
+        ],
+      },
+    });
+    const chip = wrapper.find("td .timetable-chip");
+    expect(chip.find("strong").text()).toBe("数据库");
+    expect(chip.text()).toContain("测试教师（合成）");
+    expect(chip.text()).toContain("1-8周");
+    expect(chip.text()).toContain("CS102-01");
+  });
+
+  it("前八周 / 后八周切换按周次过滤格子，明细仍按整学期", async () => {
+    const wrapper = mount(PlanTimetable, {
+      props: {
+        scope: "REAL_TIMETABLE",
+        courseNames: { CS102: "数据库" },
+        sources: [
+          placed(
+            "CS102",
+            offering("CS102", "CS102-01", [
+              {
+                dayOfWeek: 1,
+                sectionStart: 1,
+                sectionEnd: 2,
+                weeks: WEEKS.slice(0, 8),
+              },
+              {
+                dayOfWeek: 4,
+                sectionStart: 7,
+                sectionEnd: 8,
+                weeks: WEEKS.slice(8),
+              },
+            ]),
+          ),
+        ],
+      },
+    });
+    const button = (label: string) =>
+      wrapper
+        .findAll("button.timetable-weeks__btn")
+        .find((item) => item.text() === label)!;
+    expect(button("全学期").attributes("aria-pressed")).toBe("true");
+    expect(cellText(wrapper, 1, 1)).toContain("数据库");
+    expect(cellText(wrapper, 7, 4)).toContain("数据库");
+
+    await button("前八周（1-8）").trigger("click");
+    expect(button("前八周（1-8）").attributes("aria-pressed")).toBe("true");
+    expect(cellText(wrapper, 1, 1)).toContain("数据库");
+    expect(cellText(wrapper, 7, 4)).toBe("");
+
+    await button("后八周（9-16）").trigger("click");
+    expect(cellText(wrapper, 1, 1)).toBe("");
+    expect(cellText(wrapper, 7, 4)).toContain("9-16周");
   });
 });

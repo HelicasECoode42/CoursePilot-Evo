@@ -74,14 +74,14 @@ public class CatalogAssembler {
         return new CatalogDtos.CourseOffering(
             o.getCourseCode(),
             o.getOfferingId(),
-            null,                        // 当前没有教师主键
+            o.getTeacherKey(),
             orUnknown(o.getTeacher()),
-            null,                        // 实体没有学分
-            null,                        // 实体没有容量
+            o.getCredits(),
+            o.getCapacity(),
             raw,
             meetings,
             status,
-            "offering:" + o.getOfferingId());
+            o.getSourceRefId() != null ? o.getSourceRefId() : "offering:" + o.getOfferingId());
     }
 
     private static Meeting toMeeting(MeetingTime m) {

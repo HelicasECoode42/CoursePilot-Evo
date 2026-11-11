@@ -224,7 +224,14 @@ class ToolClient:
                 raise ToolContractViolation(
                     f"{tool}: data is null on a {payload.get('status')} response"
                 )
-            return spec.response_model.model_validate(data)
+            result = spec.response_model.model_validate(data)
+            if isinstance(result, PlanValidation) and {
+                section.scope for section in result.sections
+            } != {"TIMETABLE", "CURRICULUM"}:
+                raise ToolContractViolation(
+                    f"{tool}: sections must contain TIMETABLE and CURRICULUM"
+                )
+            return result
         except ValidationError as exc:
             raise ToolContractViolation(f"{tool}: off contract: {exc}") from exc
         except (TypeError, AttributeError) as exc:

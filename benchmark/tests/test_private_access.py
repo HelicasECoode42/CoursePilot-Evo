@@ -153,9 +153,8 @@ def test_missing_root_rejected(tmp_path):
 
 def test_author_may_read_fixtures_but_runner_may_not(private_root):
     root, _ = private_root
-    if not (root / "fixtures").exists():
-        (root / "fixtures").mkdir()
-        (root / "fixtures" / "G1-001.json").write_text("{}", encoding="utf-8")
+    (root / "fixtures").mkdir()
+    (root / "fixtures" / "G1-001.json").write_text("{}", encoding="utf-8")
     assert resolve_private(root, "fixtures/G1-001.json", role="author").is_file()
     with pytest.raises(PrivateAccessError) as e:
         resolve_private(root, "fixtures/G1-001.json", role="runner")

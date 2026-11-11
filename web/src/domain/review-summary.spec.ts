@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewNote } from "../contracts";
-import { summarizeReviewsByDimension } from "./review-summary";
+import {
+  summarizeReviewsByDimension,
+  teacherReviewNotes,
+  unboundReviewNotes,
+} from "./review-summary";
 
 const note = (overrides: Partial<ReviewNote>): ReviewNote => ({
   reviewNoteId: "review-1",
@@ -55,5 +59,51 @@ describe("review dimension summaries", () => {
 
   it("returns no dimensions when the course has no review records", () => {
     expect(summarizeReviewsByDimension([], "CS101")).toEqual([]);
+  });
+});
+
+describe("按老师拆分评价", () => {
+  const note = (
+    reviewNoteId: string,
+    teacherKey: string | null,
+    courseCode = "SE201",
+  ) =>
+    ({
+      reviewNoteId,
+      courseCode,
+      teacherKey,
+      termId: null,
+      sourceKind: "USER_IMPORT",
+      publishedAt: null,
+      sourceUrl: null,
+      excerpt: "x",
+      dimensions: ["WORKLOAD"],
+      matchStatus: teacherKey ? "COURSE_TEACHER_MATCHED" : "COURSE_ONLY",
+      sourceRefId: `source:${reviewNoteId}`,
+    }) as ReviewNote;
+
+  const notes = [
+    note("a", "chen-sb"),
+    note("b", "teng-zm"),
+    note("c", null),
+    note("d", "chen-sb", "OTHER"),
+  ];
+
+  it("老师名下只有 teacherKey 完全相同、课程相同的评价", () => {
+    expect(
+      teacherReviewNotes(notes, "SE201", "chen-sb").map((n) => n.reviewNoteId),
+    ).toEqual(["a"]);
+    expect(
+      teacherReviewNotes(notes, "SE201", "teng-zm").map((n) => n.reviewNoteId),
+    ).toEqual(["b"]);
+  });
+
+  it("未绑定老师的评价只出现在课程整体部分，不归到任何老师", () => {
+    expect(
+      unboundReviewNotes(notes, "SE201").map((n) => n.reviewNoteId),
+    ).toEqual(["c"]);
+    expect(teacherReviewNotes(notes, "SE201", "chen-sb")).not.toContainEqual(
+      expect.objectContaining({ reviewNoteId: "c" }),
+    );
   });
 });

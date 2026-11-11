@@ -14,10 +14,12 @@ vi.mock("../api", () => ({
     listCourses: vi.fn(),
     listSessionRecords: vi.fn(),
     getSchoolProgress: vi.fn(),
+    summarizeOfferings: vi.fn(),
   },
 }));
 
 const SNAPSHOT = "curriculum-2026";
+const OFFERING_SNAPSHOT = "offering-2026";
 
 const catalog: Course[] = [
   {
@@ -219,13 +221,16 @@ describe("凑学分选课页", () => {
       items: catalog,
       nextCursor: null,
     });
+    vi.mocked(api.summarizeOfferings).mockReset();
   });
 
   it("shows the unmodeled cross-category rule notice verbatim", async () => {
     const { wrapper } = await mountView();
-    expect(wrapper.text()).toContain("系统没有算跨类别抵扣");
-    expect(wrapper.text()).toContain("本培养方案有 3 条规则系统未建模");
-    expect(wrapper.text()).toContain("凑学分只按单个类别计算");
+    expect(wrapper.text()).toContain(
+      "学分按学校教务导入的学业情况计算；跨类别抵扣以教务认定为准。",
+    );
+    expect(wrapper.text()).not.toContain("凑分只按单个类别");
+    expect(wrapper.text()).not.toContain("原表位置");
     expect(wrapper.text()).toContain(
       "已修课程可能还未填全，暂时无法确定剩余要求。",
     );
@@ -309,6 +314,9 @@ describe("凑学分选课页", () => {
 
   it("keeps duplicate school category nodes as references and keeps candidate totals on Java audit", async () => {
     const { wrapper } = await mountView();
+    attachOfferingSnapshot();
+    markEveryOfferingKnown();
+    await flushPromises();
     usePlanningStore().$patch({
       schoolProgress: {
         receipt: {
@@ -455,15 +463,38 @@ describe("凑学分选课页", () => {
 
   it("shows completion suggestions when a gap remains", async () => {
     const { wrapper } = await mountView();
+    attachOfferingSnapshot();
+    markEveryOfferingKnown();
+    await flushPromises();
     expect(wrapper.text()).toContain("学分组合（还差 6 学分）");
     expect(wrapper.text()).toContain("编译原理 + 机器学习导论");
-    expect(wrapper.text()).toContain("E2 + E4");
+    expect(wrapper.text()).toContain("E2 · E4");
     const box = wrapper
       .findAll("label.credits-check")
       .find((l) => l.text().includes("计算机图形学"))!;
     await box.get("input").setValue(true);
     await flushPromises();
     expect(wrapper.text()).not.toContain("学分组合（还差 0 学分）");
+  });
+
+  it("keeps courses with unknown offering status out of current-term combinations", async () => {
+    const { wrapper } = await mountView();
+    attachOfferingSnapshot();
+    vi.mocked(api.summarizeOfferings).mockResolvedValue({
+      items: [{ courseCode: "E2", sectionCount: 1, teacherTexts: [] }],
+      unknownCourseCodes: ["E4", "E3", "E6", "AI01"],
+      status: "OK",
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("开课情况无法确认");
+    expect(wrapper.text()).not.toContain("学分组合（还差 6 学分）");
+    expect(wrapper.text()).not.toContain("编译原理 + 机器学习导论");
+    expect(
+      wrapper
+        .findAll("label.credits-check")
+        .some((label) => label.text().includes("机器学习导论")),
+    ).toBe(true);
   });
 
   it("does not count an UNKNOWN school status as passed or remove the course from the credit candidates", async () => {
@@ -516,6 +547,9 @@ describe("凑学分选课页", () => {
 
   it("adds a suggested group to the selection when asked", async () => {
     const { wrapper } = await mountView();
+    attachOfferingSnapshot();
+    markEveryOfferingKnown();
+    await flushPromises();
     const group = wrapper
       .findAll("li")
       .find((li) => li.text().includes("编译原理 + 机器学习导论"))!;
@@ -533,6 +567,9 @@ describe("凑学分选课页", () => {
       nextCursor: null,
     });
     const { wrapper } = await mountView({ gap: 21 });
+    attachOfferingSnapshot();
+    markEveryOfferingKnown();
+    await flushPromises();
     expect(wrapper.text()).toContain("还差 21 学分");
     expect(wrapper.text()).toContain("学分组合（还差 21 学分）");
     expect(wrapper.text()).not.toContain("个组合");
@@ -568,5 +605,371 @@ describe("凑学分选课页", () => {
     await link.trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/plan/teachers");
+  });
+
+  /** 只在 mount 之后挂上学校报告（测试数据为虚构）。 */
+  function attachSchool(nodes: Array<Record<string, unknown>>) {
+    usePlanningStore().$patch({
+      schoolProgress: {
+        receipt: {
+          schoolProgressId: "school:fixture",
+          contentHash: "c".repeat(64),
+          importedAt: "2026-10-29T00:00:00Z",
+          reused: false,
+        },
+        snapshot: {
+          format: "coursepilot-shu-academic-progress",
+          version: 1,
+          capturedAt: "2026-10-29T00:00:00Z",
+          source: "fictional fixture",
+          nodes: nodes as never,
+          courses: [],
+        },
+        academicRecord: record,
+      },
+    });
+  }
+
+  function attachOfferingSnapshot() {
+    usePlanningStore().$patch({
+      offeringSnapshots: [
+        {
+          snapshotId: OFFERING_SNAPSHOT,
+          kind: "OFFERING",
+          state: "PUBLISHED",
+          sourceKind: "SYNTHETIC",
+          termId: "2026-27-1",
+          createdAt: "2026-10-01T00:00:00Z",
+          sourceValidation: "SYNTHETIC",
+        },
+      ],
+      selectedOfferingSnapshotId: OFFERING_SNAPSHOT,
+    });
+  }
+
+  function markEveryOfferingKnown() {
+    vi.mocked(api.summarizeOfferings).mockResolvedValue({
+      items: catalog.map((course) => ({
+        courseCode: course.courseCode,
+        sectionCount: 1,
+        teacherTexts: [],
+      })),
+      unknownCourseCodes: [],
+      status: "OK",
+    });
+  }
+
+  it("uses the school report gap when the Java gap is unknown and keeps candidates selectable", async () => {
+    const { wrapper } = await mountView({ unknownGap: true });
+    attachSchool([
+      {
+        nodeId: "elective",
+        parentId: null,
+        schoolNodeId: "S1",
+        leaf: true,
+        name: "专业选修课",
+        requiredCredits: 24,
+        earnedCredits: 18,
+        remainingCredits: 6,
+      },
+    ]);
+    await flushPromises();
+    expect(wrapper.text()).toContain(
+      "按学校报告还差 6 学分；本地核对无法确认。",
+    );
+    expect(wrapper.text()).toContain("学校报告 要求 24 · 已获 18 · 还差 6");
+    expect(wrapper.text()).toContain("本地核对缺口无法确定");
+    expect(wrapper.text()).not.toContain("已修 0");
+    const firstCandidate = wrapper
+      .findAll("details.credits-category")[0]!
+      .find('input[type="checkbox"]');
+    expect((firstCandidate.element as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it("groups repeated unknown audit items into the shared summary instead of listing each one", async () => {
+    const { wrapper, store } = await mountView();
+    const notInCatalog = [1, 2, 3].map((n) => ({
+      code: "COURSE_NOT_IN_CATALOG",
+      field: null,
+      message: `课程 SYN090${n} 不在课程库中，无法归入培养要求。`,
+      retryable: false,
+    }));
+    store.$patch({
+      audit: {
+        ...audit,
+        unknowns: [...audit.unknowns, ...notInCatalog],
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find(".local-audit-summary").exists()).toBe(true);
+    expect(wrapper.text()).toContain("3 门课无法归入本专业培养要求");
+    expect(wrapper.findAll(".credits-issue")).toHaveLength(0);
+  });
+
+  it("marks candidates by whether the selected offering snapshot has sections, offered first", async () => {
+    const { wrapper } = await mountView({ interestTags: [] });
+    vi.mocked(api.summarizeOfferings).mockImplementation(
+      async (_c, _s, codes) => {
+        const counts: Record<string, number> = { E2: 1, E3: 2 };
+        const failed = codes.includes("E6");
+        return {
+          status: failed ? "UNKNOWN" : "OK",
+          items: codes
+            .filter((code) => code !== "E6")
+            .map((code) => ({
+              courseCode: code,
+              sectionCount: counts[code] ?? 0,
+              teacherTexts: [],
+            })),
+          unknownCourseCodes: failed ? ["E6"] : [],
+        };
+      },
+    );
+    attachOfferingSnapshot();
+    await flushPromises();
+    const rows = wrapper
+      .findAll("details.credits-category")[0]!
+      .findAll("label.credits-check")
+      .map((label) => label.text());
+    expect(rows.map((text) => text.split(" · ")[0])).toEqual([
+      "E2",
+      "E3",
+      "E6",
+    ]);
+    expect(rows[0]).toContain("本学期开 1 个班");
+    expect(rows[1]).toContain("本学期开 2 个班");
+    expect(rows[2]).toContain("开课情况无法确认");
+    // 未开的课不进可选列表，收在「本学期未开」折叠区里。
+    const notOffered = wrapper.find("details.credits-not-offered");
+    expect(notOffered.exists()).toBe(true);
+    expect(notOffered.attributes("open")).toBeUndefined();
+    expect(notOffered.text()).toContain("本学期未开（2 门");
+    expect(notOffered.text()).toContain("AI01");
+    expect(notOffered.text()).toContain("E4");
+    expect(wrapper.text()).toContain("本学期开课情况暂无法确认");
+  });
+
+  it("says offering is unknown rather than not offered when the query fails", async () => {
+    const { wrapper } = await mountView({ interestTags: [] });
+    vi.mocked(api.summarizeOfferings).mockRejectedValue(new Error("network"));
+    attachOfferingSnapshot();
+    await flushPromises();
+    const rows = wrapper
+      .findAll("details.credits-category")[0]!
+      .findAll("label.credits-check");
+    expect(rows[0]!.text()).toContain("开课情况无法确认");
+    expect(rows[0]!.text()).not.toContain("本学期未开");
+    expect(wrapper.text()).toContain("本学期开课情况暂无法确认");
+  });
+
+  describe("学校导入与子类下钻（合成数据）", () => {
+    type SchoolNodeFixture = {
+      nodeId: string;
+      parentId: string | null;
+      schoolNodeId: string | null;
+      leaf: boolean;
+      name: string;
+      requiredCredits: number | null;
+      earnedCredits: number | null;
+      remainingCredits: number | null;
+    };
+    type SchoolCourseFixture = {
+      nodeId: string;
+      courseCode: string;
+      name: string;
+      credits: number | null;
+      outcome: "PASSED" | "IN_PROGRESS" | "NOT_TAKEN" | "UNKNOWN";
+    };
+
+    function attachSchoolTree(
+      nodes: SchoolNodeFixture[],
+      courses: SchoolCourseFixture[] = [],
+    ) {
+      usePlanningStore().$patch({
+        schoolProgress: {
+          receipt: {
+            schoolProgressId: "school:fixture",
+            contentHash: "d".repeat(64),
+            importedAt: "2026-10-29T00:00:00Z",
+            reused: false,
+          },
+          snapshot: {
+            format: "coursepilot-shu-academic-progress",
+            version: 1,
+            capturedAt: "2026-10-29T00:00:00Z",
+            source: "fictional fixture",
+            nodes: nodes as never,
+            courses: courses.map((course) => ({
+              ...course,
+              completedYear: null,
+              completedTerm: null,
+              grade: null,
+              makeup: null,
+              retake: null,
+              suggestedYear: null,
+              suggestedTerm: null,
+            })) as never,
+          },
+          academicRecord: record,
+        },
+      });
+    }
+
+    const root: SchoolNodeFixture = {
+      nodeId: "root",
+      parentId: null,
+      schoolNodeId: "R",
+      leaf: false,
+      name: "专业选修课",
+      requiredCredits: 24,
+      earnedCredits: 18,
+      remainingCredits: 6,
+    };
+
+    it("排除学校导入里已通过和在读的课，不只看本次核对的学业记录", async () => {
+      const { wrapper } = await mountView();
+      attachSchoolTree(
+        [{ ...root, leaf: true }],
+        [
+          {
+            nodeId: "root",
+            courseCode: "E3",
+            name: "深度学习",
+            credits: 3,
+            outcome: "IN_PROGRESS",
+          },
+          {
+            nodeId: "root",
+            courseCode: "E4",
+            name: "机器学习导论",
+            credits: 4,
+            outcome: "PASSED",
+          },
+        ],
+      );
+      await flushPromises();
+      const labels = wrapper
+        .findAll("label.credits-check")
+        .map((label) => label.text());
+      expect(labels.some((text) => text.includes("E3"))).toBe(false);
+      expect(labels.some((text) => text.includes("E4"))).toBe(false);
+      expect(labels.some((text) => text.includes("E2"))).toBe(true);
+    });
+
+    it("缺口下钻到最细的有缺口子类，候选只来自这些子类", async () => {
+      const { wrapper } = await mountView();
+      attachSchoolTree(
+        [
+          root,
+          {
+            nodeId: "ai",
+            parentId: "root",
+            schoolNodeId: "A",
+            leaf: true,
+            name: "人工智能方向",
+            requiredCredits: 4,
+            earnedCredits: 0,
+            remainingCredits: 4,
+          },
+          {
+            nodeId: "sys",
+            parentId: "root",
+            schoolNodeId: "B",
+            leaf: true,
+            name: "系统方向",
+            requiredCredits: 2,
+            earnedCredits: 0,
+            remainingCredits: 2,
+          },
+          {
+            nodeId: "done",
+            parentId: "root",
+            schoolNodeId: "C",
+            leaf: true,
+            name: "已满足方向",
+            requiredCredits: 2,
+            earnedCredits: 2,
+            remainingCredits: 0,
+          },
+        ],
+        [
+          {
+            nodeId: "ai",
+            courseCode: "AI01",
+            name: "人工智能导论",
+            credits: 2,
+            outcome: "NOT_TAKEN",
+          },
+          {
+            nodeId: "sys",
+            courseCode: "E2",
+            name: "编译原理",
+            credits: 2,
+            outcome: "NOT_TAKEN",
+          },
+        ],
+      );
+      await flushPromises();
+      const codes = wrapper
+        .findAll("label.credits-check")
+        .map((label) => label.text().split(" · ")[0]);
+      expect(codes.sort()).toEqual(["AI01", "E2"]);
+      expect(wrapper.text()).toContain(
+        "缺口已下钻到学校报告的小类「人工智能方向、系统方向」",
+      );
+    });
+
+    it("子类在课程库里没有可选课程时说明，不回退到整个大类", async () => {
+      const { wrapper } = await mountView();
+      attachSchoolTree([
+        root,
+        {
+          nodeId: "pe",
+          parentId: "root",
+          schoolNodeId: "P",
+          leaf: true,
+          name: "体育方向",
+          requiredCredits: 2,
+          earnedCredits: 0,
+          remainingCredits: 2,
+        },
+      ]);
+      await flushPromises();
+      expect(wrapper.findAll("label.credits-check")).toHaveLength(0);
+      expect(wrapper.text()).toContain(
+        "这个小类（体育方向）在课程库里没有可选课程。",
+      );
+    });
+
+    it("只有单门课的组合时不显示学分组合区块", async () => {
+      const { wrapper } = await mountView();
+      attachSchoolTree(
+        [
+          root,
+          {
+            nodeId: "pe",
+            parentId: "root",
+            schoolNodeId: "P",
+            leaf: true,
+            name: "计算机图形学方向",
+            requiredCredits: 6,
+            earnedCredits: 0,
+            remainingCredits: 6,
+          },
+        ],
+        [
+          {
+            nodeId: "pe",
+            courseCode: "E6",
+            name: "计算机图形学",
+            credits: 6,
+            outcome: "NOT_TAKEN",
+          },
+        ],
+      );
+      await flushPromises();
+      expect(wrapper.text()).toContain("计算机图形学");
+      expect(wrapper.text()).not.toContain("学分组合");
+    });
   });
 });

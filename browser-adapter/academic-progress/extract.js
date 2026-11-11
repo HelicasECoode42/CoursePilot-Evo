@@ -49,7 +49,7 @@ globalThis.coursepilotReadAcademicProgress = () => {
       parentId: ids.get(parent) || null,
       schoolNodeId: node.getAttribute("xfyqjd_id") || null,
       leaf: /^(true|1|yes)$/i.test(node.getAttribute("leaf") || ""),
-      name: match ? match[1] : textOf(label).split(/共[（(]/)[0].trim(),
+      name: (match ? match[1] : textOf(label)).split(/共[（(]/)[0].trim(),
       requiredCredits: match ? Number(match[2]) : null,
       earnedCredits: match ? Number(match[3]) : null,
       remainingCredits: match ? Number(match[4]) : null,

@@ -2,7 +2,7 @@
 # H2 文件库的离线备份与恢复（模块 B 的存储）。
 #
 #   scripts/h2_backup.sh backup              复制一份到备份目录（时间戳命名，保留最近 N 份）
-#   scripts/h2_backup.sh restore <备份文件>  用备份覆盖当前库（原库先挪到 *.before-restore-时间戳）
+#   scripts/h2_backup.sh restore <备份文件>  用备份覆盖当前库（先保存原库副本）
 #
 # 安全约束：
 # - 只做离线复制。Java 服务在端口上监听时（即库可能正被写入），两个子命令都拒绝执行，
@@ -77,16 +77,19 @@ cmd_restore() {
 
   umask 077
   mkdir -p "$(dirname "$DB_FILE")"
+  local staged="$DB_FILE.restore.tmp"
+  [ ! -e "$staged" ] || die "恢复临时文件已存在：$staged"
+  cp "$src" "$staged" || { rm -f -- "$staged"; die "无法复制备份，原库未更改"; }
+  chmod 600 "$staged" || { rm -f -- "$staged"; die "无法设置恢复文件权限，原库未更改"; }
   if [ -f "$DB_FILE" ]; then
     local keep="$DB_FILE.before-restore-$(timestamp)"
-    mv "$DB_FILE" "$keep"
-    chmod 600 "$keep"
+    [ ! -e "$keep" ] || { rm -f -- "$staged"; die "原库备份已存在：$keep"; }
+    cp "$DB_FILE" "$keep" || { rm -f -- "$staged" "$keep"; die "无法保存原库，原库未更改"; }
+    chmod 600 "$keep" || { rm -f -- "$staged" "$keep"; die "无法设置原库副本权限"; }
     echo "原库已保存为：$keep"
   fi
 
-  cp "$src" "$DB_FILE.tmp"
-  chmod 600 "$DB_FILE.tmp"
-  mv "$DB_FILE.tmp" "$DB_FILE"
+  mv "$staged" "$DB_FILE" || { rm -f -- "$staged"; die "无法替换数据库文件，原库未更改"; }
   echo "恢复完成：$DB_FILE（来自 $src）"
 }
 

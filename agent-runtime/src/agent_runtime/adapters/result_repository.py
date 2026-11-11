@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from agent_runtime.api.schemas import PlanningAnswer, RunManifest, TraceEvent
@@ -32,6 +33,25 @@ class FileResultRepository:
         )
         lines = [event.model_dump_json() for event in events]
         payload = "\n".join(lines)
+        if payload:
+            payload += "\n"
+        (directory / "events.jsonl").write_text(payload, encoding="utf-8")
+        return directory
+
+    def save_failure(
+        self, *, events: list[TraceEvent], manifest: RunManifest, error_code: str
+    ) -> Path:
+        """Persist a terminal run that failed before an answer could be delivered."""
+        directory = self._root / events[0].traceId.replace(":", "_")
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "manifest.json").write_text(
+            manifest.model_dump_json(indent=2), encoding="utf-8"
+        )
+        (directory / "failure.json").write_text(
+            json.dumps({"errorCode": error_code}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        payload = "\n".join(event.model_dump_json() for event in events)
         if payload:
             payload += "\n"
         (directory / "events.jsonl").write_text(payload, encoding="utf-8")

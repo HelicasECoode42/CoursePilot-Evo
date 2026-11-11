@@ -48,9 +48,14 @@ def get_session_rate_limiter(request: Request) -> FixedWindowRateLimiter:
 
 
 def require_subject(
+    request: Request,
     store: Annotated[SessionStore, Depends(get_session_store)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> str:
+    ledger = getattr(request.app.state, "spend_ledger", None)
+    if ledger is not None:
+        for expired_id in store.sweep_expired():
+            ledger.expire_session(expired_id)
     if not authorization or not authorization.startswith("Bearer "):
         raise UnauthorizedError("缺少或非法的会话令牌")
     token = authorization[len("Bearer ") :].strip()

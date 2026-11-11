@@ -19,6 +19,7 @@ import type {
   SessionPlanReplacement,
 } from "../contracts";
 import { usePlanningStore } from "../stores/planning";
+import { SAVED_PLANS_KEY } from "../domain/saved-plans";
 import ResultView from "./ResultView.vue";
 
 const PLAN_ID = "plan-test-1";
@@ -225,6 +226,7 @@ function stubOfferings(overrides: Record<string, CourseOffering[]> = {}) {
         overrides[courseCode] ?? DEFAULT_OFFERINGS[courseCode] ?? [];
       const list: SessionOfferingList & { status: "OK" } = {
         previousPlanId,
+        mustAvoidChecks: [],
         courseCode,
         items: structuredClone(items),
         status: "OK",
@@ -232,6 +234,14 @@ function stubOfferings(overrides: Record<string, CourseOffering[]> = {}) {
       return list;
     });
 }
+
+/** 未建模培养规则的 unknown（Java 原文格式，合成数据）。 */
+const UNMODELED_RULES_ISSUE = {
+  code: "UNMODELED_CURRICULUM_RULES",
+  message: "本培养方案有 1 条规则系统未建模、不参与核验（原表位置：测试表!A7）",
+  field: "curriculumSnapshotId",
+  retryable: false,
+};
 
 describe("result page course search and replacement", () => {
   let router: ReturnType<typeof createRouter>;
@@ -265,6 +275,54 @@ describe("result page course search and replacement", () => {
   const mountPage = () =>
     mount(ResultView, { global: { plugins: [router, pinia] } });
 
+  it("explains UNABLE_TO_VERIFY instead of showing a blank page", async () => {
+    const result = answer();
+    result.decision = "UNABLE_TO_VERIFY";
+    result.recommendations = [];
+    result.unknowns = [
+      {
+        code: "MUST_TEACHER_NOT_PRESERVED",
+        message: "必须保留课程 08306099 与指定教师 10009466",
+        field: "teacherKey",
+        retryable: false,
+      },
+    ];
+    store.$patch({ planningResult: result });
+
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const text = wrapper.text();
+    expect(text).toContain("这次没有生成方案");
+    expect(text).toContain("必须保留");
+    expect(text).toContain("已选课程");
+    expect(text).not.toContain("这次没有可展示的方案");
+  });
+
+  it("offers the AI course assistant on the result page for adding courses", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("想加课，但不知道加什么");
+    expect(wrapper.text()).toContain("确认采用的课程会进入待选草稿");
+  });
+
+  it("keeps chat advice available and offers regeneration after adopting a suggestion", async () => {
+    store.$patch({
+      planningResult: null,
+      adoptedAdviceSuggestions: ["advice-1"],
+    });
+    const submit = vi.spyOn(store, "submitPlan").mockResolvedValue();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("课程助手");
+    const action = buttonByText(wrapper, "用更新后的草稿重新生成方案");
+    expect(action).toBeDefined();
+    await action!.trigger("click");
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
   it("shows course-specific reasons and exploration steps", async () => {
     const result = answer();
     result.recommendations[0].courseRationales = [
@@ -282,6 +340,10 @@ describe("result page course search and replacement", () => {
     const wrapper = mountPage();
     await flushPromises();
     expect(wrapper.text()).toContain("下学期选课规划");
+    // 推荐依据收在展开的课程行里，先打开 CS102 那一行。
+    await courseCard(wrapper, "程序设计基础（测试）")!
+      .get(".course-row__toggle")
+      .trigger("click");
     expect(wrapper.text()).toContain("适合作为基础课");
     expect(wrapper.text()).toContain("研究方向探索");
     expect(wrapper.text()).toContain("阅读入门资料");
@@ -304,6 +366,9 @@ describe("result page course search and replacement", () => {
     stubOfferings();
     const wrapper = mountPage();
     await flushPromises();
+    await courseCard(wrapper, "程序设计基础（测试）")!
+      .get(".course-row__toggle")
+      .trigger("click");
     expect(wrapper.text()).toContain("课程目录事实：课程内容覆盖基础编程");
     expect(wrapper.text()).toContain("培养方案资料");
     expect(wrapper.text()).toContain("curriculum:cs102");
@@ -341,16 +406,19 @@ describe("result page course search and replacement", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    const notice = wrapper.get('[aria-label="无法确认的项目"]');
+    // 方案级问题收在顶部徽标的展开明细里，不在页面上堆一块大提示。
+    await wrapper.get(".verdict-badge").trigger("click");
+    const notice = wrapper.get('[aria-label="方案级问题"]');
     expect(notice.text()).toContain("当前建议由演示模型生成。");
-    expect(notice.text()).toContain(
-      "部分班次的上课时间无法识别，无法确认是否冲突。",
-    );
     expect(notice.text()).not.toContain("FAKE_MODEL");
     expect(notice.text()).not.toContain("W2");
-    const cardNotice = wrapper.get('.option-section .notice[role="status"]');
-    expect(cardNotice.text()).not.toContain("TIME_UNPARSEABLE");
-    expect(cardNotice.text()).not.toContain("offeringSnapshot");
+    // 时间无法识别的问题归到 CS103 卡片上，只写一次，不带原始字段。
+    const cardIssues = wrapper.get('[aria-label="这门课的问题"]');
+    expect(cardIssues.text()).toContain(
+      "部分班次的上课时间无法识别，无法确认是否冲突。",
+    );
+    expect(cardIssues.text()).not.toContain("TIME_UNPARSEABLE");
+    expect(cardIssues.text()).not.toContain("offeringSnapshot");
     const details = wrapper.get("details.debug-id");
     expect((details.element as HTMLDetailsElement).open).toBe(false);
     expect(details.text()).toContain("FAKE_MODEL");
@@ -362,11 +430,20 @@ describe("result page course search and replacement", () => {
   const buttonByText = (wrapper: ReturnType<typeof mountPage>, text: string) =>
     wrapper.findAll("button").find((item) => item.text() === text);
 
+  /** 换班：点这门课卡片上的「选班次 / 换班」按钮，列出它的班次。 */
   const openAndSearch = async (
     wrapper: ReturnType<typeof mountPage>,
     course: string,
   ) => {
-    await wrapper.get("#result-search-entry-0").trigger("click");
+    await wrapper.get(`#result-swap-0-${course}`).trigger("click");
+    await flushPromises();
+  };
+
+  /** 加课：在右栏顶部的加课框里输入课程名或课程号并搜索。 */
+  const searchAdd = async (
+    wrapper: ReturnType<typeof mountPage>,
+    course: string,
+  ) => {
     await wrapper.get("#result-search-course-0").setValue(course);
     await wrapper.get("form.search-form").trigger("submit");
     await flushPromises();
@@ -497,12 +574,12 @@ describe("result page course search and replacement", () => {
     stubOfferings();
     const wrapper = mountPage();
     expect(
-      wrapper.get("#result-search-entry-0").attributes("aria-expanded"),
+      wrapper.get("#result-swap-0-CS103").attributes("aria-expanded"),
     ).toBe("false");
 
     await openAndSearch(wrapper, "CS103");
     expect(
-      wrapper.get("#result-search-entry-0").attributes("aria-expanded"),
+      wrapper.get("#result-swap-0-CS103").attributes("aria-expanded"),
     ).toBe("true");
 
     const conflict = rowOf(wrapper, "CS103-01");
@@ -540,12 +617,77 @@ describe("result page course search and replacement", () => {
     );
   });
 
+  it("search preview flags a section that Java says hits a must-avoid time, and never calls it clear", async () => {
+    vi.spyOn(api, "searchSessionOfferings").mockImplementation(
+      async (previousPlanId, courseCode) => ({
+        previousPlanId,
+        courseCode,
+        status: "OK",
+        items: structuredClone(DEFAULT_OFFERINGS[courseCode] ?? []),
+        mustAvoidChecks: [
+          { classId: "CS103-01", verdict: "CONFLICT" },
+          { classId: "CS103-02", verdict: "CLEAR" },
+        ],
+      }),
+    );
+    const wrapper = mountPage();
+    await openAndSearch(wrapper, "CS103");
+
+    const hit = rowOf(wrapper, "CS103-01");
+    expect(hit?.text()).toContain("有冲突");
+    expect(hit?.text()).toContain("与你设定的必避时段冲突");
+    expect(hit?.text()).not.toContain("没有发现冲突");
+    expect(hit?.text()).not.toContain("选这个班次");
+    const clear = rowOf(wrapper, "CS103-02");
+    expect(clear?.text()).toContain("与你设定的必避时段没有冲突");
+  });
+
+  it("lets a section pass the must-avoid check on unverified data, with the source caveat, and still blocks a real hit", async () => {
+    vi.spyOn(api, "searchSessionOfferings").mockImplementation(
+      async (previousPlanId, courseCode) => ({
+        previousPlanId,
+        courseCode,
+        status: "OK",
+        items: structuredClone(DEFAULT_OFFERINGS[courseCode] ?? []),
+        mustAvoidChecks: [
+          { classId: "CS103-01", verdict: "CONFLICT" },
+          { classId: "CS103-02", verdict: "CLEAR_UNVERIFIED" },
+        ],
+      }),
+    );
+    const wrapper = mountPage();
+    await openAndSearch(wrapper, "CS103");
+
+    const clear = rowOf(wrapper, "CS103-02");
+    expect(clear?.get("button").text()).toBe("选这个班次");
+    expect(clear?.get("button").attributes("disabled")).toBeUndefined();
+    expect(clear?.text()).toContain("按未核验课表");
+    expect(clear?.text()).not.toContain("无法确认是否与你设定的必避时段冲突");
+    expect(rowOf(wrapper, "CS103-01")?.text()).toContain(
+      "与你设定的必避时段冲突",
+    );
+  });
+
+  it("does not claim a section is conflict-free when the student has must-avoid times but Java gave no check for it", async () => {
+    const wrapper = mountPage();
+    store.$patch({
+      draft: { ...store.draft, mustSlots: ["5-1"] },
+    });
+    stubOfferings();
+    await openAndSearch(wrapper, "CS103");
+
+    const row = rowOf(wrapper, "CS103-02");
+    expect(row?.text()).toContain("还没有核对这个班次与你设定的必避时段");
+    expect(row?.text()).not.toContain("没有发现冲突");
+    expect(row?.text()).not.toContain("选这个班次");
+  });
+
   it("says a course has no offerings in the current snapshot instead of reporting an error", async () => {
     stubOfferings();
     const wrapper = mountPage();
-    await openAndSearch(wrapper, "CS999");
+    await searchAdd(wrapper, "CS999");
 
-    expect(wrapper.text()).toContain("这门课在当前快照下没有班次");
+    expect(wrapper.text()).toContain("CS999 在当前快照下没有开课班次");
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
   });
 
@@ -553,16 +695,17 @@ describe("result page course search and replacement", () => {
     vi.spyOn(api, "searchSessionOfferings").mockImplementation(
       async (previousPlanId, courseCode) => ({
         previousPlanId,
+        mustAvoidChecks: [],
         courseCode,
         items: [],
         status: "UNKNOWN",
       }),
     );
     const wrapper = mountPage();
-    await openAndSearch(wrapper, "CS999");
+    await searchAdd(wrapper, "CS999");
 
     expect(wrapper.text()).toContain("班次无法确认");
-    expect(wrapper.text()).not.toContain("这门课在当前快照下没有班次");
+    expect(wrapper.text()).not.toContain("在当前快照下没有开课班次");
     expect(wrapper.find("li.offering-row").exists()).toBe(false);
   });
 
@@ -570,6 +713,7 @@ describe("result page course search and replacement", () => {
     vi.spyOn(api, "searchSessionOfferings").mockImplementation(
       async (previousPlanId, courseCode) => ({
         previousPlanId,
+        mustAvoidChecks: [],
         courseCode,
         items: structuredClone(DEFAULT_OFFERINGS[courseCode] ?? []),
         status: "UNKNOWN",
@@ -589,6 +733,7 @@ describe("result page course search and replacement", () => {
     vi.spyOn(api, "searchSessionOfferings").mockImplementation(
       async (previousPlanId, courseCode) => ({
         previousPlanId,
+        mustAvoidChecks: [],
         courseCode,
         // 方案里的 CS102-01 在快照中找不到，它的时间就成了缺口。
         items:
@@ -646,7 +791,7 @@ describe("result page course search and replacement", () => {
     expect(wrapper.text()).toContain(
       "CS103-02 与 CS102-01 在周四第 7-8 节时间重叠",
     );
-    expect(wrapper.find(".notice--success").exists()).toBe(false);
+    expect(wrapper.find(".verdict-badge--pass").exists()).toBe(false);
   });
 
   it("states that the result is unknown rather than fine when re-verification is UNKNOWN", async () => {
@@ -673,7 +818,7 @@ describe("result page course search and replacement", () => {
 
     expect(wrapper.text()).toContain("部分条件无法确认");
     expect(wrapper.text()).toContain("CS103-02 的周次无法确认");
-    expect(wrapper.find(".notice--success").exists()).toBe(false);
+    expect(wrapper.find(".verdict-badge--pass").exists()).toBe(false);
   });
 
   it("does not show a green pass for VALID with SIMULATION scope", async () => {
@@ -687,7 +832,7 @@ describe("result page course search and replacement", () => {
     await recheck(wrapper);
 
     expect(wrapper.text()).toContain("模拟核验通过");
-    expect(wrapper.find(".notice--success").exists()).toBe(false);
+    expect(wrapper.find(".verdict-badge--pass").exists()).toBe(false);
   });
 
   it("shows a green pass only for VALID with REAL_TIMETABLE scope", async () => {
@@ -700,7 +845,7 @@ describe("result page course search and replacement", () => {
     await selectClass(wrapper, "CS103-02");
     await recheck(wrapper);
 
-    expect(wrapper.get(".notice--success").text()).toContain(
+    expect(wrapper.get(".verdict-badge--pass").text()).toContain(
       "本次快照下核验通过",
     );
   });
@@ -730,9 +875,10 @@ describe("result page course search and replacement", () => {
     await recheck(wrapper);
 
     expect(wrapper.text()).toContain("这是调整后重新核验的新版本");
+    await wrapper.get(".verdict-badge").trigger("click");
     expect(wrapper.text()).toContain("新方案仍有冲突");
     expect(wrapper.text()).not.toContain("课程层通过，时间待确认");
-    expect(wrapper.get("h2.sub-label").text()).toBe("方案 1");
+    expect(wrapper.get("h2.plan-bar__title").text()).toBe("方案 1");
   });
 
   it("ignores repeated clicks on re-verify while the request is in flight", async () => {
@@ -770,6 +916,7 @@ describe("result page course search and replacement", () => {
         }
         return {
           previousPlanId,
+          mustAvoidChecks: [],
           courseCode,
           items: DEFAULT_OFFERINGS.CS102,
           status: "OK" as const,
@@ -805,6 +952,7 @@ describe("result page course search and replacement", () => {
     vi.spyOn(api, "searchSessionOfferings").mockImplementation(
       async (previousPlanId, courseCode) => ({
         previousPlanId,
+        mustAvoidChecks: [],
         courseCode,
         items:
           courseCode === "CS102"
@@ -855,11 +1003,18 @@ describe("result page course search and replacement", () => {
 
     const card = courseCard(wrapper, "程序设计基础（测试）");
     expect(card).toBeDefined();
-    expect(card!.text()).toContain("CS102");
+    // 默认是紧凑行：课程名、学分、老师与短时间。
     expect(card!.text()).toContain("测试教师（合成）");
-    expect(card!.text()).toContain("周一 第1-2节 · 第1–16周");
+    expect(card!.text()).toContain("周一1-2 · 1-16周");
     expect(card!.text()).not.toContain("teacher-li-01");
     expect(card!.text()).not.toContain("{第");
+    // 课程号与完整时间收在展开的详情里。
+    expect(card!.find(".course-row__detail").exists()).toBe(false);
+    await card!.get(".course-row__toggle").trigger("click");
+    expect(card!.get(".course-row__detail").text()).toContain("CS102");
+    expect(card!.get(".course-row__detail").text()).toContain(
+      "周一 第1-2节 · 第1–16周",
+    );
   });
 
   it("shows a plan number instead of the raw plan id, which stays in a collapsed debug section", async () => {
@@ -867,7 +1022,7 @@ describe("result page course search and replacement", () => {
     const wrapper = mountPage();
     await flushPromises();
 
-    const heading = wrapper.get("h2.sub-label");
+    const heading = wrapper.get("h2.plan-bar__title");
     expect(heading.text()).toBe("方案 1");
     expect(heading.attributes("title")).toBe(PLAN_ID);
     expect(wrapper.get(".debug-id summary").text()).toBe("排查编号与详情");
@@ -894,7 +1049,7 @@ describe("result page course search and replacement", () => {
     expect(request).toEqual({ previousPlanId: PLAN_ID, courseCode: "CS102" });
     expect(key).toMatch(/^web-/);
     expect(wrapper.text()).toContain("这是调整后重新核验的新版本");
-    expect(wrapper.get(".notice--success").text()).toContain(
+    expect(wrapper.get(".verdict-badge--pass").text()).toContain(
       "本次快照下核验通过",
     );
     expect(courseCard(wrapper, "程序设计基础（测试）")).toBeUndefined();
@@ -988,7 +1143,7 @@ describe("result page course search and replacement", () => {
       .trigger("click");
     await flushPromises();
 
-    expect(wrapper.find(".notice--success").exists()).toBe(false);
+    expect(wrapper.find(".verdict-badge--pass").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("核验通过");
     expect(wrapper.text()).toContain("剩余课程的时间无法确认（测试）");
   });
@@ -1023,5 +1178,382 @@ describe("result page course search and replacement", () => {
       verification: null,
       empty: true,
     });
+  });
+
+  it("shows timetable and curriculum as two blocks with separate verdicts and an overall line", async () => {
+    const result = answer();
+    result.recommendations[0].verification = validation({
+      verdict: "UNKNOWN",
+      scope: "REAL_TIMETABLE",
+      unknownChecks: [UNMODELED_RULES_ISSUE],
+      sections: [
+        {
+          scope: "TIMETABLE",
+          verdict: "VALID",
+          violations: [],
+          unknownChecks: [],
+        },
+        {
+          scope: "CURRICULUM",
+          verdict: "UNKNOWN",
+          violations: [],
+          unknownChecks: [UNMODELED_RULES_ISSUE],
+        },
+      ],
+    });
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+    const badges = wrapper.findAll(".verdict-badge");
+    expect(badges).toHaveLength(2);
+    expect(badges[0].text()).toBe("课表：通过");
+    expect(badges[0].classes()).toContain("verdict-badge--pass");
+    expect(badges[1].text()).toBe("毕业要求：需人工确认 1 条");
+    expect(badges[1].classes()).toContain("verdict-badge--pending");
+    await badges[1].trigger("click");
+    const details = wrapper.get(".verdict-details");
+    expect(details.text()).toContain("本学期课表核验：通过");
+    expect(details.text()).toContain("毕业要求核对：无法确认");
+    expect(details.text()).toContain("有 1 条培养方案说明需人工确认");
+    expect(details.text()).not.toContain("测试表!A7");
+    expect(details.text()).toContain(
+      "总体：部分条件无法确认（取两项中较差的结果）",
+    );
+  });
+
+  it("shows a timetable conflict as its own failing block and keeps each block's own pass state", async () => {
+    const result = answer();
+    result.recommendations[0].verification = validation({
+      verdict: "INVALID",
+      scope: "REAL_TIMETABLE",
+      violations: [
+        {
+          code: "TIME_CONFLICT",
+          message: "周一 1-2 节两门课冲突",
+          field: "items",
+          retryable: false,
+        },
+      ],
+      sections: [
+        {
+          scope: "TIMETABLE",
+          verdict: "INVALID",
+          violations: [
+            {
+              code: "TIME_CONFLICT",
+              message: "周一 1-2 节两门课冲突",
+              field: "items",
+              retryable: false,
+            },
+          ],
+          unknownChecks: [],
+        },
+        {
+          scope: "CURRICULUM",
+          verdict: "VALID",
+          violations: [],
+          unknownChecks: [],
+        },
+      ],
+    });
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+    const badges = wrapper.findAll(".verdict-badge");
+    expect(badges[0].text()).toBe("课表：不通过");
+    expect(badges[0].classes()).toContain("verdict-badge--fail");
+    expect(badges[1].text()).toBe("毕业要求：通过");
+    // 毕业要求分项不依赖班次，真实的 VALID 仍可是通过；课表冲突不会把它拉成不通过。
+    expect(badges[1].classes()).toContain("verdict-badge--pass");
+    await badges[0].trigger("click");
+    expect(wrapper.get(".verdict-details").text()).toContain(
+      "周一 1-2 节两门课冲突",
+    );
+  });
+
+  it("uses two columns at 1440px and stacks below 1024px", async () => {
+    const original = globalThis.innerWidth;
+    try {
+      Object.defineProperty(globalThis, "innerWidth", {
+        configurable: true,
+        value: 1440,
+      });
+      stubOfferings();
+      const wide = mountPage();
+      await flushPromises();
+      expect(wide.find(".plan-grid--split").exists()).toBe(true);
+      expect(wide.find(".plan-grid__timetable").exists()).toBe(true);
+      expect(wide.find(".plan-grid__courses").exists()).toBe(true);
+      wide.unmount();
+
+      Object.defineProperty(globalThis, "innerWidth", {
+        configurable: true,
+        value: 390,
+      });
+      const narrow = mountPage();
+      await flushPromises();
+      expect(narrow.find(".plan-grid--split").exists()).toBe(false);
+      expect(narrow.find(".plan-grid").exists()).toBe(true);
+      narrow.unmount();
+    } finally {
+      Object.defineProperty(globalThis, "innerWidth", {
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+
+  it("shows one unplaced line per course, with the specific reason, on that course's card", async () => {
+    const result = answer();
+    result.unknowns = [
+      {
+        code: "SECTION_NOT_ASSIGNED",
+        message: "课程 CS103：与其他推荐课程的时间冲突",
+        field: null,
+        retryable: false,
+      },
+    ];
+    result.recommendations[0].verification = validation({
+      verdict: "UNKNOWN",
+      scope: "COURSE_ONLY",
+      unknownChecks: [
+        {
+          code: "SECTION_UNASSIGNED",
+          message: "课程 CS103 未指定班次，无法核验其时间与班次归属",
+          field: null,
+          retryable: false,
+        },
+      ],
+    });
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const card = courseCard(wrapper, "数据结构（测试）")!;
+    const lines = card.findAll(".course-card__issues li");
+    expect(lines).toHaveLength(1);
+    expect(lines[0].text()).toBe("未排进课表：与其他推荐课程的时间冲突");
+    expect(wrapper.text().match(/没有选定班次/g) ?? []).toHaveLength(0);
+    expect(wrapper.text()).not.toContain("暂时无法确认");
+  });
+
+  it("adds a clear offering through add-course and shows the re-verified new version", async () => {
+    stubOfferings();
+    const addSpy = vi.spyOn(api, "addSessionPlanCourse").mockResolvedValue({
+      previousPlanId: PLAN_ID,
+      planId: "plan-after-add",
+      items: [
+        ...INITIAL_ITEMS,
+        {
+          courseCode: "CS103",
+          teacherKey: "teacher-wang-03",
+          classId: "CS103-02",
+        },
+      ],
+      hardConstraints: [],
+      verification: validation({ verdict: "VALID", scope: "COURSE_ONLY" }),
+      empty: false,
+    });
+    const wrapper = mountPage();
+    await searchAdd(wrapper, "CS103");
+
+    const addButton = wrapper
+      .findAll("button")
+      .find((button) => button.text() === "加入方案");
+    expect(addButton).toBeDefined();
+    await addButton!.trigger("click");
+    await flushPromises();
+
+    expect(addSpy).toHaveBeenCalledTimes(1);
+    const [body, key] = addSpy.mock.calls[0];
+    expect(body).toEqual({
+      previousPlanId: PLAN_ID,
+      courseCode: "CS103",
+      classId: "CS103-02",
+    });
+    expect(key).toMatch(/^web-/);
+    expect(store.editedPlans[PLAN_ID]?.planId).toBe("plan-after-add");
+    expect(wrapper.text()).toContain("这是调整后重新核验的新版本");
+  });
+
+  it("maps add-course error codes to plain text and keeps the plan unchanged", async () => {
+    stubOfferings();
+    vi.spyOn(api, "addSessionPlanCourse").mockRejectedValue(
+      new ApiFailure("服务端原文", "http", 422, "COURSE_ALREADY_TAKEN"),
+    );
+    const wrapper = mountPage();
+    await searchAdd(wrapper, "CS103");
+    const addButton = wrapper
+      .findAll("button")
+      .find((button) => button.text() === "加入方案");
+    await addButton!.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(
+      "你已修过或正在修这门课，不能再加入方案。",
+    );
+    expect(wrapper.text()).not.toContain("服务端原文");
+    expect(store.editedPlans[PLAN_ID]).toBeUndefined();
+  });
+
+  it("shows the reused-reason notice once above the course list after an edit", async () => {
+    const result = answer();
+    result.recommendations[0].courseRationales = [
+      { courseCode: "CS102", reason: "适合作为基础课", reviewNoteIds: [] },
+    ];
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+    // 未调整前不出现该说明。
+    expect(wrapper.text()).not.toContain("以下理由来自原推荐");
+
+    store.applyPlanEdit(PLAN_ID, {
+      previousPlanId: PLAN_ID,
+      planId: "plan-after-edit",
+      items: structuredClone(INITIAL_ITEMS),
+      hardConstraints: [],
+      verification: validation({ verdict: "VALID", scope: "COURSE_ONLY" }),
+      empty: false,
+    });
+    await flushPromises();
+
+    const notes = wrapper.findAll(".course-list__note");
+    expect(notes).toHaveLength(1);
+    expect(notes[0].text()).toBe("以下理由来自原推荐：方案调整后未重新生成。");
+    expect(
+      wrapper
+        .findAll(".course-card")
+        .some((card) => card.text().includes("以下理由来自原推荐")),
+    ).toBe(false);
+  });
+
+  it("collapses the career section by default and renames the regenerate button", async () => {
+    const result = answer();
+    result.recommendations[0].explorationDirections = [
+      {
+        title: "研究方向探索",
+        description: "了解研究问题",
+        steps: ["阅读入门资料"],
+      },
+    ];
+    store.$patch({ planningResult: result });
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const career = wrapper.get("details.career-details");
+    expect(career.attributes("open")).toBeUndefined();
+    expect(career.get("summary").text()).toBe(
+      "职业与科研方向探索（AI 生成，仅供参考）",
+    );
+    const regenerate = wrapper
+      .findAll("button")
+      .find((button) => button.text() === "让 AI 重新生成方案");
+    expect(regenerate).toBeDefined();
+    expect(wrapper.text()).toContain(
+      "会按当前条件重新推荐，已做的换班/加课会被替换",
+    );
+    expect(wrapper.findAll("button").some((b) => b.text() === "重新提交")).toBe(
+      false,
+    );
+  });
+
+  it("puts the add-course action in the right column toolbar", async () => {
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+    const addButton = wrapper
+      .get(".plan-actions")
+      .findAll("button")
+      .find((button) => button.text() === "加课");
+    expect(addButton).toBeDefined();
+    expect(wrapper.find(".plan-grid__courses .add-course").exists()).toBe(true);
+  });
+
+  it("closes the swap panel with Escape and returns focus to its card button", async () => {
+    stubOfferings();
+    const wrapper = mountPage();
+    await openAndSearch(wrapper, "CS103");
+    expect(wrapper.find(".swap-panel").exists()).toBe(true);
+
+    await wrapper.get(".swap-panel").trigger("keydown", { key: "Escape" });
+    await flushPromises();
+    expect(wrapper.find(".swap-panel").exists()).toBe(false);
+    expect(
+      wrapper.get("#result-swap-0-CS103").attributes("aria-expanded"),
+    ).toBe("false");
+  });
+
+  it("keeps each course row collapsed until it is opened, with 换班 and 删除 beside it", async () => {
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    const card = courseCard(wrapper, "程序设计基础（测试）")!;
+    const toggle = card.get(".course-row__toggle");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(card.get(".course-row__tools").text()).toContain("换班");
+    expect(card.get(".course-row__tools").text()).toContain("删除");
+    await toggle.trigger("click");
+    expect(card.get(".course-row__toggle").attributes("aria-expanded")).toBe(
+      "true",
+    );
+    await card.get(".course-row__toggle").trigger("click");
+    expect(card.find(".course-row__detail").exists()).toBe(false);
+  });
+
+  it("saves a plan copy to this browser without grades and reopens it read-only", async () => {
+    localStorage.clear();
+    stubOfferings();
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await buttonByText(wrapper, "保存方案")!.trigger("click");
+    const menuItem = wrapper
+      .findAll('[role="menuitem"]')
+      .find((item) => item.text().startsWith("保存到本机浏览器"));
+    await menuItem!.trigger("click");
+    await flushPromises();
+
+    const raw = localStorage.getItem(SAVED_PLANS_KEY);
+    expect(raw).not.toBeNull();
+    const saved = JSON.parse(raw!);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].planId).toBe(PLAN_ID);
+    expect(
+      saved[0].courses.map((c: { courseCode: string }) => c.courseCode),
+    ).toEqual(["CS102", "CS103"]);
+    expect(raw).not.toMatch(/grade|transcript|token|password/i);
+    expect(wrapper.text()).toContain("非最新核验结果");
+
+    const list = wrapper.get('[aria-label="本机保存的方案"]');
+    expect(list.text()).toContain("方案 1");
+    await list.get("button").trigger("click");
+    const view = wrapper.get('[aria-label="保存的方案副本（只读）"]');
+    expect(view.text()).toContain("程序设计基础（测试）");
+    expect(view.find("button").text()).toContain("删除这份副本");
+    localStorage.clear();
+  });
+
+  it("opens the browser print dialog from the save menu and marks .ics as unavailable", async () => {
+    stubOfferings();
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    const wrapper = mountPage();
+    await flushPromises();
+
+    await buttonByText(wrapper, "保存方案")!.trigger("click");
+    expect(wrapper.text()).toContain("缺少开学日期和节次的上课钟点");
+    const menuItem = wrapper
+      .findAll('[role="menuitem"]')
+      .find((item) => item.text().startsWith("打印"));
+    await menuItem!.trigger("click");
+
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false);
+    print.mockRestore();
   });
 });

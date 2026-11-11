@@ -150,9 +150,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{'步骤':<16} {'退出码':<6} 失败归属")
     for item in outcomes:
         note = item.get("note", "")
-        print(
-            f"{item['name']:<16} {('PLAN' if note else item['exitCode']):<6} {item['owner'] if item['exitCode'] else '-'} {note}"
-        )
+        label = ("BLOCKED" if item["exitCode"] else "PLAN") if note else item["exitCode"]
+        print(f"{item['name']:<16} {label:<6} {item['owner'] if item['exitCode'] else '-'} {note}")
     print()
     if failed:
         print("未通过：" + "、".join(f"{item['name']}({item['exitCode']}) → {item['owner']}" for item in failed))

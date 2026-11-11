@@ -247,7 +247,7 @@ def test_start_controlled_stub_returns_the_actual_isolated_url(monkeypatch):
     server = StubServer()
     monkeypatch.setattr(stub_upstream, "serve", lambda **kwargs: (server, "http://127.0.0.1:58123", object()))
     ready, url, result_server = start_controlled_stub(
-        type("Args", (), {"with_stub": True, "plan": False, "api_url": None})(), {}
+        type("Args", (), {"with_stub": True, "plan": False, "api_url": None})()
     )
     assert ready is True
     assert url == "http://127.0.0.1:58123"

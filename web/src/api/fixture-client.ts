@@ -12,10 +12,12 @@ import type {
   PlanItem,
   PlanningAnswer,
   PlanningRequest,
+  PlanSection,
   PlanValidation,
   ReviewNote,
   RunReport,
   SessionPlanReplaceInput,
+  SessionPlanCourseAddInput,
   SessionPlanEditInput,
   SessionPlanEditResult,
   SessionPlanReplacement,
@@ -32,6 +34,7 @@ import {
   type CurriculumResult,
   type OfferingSnapshotResult,
   type CourseSearch,
+  type OfferingSummarySearch,
   type ReviewNoteSearch,
   type SessionOfferingSearch,
   type SessionView,
@@ -59,6 +62,13 @@ const DEMO_COURSES: Course[] = [
     credits: null,
     category: "演示课程",
     sourceRefIds: ["source:fixture-course-cs103"],
+  },
+  {
+    courseCode: "CS104",
+    name: "数据库原理（演示）",
+    credits: null,
+    category: "演示课程",
+    sourceRefIds: ["source:fixture-course-cs104"],
   },
 ];
 
@@ -211,24 +221,27 @@ const FIXTURE_HARD_CONSTRAINTS: Constraint[] = [
  * 已核验通过。verdict 写 VALID 只表示「在这组演示数据里没发现违规」，
  * 页面仍然不会给绿色。
  */
+const DEMO_UNKNOWN_CHECKS: PlanValidation["unknownChecks"] = [
+  {
+    code: "CLASS_NOT_SELECTED",
+    message: "CS103 尚未选定班次，上课时间无法确认（演示数据）。",
+    field: null,
+    retryable: false,
+  },
+];
 const DEMO_VERIFICATION: PlanValidation = {
   verifierResultId: "fixture-verifier-base",
-  verdict: "VALID",
+  // 演示方案有未确认的班次，总判决不能是 VALID（与 Java 的分项取最差规则一致）。
+  verdict: "UNKNOWN",
   scope: "SIMULATION",
   curriculumSnapshotId: DEMO_CURRICULUM_ID,
   offeringSnapshotId: FIXTURE_OFFERING_SNAPSHOT_ID,
   recordRevision: DEMO_RECORD.revision,
   violations: [],
-  unknownChecks: [
-    {
-      code: "CLASS_NOT_SELECTED",
-      message: "CS103 尚未选定班次，上课时间无法确认（演示数据）。",
-      field: null,
-      retryable: false,
-    },
-  ],
+  unknownChecks: DEMO_UNKNOWN_CHECKS,
   performedChecks: ["PLAN_TIME_OVERLAP", "HARD_CONSTRAINT_BLOCK_DAY"],
   sourceRefIds: ["source:fixture-offering-cs102-01"],
+  sections: timetableAndCurriculumSections("UNKNOWN", [], DEMO_UNKNOWN_CHECKS),
 };
 
 const DEMO_ANSWER: PlanningAnswer = {
@@ -236,6 +249,12 @@ const DEMO_ANSWER: PlanningAnswer = {
   traceId: "fixture-trace-e2",
   decision: "RECOMMENDATIONS",
   academicAudit: DEMO_AUDIT,
+  planningContext: {
+    targetTerm: "NEXT_SEMESTER",
+    timetableReferenceSnapshotId: FIXTURE_OFFERING_SNAPSHOT_ID,
+    timetableReferenceTermId: "2025-FALL",
+    timetableSourceValidation: "SYNTHETIC",
+  },
   recommendations: [
     {
       planId: FIXTURE_PREVIOUS_PLAN_ID,
@@ -331,9 +350,42 @@ const CS102_OFFERINGS: CourseOffering[] = [
   },
 ];
 
+/** CS104 只用于演示「加课」：01 与方案里的 CS102-01 同一时段（演示冲突预览），02 不冲突。 */
+const CS104_OFFERINGS: CourseOffering[] = [
+  {
+    courseCode: "CS104",
+    classId: "CS104-01",
+    teacherKey: "teacher-min-04",
+    teacherText: "李敏（合成）",
+    credits: 3,
+    capacity: 60,
+    meetingTextRaw: "周一 1-2 节 1-16 周",
+    meetings: [
+      { dayOfWeek: 1, sectionStart: 1, sectionEnd: 2, weeks: WEEKS_1_TO_16 },
+    ],
+    parseStatus: "PARSED",
+    sourceRefId: "source:fixture-offering-cs104-01",
+  },
+  {
+    courseCode: "CS104",
+    classId: "CS104-02",
+    teacherKey: "teacher-min-04",
+    teacherText: "李敏（合成）",
+    credits: 3,
+    capacity: 60,
+    meetingTextRaw: "周三 3-4 节 1-16 周",
+    meetings: [
+      { dayOfWeek: 3, sectionStart: 3, sectionEnd: 4, weeks: WEEKS_1_TO_16 },
+    ],
+    parseStatus: "PARSED",
+    sourceRefId: "source:fixture-offering-cs104-02",
+  },
+];
+
 const FIXTURE_OFFERINGS = new Map<string, CourseOffering[]>([
   ["CS102", CS102_OFFERINGS],
   ["CS103", CS103_OFFERINGS],
+  ["CS104", CS104_OFFERINGS],
 ]);
 
 const FIXTURE_TEACHER_OPTIONS: TeacherCourseOption[] = [
@@ -422,6 +474,26 @@ const FIXTURE_RUN_REPORT: RunReport = {
   failureCategories: ["FIXTURE_NO_EVALUATION"],
 };
 
+/**
+ * 演示数据的两个分项。课表分项承载全部违规与未知项；演示数据不含毕业要求规则，
+ * 毕业要求分项记为 VALID（无可报告的问题），总判决与课表分项一致，即取两者中较差的结果。
+ */
+function timetableAndCurriculumSections(
+  verdict: PlanValidation["verdict"],
+  violations: PlanValidation["violations"],
+  unknownChecks: PlanValidation["unknownChecks"],
+): PlanSection[] {
+  return [
+    { scope: "TIMETABLE", verdict, violations, unknownChecks },
+    {
+      scope: "CURRICULUM",
+      verdict: "VALID",
+      violations: [],
+      unknownChecks: [],
+    },
+  ];
+}
+
 /** 按班次生成核验判决。判决只说明演示数据的情况，不是真实核验。 */
 function fixtureVerification(
   offering: CourseOffering,
@@ -461,6 +533,36 @@ function fixtureVerification(
     unknownChecks,
     performedChecks: ["PLAN_TIME_OVERLAP", "HARD_CONSTRAINT_BLOCK_DAY"],
     sourceRefIds: [offering.sourceRefId],
+    sections: timetableAndCurriculumSections(
+      verdict,
+      violations,
+      unknownChecks,
+    ),
+  };
+}
+
+/** 加课但未选班次：Java 的 SECTION_UNASSIGNED 文案，页面据此显示「未排进课表：还没有选定班次」。 */
+function fixtureUnassignedVerification(courseCode: string): PlanValidation {
+  const unknownChecks: PlanValidation["unknownChecks"] = [
+    {
+      code: "SECTION_UNASSIGNED",
+      message: `课程 ${courseCode} 未指定班次，无法核验上课时间（演示数据）。`,
+      field: null,
+      retryable: false,
+    },
+  ];
+  return {
+    verifierResultId: `fixture-verifier-add-${courseCode.toLowerCase()}`,
+    verdict: "UNKNOWN",
+    scope: "SIMULATION",
+    curriculumSnapshotId: DEMO_CURRICULUM_ID,
+    offeringSnapshotId: FIXTURE_OFFERING_SNAPSHOT_ID,
+    recordRevision: DEMO_RECORD.revision,
+    violations: [],
+    unknownChecks,
+    performedChecks: ["PLAN_TIME_OVERLAP"],
+    sourceRefIds: [`source:fixture-course-${courseCode.toLowerCase()}`],
+    sections: timetableAndCurriculumSections("UNKNOWN", [], unknownChecks),
   };
 }
 
@@ -470,6 +572,14 @@ export class FixtureApiClient implements CoursePilotApiClient {
 
   clearSession(): void {
     this.sessionToken = null;
+  }
+
+  restoreSession(sessionToken: string): void {
+    this.sessionToken = sessionToken;
+  }
+
+  currentSessionToken(): string | null {
+    return this.sessionToken;
   }
 
   async createSession(signal?: AbortSignal): Promise<SessionView> {
@@ -647,6 +757,8 @@ export class FixtureApiClient implements CoursePilotApiClient {
       previousPlanId,
       courseCode,
       items: structuredClone(FIXTURE_OFFERINGS.get(courseCode) ?? []),
+      // 演示数据不做必避时段核对：没有检查结果，页面会按「未核对」处理，不声称无冲突。
+      mustAvoidChecks: [],
       status: "OK",
     };
   }
@@ -693,6 +805,62 @@ export class FixtureApiClient implements CoursePilotApiClient {
       ),
       hardConstraints: structuredClone(FIXTURE_HARD_CONSTRAINTS),
       verification: fixtureVerification(offering, verdict),
+    };
+  }
+
+  async addSessionPlanCourse(
+    body: SessionPlanCourseAddInput,
+    _idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<SessionPlanEditResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    if (
+      FIXTURE_PLAN_BASE_ITEMS.some(
+        (item) => item.courseCode === body.courseCode,
+      )
+    ) {
+      throw new ApiFailure(
+        "这门课已在方案里。",
+        "http",
+        422,
+        "COURSE_ALREADY_IN_PLAN",
+      );
+    }
+    const offering =
+      body.classId == null
+        ? null
+        : ((FIXTURE_OFFERINGS.get(body.courseCode) ?? []).find(
+            (item) => item.classId === body.classId,
+          ) ?? null);
+    // 指定了班次却不在搜索结果里：与换班一样拒绝，不能把不存在的班次写进方案。
+    if (body.classId != null && offering === null) {
+      throw new ApiFailure(
+        "所选班次不在当前搜索结果里，请重新搜索后再选。",
+        "http",
+        404,
+        "NOT_FOUND",
+      );
+    }
+    const items: PlanItem[] = [
+      ...FIXTURE_PLAN_BASE_ITEMS.map((item) => ({ ...item })),
+      {
+        courseCode: body.courseCode,
+        teacherKey: offering?.teacherKey ?? null,
+        classId: offering?.classId ?? null,
+      },
+    ];
+    return {
+      previousPlanId: body.previousPlanId,
+      planId: `${body.previousPlanId}-add-${body.courseCode}`,
+      items,
+      hardConstraints: structuredClone(FIXTURE_HARD_CONSTRAINTS),
+      verification:
+        offering === null
+          ? fixtureUnassignedVerification(body.courseCode)
+          : fixtureVerification(offering, "VALID"),
+      empty: false,
     };
   }
 
@@ -748,14 +916,6 @@ export class FixtureApiClient implements CoursePilotApiClient {
     );
   }
 
-  async importSchoolProgress(
-    body: SchoolProgressImportRequest,
-    idempotencyKey: string,
-    signal?: AbortSignal,
-  ): Promise<SchoolProgressImportResult> {
-    return this.saveSchoolProgress(body, idempotencyKey, signal);
-  }
-
   async getSchoolProgress(
     signal?: AbortSignal,
   ): Promise<SchoolProgressImportResult | null> {
@@ -763,6 +923,34 @@ export class FixtureApiClient implements CoursePilotApiClient {
     if (!this.sessionToken)
       throw new Error("Fixture session has not been created");
     return null;
+  }
+
+  async summarizeOfferings(
+    _curriculumSnapshotId: string,
+    _offeringSnapshotId: string,
+    courseCodes: string[],
+    signal?: AbortSignal,
+  ): Promise<OfferingSummarySearch> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!this.sessionToken)
+      throw new Error("Fixture session has not been created");
+    // 演示数据是确定的：没有班次就是确定的「未开」，所以每门课都给出计数，不列入未知。
+    return {
+      items: courseCodes.map((courseCode) => {
+        const sections = FIXTURE_OFFERINGS.get(courseCode) ?? [];
+        const teacherTexts = [
+          ...new Set(sections.map((section) => section.teacherText ?? "")),
+        ].filter(Boolean);
+        return {
+          courseCode,
+          sectionCount: new Set(sections.map((section) => section.classId))
+            .size,
+          teacherTexts,
+        };
+      }),
+      unknownCourseCodes: [],
+      status: "OK",
+    };
   }
 
   async listTeacherCourseOptions(

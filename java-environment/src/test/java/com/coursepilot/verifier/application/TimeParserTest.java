@@ -213,4 +213,44 @@ class TimeParserTest {
     assertTrue(outcome.isOutOfContract());
     assertTrue(outcome.getMeetings().isEmpty());
   }
+
+  @Test
+  @DisplayName("多段节次共用一个周次块：星期四第3-4,7-8节{9-12周} 拆成两段同周次的课")
+  void multiSectionListIsTwoMeetings() {
+    TimeParser.ParseOutcome outcome = parser.parse("星期四第3-4,7-8节{9-12周}");
+    assertTrue(outcome.isOk(), outcome.getReason());
+    List<MeetingTime> meetings = outcome.getMeetings();
+    assertEquals(2, meetings.size());
+    assertEquals(4, meetings.get(0).getDayOfWeek());
+    assertEquals(3, meetings.get(0).getStartSection());
+    assertEquals(4, meetings.get(0).getEndSection());
+    assertEquals(7, meetings.get(1).getStartSection());
+    assertEquals(8, meetings.get(1).getEndSection());
+    assertEquals(List.of(9, 10, 11, 12), List.copyOf(meetings.get(0).getWeeks()));
+    assertEquals(meetings.get(0).getWeeks(), meetings.get(1).getWeeks());
+  }
+
+  @Test
+  @DisplayName("多段节次与另一段时间用逗号连接仍逐段解析")
+  void multiSectionFollowedByAnotherBlock() {
+    TimeParser.ParseOutcome outcome = parser.parse("星期一第1-2,5节{1-16周(单)},星期三第3-4节{1-16周}");
+    assertTrue(outcome.isOk(), outcome.getReason());
+    assertEquals(3, outcome.getMeetings().size());
+    assertEquals(List.of(1, 3, 5, 7, 9, 11, 13, 15), List.copyOf(outcome.getMeetings().get(0).getWeeks()));
+  }
+
+  @Test
+  @DisplayName("截断的多段写法保持未知，不得只解析前半段")
+  void truncatedMultiSectionStaysUnknown() {
+    assertFalse(parser.parse("星期四第3-4,7-8节{9-12").isOk());
+    assertFalse(parser.parse("星期四第3-4,节{9-12周}").isOk());
+    assertFalse(parser.parse("星期四第3-4,7-8").isOk());
+    assertFalse(parser.parse("星期四第3-4,7-8节{9-12周},星期五第7-").isOk());
+  }
+
+  @Test
+  @DisplayName("多段中有倒置节次时整体未知")
+  void multiSectionWithInvertedRangeIsUnknown() {
+    assertFalse(parser.parse("星期四第8-7,3-4节{9-12周}").isOk());
+  }
 }

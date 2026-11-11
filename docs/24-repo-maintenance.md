@@ -21,7 +21,7 @@ cd web             && npm run lint && npm run typecheck
 python scripts/check_modules.py
 ```
 
-CI 跑的是 `check_contracts.py` + `self_check.py` + `check_modules.py`。**CI 绿不等于功能对**——它只验结构、链接和各模块自己的测试。
+PR CI 在 `.github/workflows/project-checks.yml` 中运行契约与仓库自查脚本，并由 Java、Python、Web、Benchmark、Integration 模块 job 直接执行对应检查；`java-environment/importer` 另行运行 Maven `verify`。`scripts/check_modules.py` 保留为本地全仓检查入口，PR CI 不再调用它。**CI 绿不等于功能对**——它只验结构、链接和各模块自己的测试。
 
 ## 二、本地起服务
 

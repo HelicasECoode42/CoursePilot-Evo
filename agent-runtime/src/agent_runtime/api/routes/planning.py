@@ -3,26 +3,65 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request
 
+from agent_runtime.adapters.tool_client import (
+    ToolClient,
+    ToolContractViolation,
+    ToolRejected,
+    ToolUnavailable,
+)
 from agent_runtime.api.deps import (
     get_idempotency,
     get_runner,
     get_spend_ledger,
+    get_tool_client,
     require_subject,
 )
 from agent_runtime.api.errors import envelope
 from agent_runtime.api.idempotency import IdempotencyStore
-from agent_runtime.api.schemas import PlanningRequest
+from agent_runtime.api.schemas import PlanningContext, PlanningRequest
 from agent_runtime.application.budget import SessionSpendLedger
 from agent_runtime.application.context import ExecutionContext
 from agent_runtime.application.ids import digest
 from agent_runtime.application.runner import PlanningRunner
 
 router = APIRouter()
+
+
+def _planning_context(
+    tool_client: ToolClient,
+    context: ExecutionContext,
+    offering_snapshot_id: str | None,
+) -> PlanningContext:
+    """Label the plan: it is for next term, checked against the snapshot's own term.
+
+    The term and validation come from Java's offering snapshot list. When that list
+    is unavailable or lacks the snapshot, those fields are null and the page must
+    say the term is unknown. They are never guessed from the snapshot id.
+    """
+    if offering_snapshot_id is None:
+        return PlanningContext(
+            targetTerm="NEXT_SEMESTER",
+            timetableReferenceSnapshotId=None,
+            timetableReferenceTermId=None,
+            timetableSourceValidation=None,
+        )
+    try:
+        snapshots = tool_client.call("listOfferingSnapshots", None, context)
+    except (ToolUnavailable, ToolRejected, ToolContractViolation):
+        snapshots = []
+    match = next((item for item in snapshots if item.snapshotId == offering_snapshot_id), None)
+    return PlanningContext(
+        targetTerm="NEXT_SEMESTER",
+        timetableReferenceSnapshotId=offering_snapshot_id,
+        timetableReferenceTermId=match.termId if match is not None else None,
+        timetableSourceValidation=match.sourceValidation if match is not None else None,
+    )
 
 
 @router.post("/api/v1/planning")
@@ -35,6 +74,7 @@ def plan(
     runner: Annotated[PlanningRunner, Depends(get_runner)],
     idempotency: Annotated[IdempotencyStore, Depends(get_idempotency)],
     spend_ledger: Annotated[SessionSpendLedger, Depends(get_spend_ledger)],
+    tool_client: Annotated[ToolClient, Depends(get_tool_client)],
 ) -> dict:
     body_digest = digest(
         json.dumps(body.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
@@ -50,8 +90,12 @@ def plan(
             offering_snapshot_id=body.offeringSnapshotId,
             model_id=settings.model_id,
             temperature=settings.temperature,
-            deadline=datetime.now(UTC) + timedelta(milliseconds=45000),
+            deadline=datetime.now(UTC) + timedelta(milliseconds=settings.deadline_ms),
             harness_version=harness.version,
+        )
+        context = replace(
+            context,
+            planning_context=_planning_context(tool_client, context, body.offeringSnapshotId),
         )
         # 发起模型调用前原子地预留一次运行的最大用量（单次运行的输入/输出上限）：
         # 检查和预留在同一把锁里，并发请求不会同时通过检查。
@@ -59,15 +103,43 @@ def plan(
         reservation = spend_ledger.reserve(
             subject_id, settings.max_input_tokens, settings.max_output_tokens
         )
+        answer = None
         try:
             answer = runner.run(body, context)
+            if answer.planningContext != context.planning_context:
+                answer = answer.model_copy(update={"planningContext": context.planning_context})
+            payload = envelope(x_request_id, "OK", answer).model_dump(mode="json")
         except Exception as exc:
-            # 失败也可能已经花过 token：异常上带了实际用量就按实际结算，否则整笔释放。
-            reservation.settle(
-                getattr(exc, "input_tokens", None), getattr(exc, "output_tokens", None)
-            )
+            input_tokens = getattr(exc, "input_tokens", None)
+            output_tokens = getattr(exc, "output_tokens", None)
+            if answer is not None:
+                if input_tokens is None:
+                    input_tokens = answer.usage.inputTokens
+                    exc.input_tokens = input_tokens
+                if output_tokens is None:
+                    output_tokens = answer.usage.outputTokens
+                    exc.output_tokens = output_tokens
+            # Before generation there is no usage to charge; after generation the
+            # answer usage survives any metadata/archive failure.
+            reservation.settle(input_tokens, output_tokens)
             raise
-        reservation.settle(answer.usage.inputTokens, answer.usage.outputTokens)
-        return envelope(x_request_id, "OK", answer).model_dump(mode="json")
+        else:
+            reservation.settle(answer.usage.inputTokens, answer.usage.outputTokens)
+        finally:
+            # 已结算时是空操作；取消等其它 BaseException 也不会留下占用的预留。
+            reservation.release()
+        return payload
 
-    return idempotency.run(subject_id, "planning", idempotency_key, body_digest, produce)
+    return idempotency.run(
+        subject_id,
+        "planning",
+        idempotency_key,
+        body_digest,
+        produce,
+        # Once a provider reports usage, replaying the same key must not pay twice.
+        # Failures before a model call (no known usage) retain the existing retry path.
+        cache_failure=lambda exc: (
+            getattr(exc, "input_tokens", None) is not None
+            or getattr(exc, "output_tokens", None) is not None
+        ),
+    )

@@ -62,12 +62,6 @@ def schema_validator(definition: str):
     return validate
 
 
-def gate(step: str, expect: str, ok: bool, why: str, repro: str) -> StepResult | None:
-    if ok:
-        return None
-    return StepResult(step, BLOCKED, "-", expect, why, detail=why, repro=repro)
-
-
 def call(
     transport, step: str, request_id: str, expect: str, method: str, url: str, headers: dict, body=None, attempts=None
 ) -> tuple[StepResult, Any]:
@@ -156,14 +150,24 @@ def main(argv: list[str] | None = None) -> int:
             planning_url,
             auth | {"Idempotency-Key": "stub-1"},
             planning_body,
+            attempts=[Attempt("200 + Envelope(OK)", 200, "OK")],
         )
         if r.verdict == PASS:
             data = (resp.payload.get("data") or {}) if isinstance(resp.payload, dict) else None
-            verdict, detail = classify_planning(data)
-            if verdict == FAIL:
-                r = StepResult(step, FAIL, DEFAULT_REQUEST_ID, expect, resp.describe(), detail=detail, repro=r.repro)
-            else:
-                r = StepResult(step, PASS, DEFAULT_REQUEST_ID, expect, resp.describe(), detail=detail, repro=r.repro)
+            if (
+                not isinstance(data, dict)
+                or data.get("decision") != "UNABLE_TO_VERIFY"
+                or data.get("recommendations") != []
+            ):
+                r = StepResult(
+                    step,
+                    FAIL,
+                    DEFAULT_REQUEST_ID,
+                    expect,
+                    resp.describe(),
+                    detail="资料不足场景必须返回 UNABLE_TO_VERIFY 和空推荐列表",
+                    repro=r.repro,
+                )
         results.append(r)
 
         step = "stub_repeatable"

@@ -46,7 +46,11 @@ const zhang: TeacherCourseOption = {
   teacherDisplayName: "张伟（合成）",
   availability: "HISTORICAL_ONLY",
   reviewNoteIds: ["review-cs103-zhang-01"],
-  classIds: [],
+  classIds: ["CS103-01", "CS103-03"],
+  sectionCount: 2,
+  offeringSnapshotId: "OFS_test",
+  offeringSourceValidation: "UNVERIFIED",
+  factSource: "OFFERING_SNAPSHOT",
 };
 const wang: TeacherCourseOption = {
   courseCode: "CS103",
@@ -55,6 +59,20 @@ const wang: TeacherCourseOption = {
   availability: "UNKNOWN",
   reviewNoteIds: ["review-cs103-wang-01"],
   classIds: ["CS103-02"],
+  sectionCount: 1,
+  offeringSnapshotId: "OFS_test",
+  factSource: "OFFERING_SNAPSHOT",
+};
+/** 搜得到但没有本学期班次的教师（历史绑定）：不能设为必须保留/优先考虑。 */
+const historical: TeacherCourseOption = {
+  courseCode: "CS103",
+  teacherKey: "teacher-history-04",
+  teacherDisplayName: "无本学期班次（合成）",
+  availability: "HISTORICAL_ONLY",
+  reviewNoteIds: [],
+  classIds: [],
+  sectionCount: 0,
+  factSource: "TEACHER_BINDING",
 };
 
 const matched: ReviewNote = {
@@ -121,7 +139,7 @@ describe("teacher comparison page", () => {
       draft: emptyPlanningDraft(),
     });
     listOptions.mockImplementation(async (_id, code, _signal, query) => ({
-      items: [zhang, wang].filter(
+      items: [zhang, wang, historical].filter(
         (option) =>
           (code === null || option.courseCode === code) &&
           (!query || option.teacherDisplayName.includes(query)),
@@ -210,10 +228,27 @@ describe("teacher comparison page", () => {
     const text = wrapper.text();
     expect(text).toContain("张伟（合成）");
     expect(text).toContain("王芳（合成）");
-    expect(text).toContain("仅有历史资料");
+    // 真实开课快照配对：显示「未核验的本学期开课表」和班次数，可设置强度。
+    expect(text).toContain("本学期开课表（未核验）");
+    expect(text).toContain("2 个班次");
     expect(text).toContain("目标学期开课状态未知");
     expect(text).toContain("1 个班次");
-    expect(text).toContain("暂无班次资料");
+    // 只有历史绑定、所选开课快照里没有班次：显示原因且禁止设置强度。
+    expect(text).toContain("仅有历史资料");
+    expect(text).toContain("所选开课表里没有这位教师的班次");
+    const historyRow = wrapper
+      .findAll("li.teacher-option")
+      .find((item) => item.text().includes("无本学期班次（合成）"))!;
+    expect(
+      historyRow
+        .get('button[aria-label="无本学期班次（合成） 必须保留"]')
+        .attributes("disabled"),
+    ).toBeDefined();
+    expect(
+      historyRow
+        .get('button[aria-label="无本学期班次（合成） 优先考虑"]')
+        .attributes("disabled"),
+    ).toBeDefined();
   });
 
   it("allows teacher-name searches and shows associated courses", async () => {
@@ -576,9 +611,44 @@ describe("teacher comparison page", () => {
     expect(wrapper.find("li.teacher-option").exists()).toBe(false);
   });
 
-  it("marks listed teachers as possibly incomplete when the teacher list is UNKNOWN", async () => {
+  it("labels an unverified current timetable as unverified, not unknown, and does not warn about it as an error", async () => {
     listOptions.mockResolvedValueOnce({
-      items: [zhang, wang],
+      items: [
+        {
+          courseCode: "CS103",
+          teacherKey: "teacher-zhang-01",
+          teacherDisplayName: "张伟（合成）",
+          availability: "UNKNOWN",
+          reviewNoteIds: [],
+          classIds: [],
+          courseName: "数据结构",
+          sectionCount: 3,
+          offeringSnapshotId: "OFS_fictional",
+          offeringSourceValidation: "UNVERIFIED",
+          factSource: "OFFERING_SNAPSHOT",
+        },
+      ],
+      status: "UNKNOWN",
+    });
+    const wrapper = mountPage();
+    await search(wrapper);
+
+    const row = wrapper
+      .findAll("li.teacher-option")
+      .find((item) => item.text().includes("张伟（合成）"))!;
+    expect(row.text()).toContain("本学期开课表（未核验）");
+    expect(row.text()).toContain("3 个班次");
+    expect(row.text()).not.toContain("目标学期开课状态未知");
+    expect(wrapper.text()).not.toContain("下面的教师资料无法确认");
+    expect(wrapper.text()).toContain("尚未核验");
+  });
+
+  it("marks listed teachers as possibly incomplete when the teacher list is UNKNOWN", async () => {
+    listOptions.mockResolvedValue({
+      items: [
+        { ...zhang, offeringSourceValidation: null },
+        { ...wang, offeringSourceValidation: null },
+      ],
       status: "UNKNOWN",
     });
     const wrapper = mountPage();

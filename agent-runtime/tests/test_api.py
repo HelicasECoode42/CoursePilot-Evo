@@ -395,8 +395,8 @@ def test_planning_empty_catalog_is_unable_to_verify_not_422() -> None:
 
 def test_planning_invalid_model_output_returns_422() -> None:
     class AlwaysInvalid:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             raise ModelInvalidOutput("broken json")
 
     app = create_app(tool_client=TypedFakeToolClient())
@@ -422,8 +422,8 @@ def test_planning_invalid_model_output_returns_422() -> None:
 
 def test_planning_model_rate_limit_returns_429() -> None:
     class Limited:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             raise ModelUpstreamError("模型端点限流", status_code=429)
 
     app = create_app(tool_client=TypedFakeToolClient())
@@ -450,8 +450,8 @@ def test_planning_model_rate_limit_returns_429() -> None:
 
 def test_planning_model_unavailable_returns_503() -> None:
     class Down:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             raise ModelUpstreamError("模型端点不可用", status_code=503)
 
     app = create_app(tool_client=TypedFakeToolClient())
@@ -489,8 +489,8 @@ def test_create_app_rejects_placeholder_model_when_endpoint_is_configured() -> N
 
 def test_planning_model_timeout_returns_504() -> None:
     class TimedOut:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             raise ModelTimeout("模型请求超时")
 
     app = create_app(tool_client=TypedFakeToolClient())
@@ -634,3 +634,45 @@ def test_admin_key_comparison_rejects_non_ascii_without_crashing() -> None:
     }
     response = client.get("/api/v1/reports/runs/run:demo", headers=headers)
     assert response.status_code == 403
+
+
+def test_gateway_course_name_query_is_forwarded_and_blank_means_no_filter() -> None:
+    seen: list[object] = []
+
+    class QueryFake(FakeToolClient):
+        def call_page(self, tool, dto, context, *, params=None):
+            assert tool == "listCourses"
+            seen.append(params["query"])
+            return ToolPage([], None)
+
+    client = TestClient(create_app(tool_client=QueryFake()))
+    headers = {"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:name-q"}
+    name = client.get(
+        "/api/v1/courses",
+        params={"curriculumSnapshotId": "curr:demo", "query": "算法设计"},
+        headers=headers,
+    )
+    blank = client.get(
+        "/api/v1/courses",
+        params={"curriculumSnapshotId": "curr:demo", "query": "   "},
+        headers=headers,
+    )
+    assert name.status_code == blank.status_code == 200
+    assert seen == ["算法设计", None]
+
+
+def test_gateway_rejects_overlong_course_query_before_java() -> None:
+    class MustNotCall(FakeToolClient):
+        def call_page(self, tool, dto, context, *, params=None):
+            raise AssertionError("Java must not be called for an invalid query")
+
+    client = TestClient(create_app(tool_client=MustNotCall()))
+    response = client.get(
+        "/api/v1/courses",
+        params={"curriculumSnapshotId": "curr:demo", "query": "算" * 201},
+        headers={"Authorization": f"Bearer {_token(client)}", "X-Request-Id": "req:long-q"},
+    )
+    assert response.status_code == 400
+    issue = response.json()["issues"][0]
+    assert issue["code"] == "INVALID_QUERY"
+    assert issue["field"] == "query"

@@ -104,10 +104,15 @@ watch(query, () => {
 watch(
   () => props.curriculumSnapshotId,
   () => {
+    clearTimer();
+    seq += 1;
+    controller?.abort();
+    controller = null;
     query.value = "";
     results.value = [];
     nextCursor.value = null;
     status.value = "idle";
+    errorMessage.value = "";
     picked.value = null;
   },
 );

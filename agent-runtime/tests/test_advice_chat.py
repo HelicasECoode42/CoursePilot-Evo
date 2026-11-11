@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 
-import pytest
 from fastapi.testclient import TestClient
 
 from agent_runtime.adapters.model_client import (
@@ -163,24 +163,26 @@ def test_chat_uses_default_candidate_scope_and_keeps_fake_marked():
     assert len(tools.calls) == 5
 
 
-def test_chat_rejects_model_course_and_review_not_in_shown_facts(caplog):
-    tools = ChatTools()
-    caplog.set_level(logging.WARNING, logger="agent_runtime.application.advice_chat")
-    with pytest.raises(ModelInvalidOutput, match="课程引用不匹配") as caught:
-        AdviceChatService(tool_client=tools, model_adapter=ChatModel("CS999")).run(
-            _request(), _context()
-        )
-    assert caught.value.diagnostics["field_path"] == "courses[0].courseCode"
-    assert caught.value.diagnostics["reason_code"] == "COURSE_REFERENCE_MISMATCH"
-    assert caught.value.diagnostics["input_tokens"] == 10
+def test_out_of_scope_citations_are_dropped_and_answer_kept(caplog):
+    caplog.set_level(logging.INFO, logger="agent_runtime.application.advice_chat")
+    answer = AdviceChatService(tool_client=ChatTools(), model_adapter=ChatModel("CS999")).run(
+        _request(), _context()
+    )
+    assert answer.reply == "建议先了解课程内容。"
+    assert answer.courses == []
+    assert answer.suggestions == []
+    assert any(issue.code == "MODEL_CITATION_DROPPED" for issue in answer.unknowns)
+    assert "CS999" not in answer.model_dump_json()
     assert "CS999" not in caplog.text
 
-    with pytest.raises(ModelInvalidOutput, match="课程评价引用不匹配") as caught:
-        AdviceChatService(
-            tool_client=tools, model_adapter=ChatModel("CS301", ["review:other"])
-        ).run(_request(), _context())
-    assert caught.value.diagnostics["field_path"] == "courses[0].reviewNoteIds"
-    assert caught.value.diagnostics["reason_code"] == "REVIEW_REFERENCE_MISMATCH"
+
+def test_foreign_review_id_is_dropped_and_course_kept():
+    answer = AdviceChatService(
+        tool_client=ChatTools(), model_adapter=ChatModel("CS301", ["review:other"])
+    ).run(_request(), _context())
+    assert [item.courseCode for item in answer.courses] == ["CS301"]
+    assert answer.courses[0].reviewNoteIds == []
+    assert any(issue.code == "MODEL_CITATION_DROPPED" for issue in answer.unknowns)
 
 
 def test_chat_uses_matching_school_progress_record_when_id_is_omitted():
@@ -274,7 +276,22 @@ def test_explicit_record_id_does_not_reuse_mismatched_school_progress():
                                     "remainingCredits": 3,
                                 }
                             ],
-                            "courses": [],
+                            "courses": [
+                                {
+                                    "nodeId": "node:1",
+                                    "courseCode": "CS301",
+                                    "name": "人工智能",
+                                    "credits": 3,
+                                    "outcome": "PASSED",
+                                    "completedYear": None,
+                                    "completedTerm": None,
+                                    "grade": None,
+                                    "makeup": None,
+                                    "retake": None,
+                                    "suggestedYear": None,
+                                    "suggestedTerm": None,
+                                }
+                            ],
                         },
                         "academicRecord": {
                             "academicRecordId": "record:school",
@@ -288,10 +305,10 @@ def test_explicit_record_id_does_not_reuse_mismatched_school_progress():
                     }
                 )
             if tool == "getAcademicRecord":
-                assert params["recordId"] == "record:selected"
+                assert params["recordId"] == "record:school"
                 return AcademicRecord(
-                    academicRecordId="record:selected",
-                    revision=1,
+                    academicRecordId="record:school",
+                    revision=2,
                     curriculumSnapshotId="curr:1",
                     completedCourses=[],
                     transcriptComplete=False,
@@ -300,7 +317,7 @@ def test_explicit_record_id_does_not_reuse_mismatched_school_progress():
                 )
             return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
 
-    request = _request().model_copy(update={"academicRecordId": "record:selected"})
+    request = _request().model_copy(update={"academicRecordId": "record:school"})
     model = ChatModel()
     answer = AdviceChatService(tool_client=ProgressTools(), model_adapter=model).run(
         request, _context()
@@ -308,6 +325,9 @@ def test_explicit_record_id_does_not_reuse_mismatched_school_progress():
     assert answer.schoolProgress is None
     assert any(issue.code == "SCHOOL_PROGRESS_RECORD_MISMATCH" for issue in answer.unknowns)
     assert '"schoolProgress": null' in model.messages[0]["content"]
+    facts = _model_facts(model)
+    assert {item["courseCode"] for item in facts["availableCourses"]} >= {"CS301"}
+    assert facts["schoolReportGaps"] == [{"category": "专业选修", "remainingCredits": "3"}]
 
 
 def test_chat_http_idempotent_replay_does_not_call_model_twice():
@@ -332,7 +352,7 @@ def test_chat_http_idempotent_replay_does_not_call_model_twice():
     assert app.state.spend_ledger.spent(session["sessionId"])[0] == 10
 
 
-def test_chat_http_classifies_reference_failure_without_echoing_course_value():
+def test_chat_http_drops_unknown_course_without_echoing_course_value():
     tools = ChatTools()
     app = create_app(tool_client=tools)
     model = ChatModel("CS999")
@@ -348,10 +368,10 @@ def test_chat_http_classifies_reference_failure_without_echoing_course_value():
             "Idempotency-Key": "chat:classified",
         },
     )
-    assert response.status_code == 422
-    issue = response.json()["issues"][0]
-    assert issue["message"] == "课程引用不匹配"
-    assert issue["field"] == "courses[0].courseCode"
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["courses"] == []
+    assert any(issue["code"] == "MODEL_CITATION_DROPPED" for issue in data["unknowns"])
     assert "CS999" not in response.text
     assert model.calls == 1
 
@@ -392,3 +412,175 @@ def test_chat_caches_paid_terminal_failure_and_new_key_runs_again():
     assert retry.status_code == 422
     assert model.calls == 2
     assert app.state.spend_ledger.spent(session["sessionId"]) == (20, 16)
+
+
+def _catalog_course(code: str, name: str, category: str) -> Course:
+    return Course(
+        courseCode=code,
+        name=name,
+        credits=Decimal("3.00"),
+        category=category,
+        sourceRefIds=[f"src:{code}"],
+        suggestedTerm=None,
+    )
+
+
+CATALOG = [
+    _catalog_course("CS201", "线性代数", "学科基础课"),
+    _catalog_course("CS205", "数据结构", "学科基础课"),
+    _catalog_course("CS301", "人工智能", "专业选修课"),
+    _catalog_course("CS302", "数据库系统", "专业选修课"),
+    _catalog_course("CS303", "机器学习", "高年级研讨课"),
+    _catalog_course("CS101", "程序设计", "公共基础课"),
+]
+
+
+class SchoolReportTools(ChatTools):
+    """Serves a school report with Decimal credits, gaps, and a school-passed course."""
+
+    def __init__(self, gaps: dict[str, str]):
+        super().__init__()
+        self._gaps = gaps
+
+    def call(self, tool, dto, context, *, params=None, idempotency_key=None):
+        if tool == "getSchoolProgress":
+            from agent_runtime.api.schemas import SchoolProgressImportResult
+
+            nodes = [
+                {
+                    "nodeId": f"node:{index}",
+                    "parentId": None,
+                    "schoolNodeId": None,
+                    "leaf": True,
+                    "name": name,
+                    "requiredCredits": 40,
+                    "earnedCredits": 40 - int(remaining),
+                    "remainingCredits": int(remaining),
+                }
+                for index, (name, remaining) in enumerate(self._gaps.items())
+            ]
+            return SchoolProgressImportResult.model_validate(
+                {
+                    "receipt": {
+                        "schoolProgressId": "progress:1",
+                        "contentHash": "c" * 64,
+                        "importedAt": datetime.now(UTC).isoformat(),
+                        "reused": True,
+                    },
+                    "snapshot": {
+                        "format": "coursepilot-shu-academic-progress",
+                        "version": 1,
+                        "capturedAt": datetime.now(UTC).isoformat(),
+                        "source": "browser adapter",
+                        "nodes": nodes,
+                        "courses": [
+                            {
+                                "nodeId": "node:0",
+                                "courseCode": "CS205",
+                                "name": "数据结构",
+                                "credits": 3,
+                                "outcome": "PASSED",
+                                "completedYear": None,
+                                "completedTerm": None,
+                                "grade": None,
+                                "makeup": None,
+                                "retake": None,
+                                "suggestedYear": None,
+                                "suggestedTerm": None,
+                            }
+                        ],
+                    },
+                    "academicRecord": {
+                        "academicRecordId": "record:school",
+                        "revision": 1,
+                        "curriculumSnapshotId": "curr:1",
+                        "completedCourses": [],
+                        "transcriptComplete": False,
+                        "sourceKind": "USER_IMPORT",
+                        "createdAt": datetime.now(UTC).isoformat(),
+                    },
+                }
+            )
+        if tool == "listCourses":
+            return list(CATALOG)
+        return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
+
+
+class RawModel:
+    """Returns exactly the given reply, to exercise lenient validation."""
+
+    def __init__(self, courses=(), suggestions=(), reply="回答已生成。", question=None):
+        self.calls = 0
+        self.messages = []
+        self._reply = AdviceChatModelReply(
+            reply=reply,
+            question=question,
+            courses=list(courses),
+            suggestions=list(suggestions),
+            input_tokens=10,
+            output_tokens=8,
+        )
+
+    def generate_chat(self, *, context, messages):
+        self.calls += 1
+        self.messages = messages
+        return self._reply
+
+
+def _model_facts(model) -> dict:
+    return json.loads(model.messages[-1]["content"])
+
+
+def test_school_report_with_decimal_credits_produces_answer_and_gap_facts():
+    tools = SchoolReportTools({"学科基础课": "34", "专业选修课": "17", "公共基础课": "0"})
+    model = ChatModel("CS201")
+    answer = AdviceChatService(tool_client=tools, model_adapter=model).run(_request(), _context())
+
+    facts = _model_facts(model)
+    assert facts["schoolReportGaps"] == [
+        {"category": "学科基础课", "remainingCredits": "34"},
+        {"category": "专业选修课", "remainingCredits": "17"},
+    ]
+    listed = {item["courseCode"] for item in facts["availableCourses"]}
+    # Gap categories join the default scope; the school-passed course and 公共基础课 stay out.
+    assert listed == {"CS201", "CS301", "CS302", "CS303"}
+    assert [item.courseCode for item in answer.courses] == ["CS201"]
+    assert answer.schoolProgress is not None
+
+
+def test_school_passed_course_is_excluded_even_without_java_record_entry():
+    tools = SchoolReportTools({"学科基础课": "34"})
+    model = ChatModel("CS301")
+    AdviceChatService(tool_client=tools, model_adapter=model).run(_request(), _context())
+    listed = {item["courseCode"] for item in _model_facts(model)["availableCourses"]}
+    assert "CS205" not in listed
+
+
+def test_short_vague_question_with_school_report_still_answers():
+    tools = SchoolReportTools({"学科基础课": "34", "专业选修课": "17"})
+    request = _request().model_copy(update={"message": "人工智能？", "interestText": ""})
+    answer = AdviceChatService(tool_client=tools, model_adapter=FakeModelAdapter()).run(
+        request, _context()
+    )
+    assert answer.reply
+    assert answer.courses
+    assert all(item.courseCode != "CS205" for item in answer.courses)
+
+
+def test_invalid_suggestions_are_dropped_and_valid_ones_kept():
+    tools = SchoolReportTools({"专业选修课": "17"})
+    model = RawModel(
+        courses=[{"courseCode": "CS301", "reason": "与人工智能相关。", "reviewNoteIds": []}],
+        suggestions=[
+            {"kind": "INTEREST", "label": "补充兴趣", "value": "机器人方向"},
+            {"kind": "SELECT_COURSE", "label": "不存在", "value": "CS999"},
+            {"kind": "PREFER_COURSE", "label": "加入偏好", "value": "CS301"},
+            {"kind": "SELECT_COURSE", "label": "未出现在课程卡片", "value": "CS302"},
+        ],
+    )
+    answer = AdviceChatService(tool_client=tools, model_adapter=model).run(_request(), _context())
+    assert [(s.kind, s.value) for s in answer.suggestions] == [
+        ("INTEREST", "机器人方向"),
+        ("PREFER_COURSE", "CS301"),
+    ]
+    assert any(issue.code == "MODEL_CITATION_DROPPED" for issue in answer.unknowns)

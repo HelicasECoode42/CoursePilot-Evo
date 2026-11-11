@@ -62,8 +62,13 @@ class Settings(BaseSettings):
 
     # 每会话累计上限（SessionSpendCap）。上面那组是「一次运行」的预算，运行结束即归零；
     # 这组限制一个会话总共能花多少，防止换 Idempotency-Key 反复提交把账单跑上去。
-    session_max_input_tokens: int = Field(default=40000, ge=1)
-    session_max_output_tokens: int = Field(default=10000, ge=1)
+    # 默认值按一个正常会话定（tests/test_advice_chat_budget.py 用合成学校进度模拟）：
+    # 学校进度压缩后，每轮对话估计输入约 3700 token（单次上限 8000）；10 轮约 3.7 万，
+    # 3 次规划每次按单次上限 8000 计约 2.4 万，合计约 6.1 万，加一次预留余量取 10 万。
+    # 输出：10 轮对话约 1.5 万，3 次规划每次按单次上限 4000 计约 1.2 万，取 4 万。
+    # 单个会话最多占用今日全站上限的十分之一，全站上限不变。
+    session_max_input_tokens: int = Field(default=100000, ge=1)
+    session_max_output_tokens: int = Field(default=40000, ge=1)
     max_tracked_sessions: int = Field(default=10000, ge=1)
     # 进程级每日上限（input 与 output 合计，UTC 日切换）。所有会话共用，挡住多开会话绕过
     # 每会话上限。默认 1000000，约等于 80 次满额单次运行（每次最多 8000 + 4000）。

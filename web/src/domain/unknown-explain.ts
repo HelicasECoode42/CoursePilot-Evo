@@ -1,0 +1,248 @@
+/**
+ * 未知项的学生可读文案（结果页用）。
+ *
+ * 规则：
+ *   - 只翻译，不判断：是否未知、是否冲突都由 Java 决定，这里只说明「为什么无法确认」
+ *     以及「学生现在能做什么」。
+ *   - 代码以 Java 实际发出的为准（例如 UNMODELED_CURRICULUM_RULES，不是前端早先的 UNMODELED_RULE）。
+ *   - PENDING_COURSE 的 message 只有课程号，这里从课程名表补上课程名，逐门列出，
+ *     不再用一句笼统的「有一项课程信息无法确认」。
+ */
+
+import type { Issue, PlanValidation } from "../contracts";
+
+/**
+ * 没有对应文案的代码：显示代码与服务端原文，绝不再用「这一项暂时无法确认」这类笼统话。
+ * 服务端原文是 Java/Python 给出的事实描述，只原样呈现。
+ */
+export function unmappedUnknownText(
+  issue: Pick<Issue, "code" | "message">,
+): string {
+  const message = issue.message.trim();
+  return message === "" ? issue.code : `${issue.code}：${message}`;
+}
+
+export const UNKNOWN_EXPLANATIONS: Record<string, string> = {
+  FAKE_MODEL:
+    "当前建议由演示模型生成。这只是流程演示，不代表真实模型的判断，可以只把课程与班次当作参考。",
+  FAKE_TOOL:
+    "当前核验使用演示数据，无法确认真实课程与班次。可以把结果当作流程演示来看，不要据此安排真实选课。",
+  OFFERING_UNAVAILABLE:
+    "没有取得目标学期的班次资料，无法确认上课时间是否冲突。可以稍后重试，或回到第一步换一份开课资料。",
+  OFFERING_SNAPSHOT_MISSING:
+    "方案没有可用的班次资料，无法确认上课时间。可以回到第一步选择有班次资料的开课版本后重新生成。",
+  TIMETABLE_UNVERIFIED:
+    "这份方案的班次时间还没有经过核验，所以上课时间是否冲突无法确认，不能判为通过。可以为每门课选定班次后重新核验。",
+  TIME_UNPARSEABLE:
+    "部分班次的上课时间无法识别，无法确认是否冲突。可以在结果页换一个同课程的班次后重新核验。",
+  TIME_UNPARSED:
+    "部分班次的上课时间无法识别，无法确认是否冲突。可以在结果页换一个同课程的班次后重新核验。",
+  CLASS_NOT_FOUND:
+    "方案中的班次不在当前开课资料中，无法完成核验。可以在结果页换一个班次后重新核验。",
+  PIN_TEACHER_UNKNOWN:
+    "指定的教师无法从当前资料中确认。可以在目标里放宽教师要求，或改选其他教师的班次。",
+  MUST_TEACHER_NOT_PRESERVED:
+    "你要求「必须保留」的教师对应的课程没能进入方案，所以这次没有生成方案。可以到「已选课程」里也选上这门课（或在对话里加入待选），或把这名教师改成「优先考虑」后重新生成。",
+  PIN_TEACHER_MISMATCH:
+    "方案里的教师与「必须保留」指定的教师不一致，本次不能算通过。可以在结果页换回指定教师的班次，或放宽这条教师条件后重新生成。",
+  PIN_COURSE_MISSING:
+    "有一条「必须包含这门课」的条件没有排进方案，本次不能算通过。可以恢复这门课或删除该条件后重新生成。",
+  EVIDENCE_MISMATCH:
+    "候选课程与工具返回的事实对不上，系统没有生成方案。请调整条件后重试；如果反复出现，查看下方排查编号与详情。",
+  CONSTRAINT_UNVERIFIABLE:
+    "缺少已核验的班次时间，无法确认时间类条件（例如必避时段）是否满足。可以在目标里放宽该条件，或等班次资料核验后重新生成。",
+  COURSE_FACTS_UNKNOWN:
+    "部分课程信息无法确认。可以检查该课程是否在所选培养方案中。",
+  CREDITS_UNKNOWN:
+    "部分课程学分未知，无法完成学分相关核对。可以在学业资料里为该课程补填学分。",
+  CREDITS_SCOPE_UNSUPPORTED:
+    "当前核验范围无法确认学分要求。学分是否达标请以培养方案原文为准。",
+  CURRICULUM_NOT_FOUND:
+    "所选培养方案资料无法读取。可以回到第一步重新选择培养方案。",
+  ACADEMIC_RECORD_EMPTY:
+    "还没有可用于核对的学业记录。可以在学业资料里补充已修课程。",
+  TRANSCRIPT_COMPLETENESS_UNKNOWN:
+    "已修课程可能没有填全，暂时无法确定剩余要求。可以在学业资料里确认是否已经填完整。",
+  REQUIREMENT_SOURCE_REFS_MISSING:
+    "部分培养要求缺少可核对的来源。可以对照培养方案原文自行确认。",
+  UNMODELED_CURRICULUM_RULES:
+    "培养方案中有部分规则系统尚未纳入自动核对（例如只限选、组选、学期限制）。请以培养方案原文为准，系统不会替你判定这些规则。",
+  SECTION_NOT_ASSIGNED:
+    "这门课没有选定班次。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。",
+  SECTION_UNASSIGNED:
+    "这门课没有选定班次。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。",
+  OFFERING_NOT_CHECKED:
+    "服务端没有给出这个班次与你设定的硬时间条件的核对结果，不能判为没有冲突。可以换一个班次，或在目标里放宽时间条件后重新核验。",
+  CLASS_NOT_SELECTED:
+    "这门课还没有选定班次，上课时间无法确认。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。",
+  FIXTURE_DATA:
+    "这是演示数据，不代表真实课程与班次。可以把结果当作流程演示来看，不要据此安排真实选课。",
+  PENDING_COURSE_UNCATEGORIZED:
+    "有一门课程尚未出结果，而且系统无法确定它属于哪个类别，所以所有要求的缺口都暂不能确定。可以在学业资料里确认它的结果，并检查课程是否在培养方案中。",
+};
+
+/**
+ * 所用开课快照是学校公布的课程表（OFFICIAL_DOCUMENT）且仍待人工核验时的文案。
+ * 与默认文案分开：这时班次时间是真实来源的数据，只是还没通过核验，不能说成「没有班次」。
+ */
+const OFFICIAL_UNVERIFIED_EXPLANATIONS = new Map<string, string>([
+  [
+    "TIMETABLE_UNVERIFIED",
+    "课表来自学校公布的课程表，正在人工核验；核验通过前不能判为通过。可以先按课表自行检查，核验完成后再重新核验。",
+  ],
+  [
+    "CONSTRAINT_UNVERIFIABLE",
+    "时间类条件（例如必避时段）需要对照班次上课时间。课表来自学校公布的课程表，正在人工核验，核验通过前无法确认是否满足。可以等核验完成后重新核验这份方案。",
+  ],
+]);
+
+/** 调用方能说明的上下文。只影响文案，不改变是否未知这一判断（那由 Java 决定）。 */
+export interface UnknownContext {
+  /** 所用开课快照是学校公布的课程表（OFFICIAL_DOCUMENT）且仍待人工核验。 */
+  officialUnverified?: boolean;
+}
+
+/** 与某一份方案的核验判决绑定的未知项：换班重新核验后，旧判决里的这些项不再适用。 */
+const VERIFICATION_LEVEL_CODES = new Set([
+  // 未选定班次描述的是换班前的方案，换班后同样过时。
+  "TIMETABLE_UNVERIFIED",
+  "TIME_UNPARSEABLE",
+  "TIME_UNPARSED",
+  "CLASS_NOT_FOUND",
+  "UNMODELED_CURRICULUM_RULES",
+  "PIN_TEACHER_UNKNOWN",
+  "CONSTRAINT_UNVERIFIABLE",
+  "OFFERING_UNAVAILABLE",
+  "OFFERING_SNAPSHOT_MISSING",
+  // 未排进课表是方案本身的状态，换班后同样过时（Java 的 SECTION_UNASSIGNED，Python 的 SECTION_NOT_ASSIGNED）。
+  "SECTION_UNASSIGNED",
+  "SECTION_NOT_ASSIGNED",
+]);
+
+export function isVerificationLevelUnknown(code: string): boolean {
+  return VERIFICATION_LEVEL_CODES.has(code);
+}
+
+/** 兼容当前的「结果未知」以及旧结果里的「在修或结果未知」。 */
+export const PENDING_COURSE_PATTERN =
+  /课程 (\S+) (?:在修或)?结果未知(?:，(.+?) 类别的缺口不能确定)?/;
+
+function pendingCourseText(
+  issue: Issue,
+  courseNames: Readonly<Record<string, string>>,
+): string {
+  const match = PENDING_COURSE_PATTERN.exec(issue.message);
+  if (!match) return unmappedUnknownText(issue);
+  const code = match[1];
+  const category = match[2];
+  const name = courseNames[code];
+  const label = name && name !== code ? `${name}（${code}）` : code;
+  const categoryText = category
+    ? `${category}类别的缺口暂不能确定`
+    : "相关类别的缺口暂不能确定";
+  return `${label} ${issue.message.includes("在修或结果未知") ? "在修或结果未知" : "结果未知"}，${categoryText}。可以在学业资料里把它标为已修、未修或在修，确认后再核对。`;
+}
+
+/**
+ * Python 的 SECTION_NOT_ASSIGNED message 形如「课程 CODE：原因」（全角冒号），原因带有
+ * 具体来源（如「本学期没有开课」）。Java 的 SECTION_UNASSIGNED message 形如
+ * 「课程 CODE 未指定班次，无法核验…」，只说明没有班次，不带原因。两者都归为未排进课表。
+ */
+const SECTION_NOT_ASSIGNED_PATTERN = /^课程 (\S+)：(.+)$/;
+const SECTION_UNASSIGNED_PATTERN = /^课程 (\S+) 未指定班次/;
+export const JAVA_UNASSIGNED_REASON =
+  "方案里还没有为这门课选定班次，所以上课时间无法核验";
+
+/**
+ * 解析未选定班次的课程号与原因。原因是 Java 或 Python 给出的原文（只翻译，不改写）；
+ * Java 没有给原因时说明它的含义。格式不符或不是这两个代码时返回 null。
+ */
+export function sectionNotAssignedReason(
+  issue: Issue,
+): { courseCode: string; reason: string } | null {
+  const message = issue.message.trim();
+  if (issue.code === "SECTION_NOT_ASSIGNED") {
+    const match = SECTION_NOT_ASSIGNED_PATTERN.exec(message);
+    return match ? { courseCode: match[1], reason: match[2] } : null;
+  }
+  if (issue.code === "SECTION_UNASSIGNED") {
+    const match = SECTION_UNASSIGNED_PATTERN.exec(message);
+    return match
+      ? { courseCode: match[1], reason: JAVA_UNASSIGNED_REASON }
+      : null;
+  }
+  return null;
+}
+
+function sectionNotAssignedText(
+  issue: Issue,
+  courseNames: Readonly<Record<string, string>>,
+): string {
+  const parsed = sectionNotAssignedReason(issue);
+  if (!parsed)
+    return UNKNOWN_EXPLANATIONS[issue.code] ?? unmappedUnknownText(issue);
+  const name = courseNames[parsed.courseCode];
+  const label =
+    name && name !== parsed.courseCode
+      ? `${name}（${parsed.courseCode}）`
+      : parsed.courseCode;
+  return `${label} 没有选定班次：${parsed.reason}。可以在结果页换一个可用班次后重新核验；如果本学期没有开课，可以把它从方案中移除。`;
+}
+
+/**
+ * 当前方案里未排进课表的课程号 → 原因，供课表列出。
+ *
+ * 数据来源只有两处，都跟随「当前版本」：
+ *   - 当前方案的核验判决（Java 的 SECTION_UNASSIGNED，换班后是新判决）；
+ *   - 答复里的 SECTION_NOT_ASSIGNED（Python 给出的具体原因），仅对尚未换班的原方案有效。
+ * 换过班的方案不再读答复里的旧原因，避免把已经换掉的课还写成「未排进」。
+ */
+export function unplacedReasonsFor(
+  answerUnknowns: readonly Issue[],
+  plans: readonly {
+    replaced: boolean;
+    verification: PlanValidation | null;
+  }[],
+): Record<string, string> {
+  const reasons: Record<string, string> = {};
+  for (const plan of plans) {
+    if (plan.verification !== null) {
+      for (const issue of plan.verification.unknownChecks) {
+        const parsed = sectionNotAssignedReason(issue);
+        if (parsed !== null) reasons[parsed.courseCode] = parsed.reason;
+      }
+    }
+    if (!plan.replaced) {
+      // 未换班时原答复的具体原因（Python）比判决里 Java 的通用说明更有用，覆盖之。
+      for (const issue of answerUnknowns) {
+        const parsed = sectionNotAssignedReason(issue);
+        if (parsed !== null) reasons[parsed.courseCode] = parsed.reason;
+      }
+    }
+  }
+  return reasons;
+}
+
+/**
+ * 把一条未知项翻译成学生可读的一句话。
+ * courseNames 为课程号到课程名的表；读不到时只显示课程号，不编造课程名。
+ * context 说明所用开课快照的状态（例如学校课表待核验），用于选择对应文案。
+ */
+export function explainUnknownIssue(
+  issue: Issue,
+  courseNames: Readonly<Record<string, string>> = {},
+  context: UnknownContext = {},
+): string {
+  if (issue.code === "PENDING_COURSE")
+    return pendingCourseText(issue, courseNames);
+  if (
+    issue.code === "SECTION_NOT_ASSIGNED" ||
+    issue.code === "SECTION_UNASSIGNED"
+  )
+    return sectionNotAssignedText(issue, courseNames);
+  const official = context.officialUnverified
+    ? OFFICIAL_UNVERIFIED_EXPLANATIONS.get(issue.code)
+    : undefined;
+  if (official !== undefined) return official;
+  return UNKNOWN_EXPLANATIONS[issue.code] ?? unmappedUnknownText(issue);
+}

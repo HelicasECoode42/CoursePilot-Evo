@@ -3,11 +3,16 @@ import type { AuditItem, Course } from "../contracts";
 import {
   MAX_SUGGESTIONS,
   buildCategoryPlan,
+  deepestGapSubcategories,
   interestRelevance,
+  narrowPlanToSubcategories,
+  schoolCategoryGap,
+  subcategoryCandidates,
   suggestCompletions,
   suggestionsApply,
   summarizeSelection,
 } from "./credit-plan";
+import type { SchoolProgressNode } from "./school-progress";
 
 const ELECTIVE = "专业选修课";
 const NONE = new Set<string>();
@@ -250,5 +255,248 @@ describe("interestRelevance", () => {
   it("同一关键词只计一次，空白忽略", () => {
     expect(interestRelevance("数据结构", ["数据", " 数据 ", ""])).toBe(1);
     expect(interestRelevance("数据结构", [])).toBe(0);
+  });
+});
+
+// 学校报告节点形状与 school-progress 的 SchoolProgressNode 一致，名字与数字均为虚构。
+function schoolNode(
+  nodeId: string,
+  name: string,
+  parentId: string | null,
+  remaining: number | null,
+): SchoolProgressNode {
+  return {
+    nodeId,
+    parentId,
+    schoolNodeId: `S-${nodeId}`,
+    leaf: parentId !== null,
+    name,
+    requiredCredits: 12,
+    earnedCredits: remaining === null ? null : 12 - remaining,
+    remainingCredits: remaining,
+  };
+}
+
+describe("学校报告数字作为缺口的后备来源", () => {
+  it("matches a school category only when exactly one node has that name", () => {
+    const nodes = [
+      schoolNode("top", "通识课", null, 0),
+      schoolNode("dup-parent", "专业选修课", null, 5),
+      schoolNode("dup-child", "专业选修课", "dup-parent", 2),
+    ];
+    expect(schoolCategoryGap("通识课", nodes)).toEqual({
+      schoolNodeId: "S-top",
+      requiredCredits: 12,
+      earnedCredits: 12,
+      remainingCredits: 0,
+    });
+    expect(schoolCategoryGap("专业选修课", nodes)).toBeNull();
+    expect(schoolCategoryGap(null, nodes)).toBeNull();
+  });
+
+  it("uses the school remaining credits when the Java gap is unknown, labelled as school-sourced", () => {
+    const plan = buildCategoryPlan(
+      requirement(null, {
+        gapCredits: null,
+        earnedCredits: null,
+        state: "UNKNOWN",
+      }),
+      [course("E2", 2), course("E4", 4)],
+      NONE,
+      [],
+      schoolCategoryGap("专业选修课", [schoolNode("p", "专业选修课", null, 6)]),
+    );
+    expect(plan.state).toBe("NEEDS_CREDITS");
+    expect(plan.gapCredits).toBe(6);
+    expect(plan.gapSource).toBe("SCHOOL");
+    expect(plan.javaGapCredits).toBeNull();
+    expect(plan.school?.earnedCredits).toBe(6);
+    expect(summarizeSelection(plan, ["E4"]).remainingCredits).toBe(2);
+  });
+
+  it("keeps the Java gap when Java knows it, even if the school report differs", () => {
+    const plan = buildCategoryPlan(
+      requirement(4),
+      [course("E2", 2)],
+      NONE,
+      [],
+      schoolCategoryGap("专业选修课", [schoolNode("p", "专业选修课", null, 9)]),
+    );
+    expect(plan.gapCredits).toBe(4);
+    expect(plan.gapSource).toBe("JAVA");
+  });
+
+  it("stays unknown when neither Java nor the school report gives a gap", () => {
+    const plan = buildCategoryPlan(
+      requirement(null, { gapCredits: null }),
+      [course("E2", 2)],
+      NONE,
+      [],
+      null,
+    );
+    expect(plan.state).toBe("UNKNOWN_GAP");
+    expect(plan.gapSource).toBeNull();
+  });
+
+  it("treats a school remaining of zero as satisfied from the school source", () => {
+    const plan = buildCategoryPlan(
+      requirement(null, { gapCredits: null }),
+      [course("E2", 2)],
+      NONE,
+      [],
+      schoolCategoryGap("专业选修课", [schoolNode("p", "专业选修课", null, 0)]),
+    );
+    expect(plan.state).toBe("SATISFIED");
+    expect(plan.gapSource).toBe("SCHOOL");
+  });
+
+  describe("缺口下钻到学校子类（合成数据）", () => {
+    const node = (
+      nodeId: string,
+      parentId: string | null,
+      name: string,
+      remaining: number | null,
+    ): SchoolProgressNode => ({
+      nodeId,
+      parentId,
+      schoolNodeId: nodeId,
+      leaf: false,
+      name,
+      requiredCredits: null,
+      earnedCredits: null,
+      remainingCredits: remaining,
+    });
+
+    it("一直往下找到没有更深缺口的子类；并列子类全部返回", () => {
+      const nodes = [
+        node("root", null, "公共基础课", 6),
+        node("a", "root", "思想政治必修课", 4),
+        node("a1", "a", "马克思主义", 4),
+        node("a2", "a", "形势与政策", 0),
+        node("b", "root", "体育", 2),
+        node("c", "root", "已满足", 0),
+      ];
+      expect(
+        deepestGapSubcategories(nodes, "root")
+          .map((s) => s.name)
+          .sort(),
+      ).toEqual(["体育", "马克思主义"]);
+    });
+
+    it("根节点没有缺口或没有数字时返回空，不猜", () => {
+      expect(deepestGapSubcategories([node("r", null, "x", 0)], "r")).toEqual(
+        [],
+      );
+      expect(
+        deepestGapSubcategories([node("r", null, "x", null)], "r"),
+      ).toEqual([]);
+    });
+
+    it("子类候选来自学校挂靠的课程号，或课程目录里同名类别；已修课由调用方排除", () => {
+      const catalog: Course[] = [
+        {
+          courseCode: "M1",
+          name: "马原",
+          credits: 3,
+          category: "其他",
+          sourceRefIds: [],
+        },
+        {
+          courseCode: "M2",
+          name: "毛概",
+          credits: 2,
+          category: "思想政治必修课",
+          sourceRefIds: [],
+        },
+        {
+          courseCode: "X1",
+          name: "无关",
+          credits: 2,
+          category: "通识课",
+          sourceRefIds: [],
+        },
+      ];
+      const subs = [
+        { nodeId: "a1", name: "思想政治必修课", remainingCredits: 5 },
+      ];
+      const result = subcategoryCandidates(
+        subs,
+        [{ nodeId: "a1", courseCode: "M1" }],
+        catalog,
+      ).map((course) => course.courseCode);
+      expect(result.sort()).toEqual(["M1", "M2"]);
+    });
+
+    it("收窄后候选只来自子类，缺口用子类剩余学分，已修课被排除", () => {
+      const plan = buildCategoryPlan(
+        requirement(1, { category: "公共基础课" }),
+        [],
+        NONE,
+        [],
+      );
+      const catalog: Course[] = [
+        {
+          courseCode: "M1",
+          name: "马原",
+          credits: 1,
+          category: "公共基础课",
+          sourceRefIds: [],
+        },
+        {
+          courseCode: "M2",
+          name: "毛概",
+          credits: 2,
+          category: "公共基础课",
+          sourceRefIds: [],
+        },
+      ];
+      const narrowed = narrowPlanToSubcategories(
+        plan,
+        [{ nodeId: "a1", name: "思想政治必修课", remainingCredits: 1 }],
+        [catalog[0], catalog[1]],
+        new Set(["M2"]),
+        [],
+        catalog,
+      );
+      expect(narrowed.countable.map((c) => c.courseCode)).toEqual(["M1"]);
+      expect(narrowed.gapCredits).toBe(1);
+      expect(narrowed.focusLabel).toBe("思想政治必修课");
+    });
+
+    it("子类没有可选课程时 countable 为空，不回退到大类", () => {
+      const plan = buildCategoryPlan(
+        requirement(2),
+        [course("A", 2)],
+        NONE,
+        [],
+      );
+      const narrowed = narrowPlanToSubcategories(
+        plan,
+        [{ nodeId: "p", name: "体育", remainingCredits: 2 }],
+        [],
+        NONE,
+        [],
+        [course("A", 2)],
+      );
+      expect(narrowed.countable).toEqual([]);
+      expect(narrowed.focusLabel).toBe("体育");
+    });
+
+    it("minCourses 为 2 时只给多门课组合", () => {
+      const plan = buildCategoryPlan(
+        requirement(4),
+        [course("A", 2), course("B", 2), course("C", 4)],
+        NONE,
+        [],
+      );
+      const multi = suggestCompletions(plan, [], 4, { minCourses: 2 });
+      expect(multi.length).toBeGreaterThan(0);
+      expect(multi.every((s) => s.courseCodes.length >= 2)).toBe(true);
+      expect(
+        suggestCompletions(plan, [], 4, { minCourses: 2 }).some(
+          (s) => s.courseCodes.length === 1,
+        ),
+      ).toBe(false);
+    });
   });
 });

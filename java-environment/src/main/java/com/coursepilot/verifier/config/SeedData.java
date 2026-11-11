@@ -180,11 +180,11 @@ public class SeedData {
             reqRepo.save(new Requirement("PLAN_CS_2025", "通识", 4.0));
 
             offeringRepo.save(new CourseOffering("O_CS101_01", "CS101", "张老师",
-                "周一第1-2节{第1-16周}", "SYNTHETIC"));
+                "周一第1-2节{第1-16周}", "SYNTHETIC", "OFFER_2025_FALL", "PARSED", null, null, null, null));
             offeringRepo.save(new CourseOffering("O_CS102_01", "CS102", "李老师",
-                "周一第2-3节{第1-16周}", "SYNTHETIC"));
+                "周一第2-3节{第1-16周}", "SYNTHETIC", "OFFER_2025_FALL", "PARSED", null, null, null, null));
             offeringRepo.save(new CourseOffering("O_CS103_01", "CS103", "王老师",
-                "时间待定", "SYNTHETIC")); // 时间未知
+                "时间待定", "SYNTHETIC", "OFFER_2025_FALL", "UNPARSED", null, null, null, null)); // 时间未知
         };
     }
 

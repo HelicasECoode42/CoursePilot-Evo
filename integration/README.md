@@ -25,7 +25,7 @@ python integration/check_all.py                           # 配置校验 → 组
 | `DELIVERY.md` | 一页交付说明：七件事现状、mock/真实/未实现分列、已知限制、失败归属 |
 | `stack_config.py` | 统一配置入口：读 `data/private/stack.env` 或环境变量，校验缺项/占位密钥/端口冲突/CORS 通配，密钥不回显 |
 | `stack.env.example` | 配置模板（入库，只有占位值），键名与模块 C 的 `agent-runtime/.env.example` 对齐（`CP_` 前缀） |
-| `start_stack.py` | 组合启动：按登记表拉起 MySQL / Java / Python / Web 并判定就绪；未就绪即非零退出 |
+| `start_stack.py` | 按登记表启动 Java、Python 和 Web 并判断就绪。必需服务未就绪时返回非零退出码 |
 | `stack_checks.py` | 判定层：期望分支匹配、Envelope 结构校验、五段式失败输出、HTTP 传输（可注入假传输做自测） |
 | `check_stack.py` | 主链路检查：建会话 → record → audit → planning → replan，逐步断言状态码、Envelope 与业务字段 |
 | `smoke_stack.py` | 异常与未知覆盖：Java 未接线、无班次快照不得断言时间、契约拒绝、无令牌/假令牌 |
@@ -33,7 +33,7 @@ python integration/check_all.py                           # 配置校验 → 组
 | `check_web.py` | 浏览器检查 CLI：主路径、答未知、服务失败、窄屏四类观察点，含 `--plan` 与 `--driver` |
 | `tests/test_stack_config.py` | 配置入口自测（缺项、占位值、通配 CORS、端口冲突、来源优先级、掩码） |
 | `tests/test_stack_checks.py` | 判定层自测（缺服务不许算过、DEGRADED 不算绿、编造必须被抓、失败块五段齐） |
-| `stub_upstream.py` | 受控假响应服务：按 `Envelope` 契约返回固定响应，三个场景（只答未知 / 正常 / 上游不可用） |
+| `stub_upstream.py` | 受控假响应服务，覆盖资料不足、正常、上游不可用和进入规划后答未知四个场景 |
 | `check_stub.py` | 受控假响应检查：契约（domain schema）、可重复（两次响应逐字节相同）、不许编（不得给时间维度的核验） |
 | `tests/test_web_checks.py` | 浏览器检查自测（页面没起算 BLOCKED、缺浏览器算 BLOCKED、白屏或缺重试入口必须 FAIL） |
 | `tests/test_stub_upstream.py` | 受控假响应自测（可重复、只答未知、课程层核验、503、Envelope、裸奔与未知端点） |
@@ -78,10 +78,10 @@ cd integration && python -m pytest -q                      # 自测（不联网�
 | 步骤 | 断言 | 依赖 | 当前预期 |
 | --- | --- | --- | --- |
 | sessions | `201` + Envelope(OK) + `sessionId/sessionToken/expiresAt` | api | 可真实通过 |
-| record | `201` + Envelope(OK, AcademicRecord)；Java 未接线时 `503` issue=`TOOL_UNAVAILABLE` | api, java | 503，判 `DEGRADED` |
-| audit | `200` + Envelope(OK, AuditResult)；Java 未接线时 `503` issue=`TOOL_UNAVAILABLE` | api, java | 503，判 `DEGRADED` |
-| planning | `200` + Envelope(OK, PlanningAnswer)，`decision` 落在 RECOMMENDATIONS / CLARIFY / UNABLE_TO_VERIFY | api | W1 拒答，判 `DEGRADED` |
-| replan | 同上，且同一 `Idempotency-Key` 重复提交必须返回同一份结果（不双跑） | api | 幂等命中，判 `DEGRADED` |
+| record | `201` + Envelope(OK, AcademicRecord) | api, java | 记录写入成功 |
+| audit | `200` + Envelope(OK, AuditResult) | api, java | 返回对应记录的核对结果 |
+| planning | `200` + Envelope(OK, PlanningAnswer) | api | 按真实模型或受控模型运行模式判断 |
+| replan | 同一 `Idempotency-Key` 与相同请求内容返回同一份结果 | api | 幂等回放 |
 
 ## 异常与未知覆盖检查项（`smoke_stack.py`）
 
@@ -90,7 +90,7 @@ cd integration && python -m pytest -q                      # 自测（不联网�
 | java_unwired | Java 未就绪时 audit 必须 `503` issue=`TOOL_UNAVAILABLE`，不得返回编造的核对结果 | Java 就绪时改为走 `200` 正常分支 |
 | no_time_claim | 无班次快照时不得断言时间无冲突：`verification.scope` 不得是 `REAL_TIMETABLE` / `SIMULATION` | 该情形下「答未知或先澄清」判为通过 |
 | bad_input | 违反契约的请求必须 `422` + Envelope(INVALID_INPUT 或 ERROR, issues 非空)，不得 `200`（两者都是 `domain.schema.json` 的合法 status） | 请求体取 `contracts/examples/invalid-block-day-with-section.json` |
-| no_auth | 无令牌 → `401`；假令牌 → `404`；两者都不许 `200` | 对 `GET /api/v1/academic-records` |
+| no_auth | 无令牌和无效令牌均返回 `401` | 对 `GET /api/v1/academic-records` |
 
 ## 浏览器检查项（`check_web.py`）
 
@@ -104,7 +104,7 @@ cd integration && python -m pytest -q                      # 自测（不联网�
 | web_bundle | `/src/main.ts` 返回 `200` 且含 `createApp` | HTTP 即可 | 起页面后可过 |
 | web_shell | 页面挂载成功、品牌/模式徽标/footer 齐备、无未捕获 JS 错误 | 需浏览器 | 缺 playwright 判 `BLOCKED` |
 | web_api_down | Python 不可达时给出错误提示与重试入口、不白屏 | 需浏览器 | 需先停掉 Python 再跑；若 `web_stub_path` 失败则本条降级为 `BLOCKED`（页面连不上可用上游时，它只能证明页面会报错） |
-| web_unknown | 接口答未知/无法核验时如实呈现并可继续 | 需浏览器 + 受控假响应 | 缺页面的稳定步骤标识，判 `BLOCKED`（转交 E） |
+| web_unknown | 接口答未知时结果页如实呈现 | 需浏览器 + 受控假响应 | 驱动使用 `data-question` 推进引导，再检查结果页的未知状态 |
 | web_stub_path | 受控假响应当上游时页面进入引导第一问 | 需浏览器 + `--with-stub` | 修复前本机实测 `FAIL`（页面真实模式无法连接后端）；已在提交 `09a5e68` 修复，**本轮未复测**，结果以下次真跑为准。见下方「已知故障」 |
 | web_narrow | `390x844` 视口无横向溢出（`scrollWidth - clientWidth <= 2px`） | 需浏览器 | 缺 playwright 判 `BLOCKED` |
 
@@ -129,15 +129,12 @@ python -m pip install playwright && python -m playwright install chromium
 | --- | --- |
 | 触发 | Actions 页面手动 `workflow_dispatch`；每天定时 `30 1 * * *`（UTC，即北京时间 09:30） |
 | 权限 | `contents: read`，不碰 Issue/Project |
-| 服务 | MySQL 由 workflow 的 `services: mysql:8.4` 提供（含 healthcheck），与本地 `start_stack` 的判定无关（本地登记为 `N/A`）；Java 模块已存在（`java-environment`），但 workflow 注入的 `CP_JAVA_BASE_URL` 仍是 `:8080`，需同步改为 `:8081`（该 workflow 文件本轮未改，见下方缺口表） |
-| 步骤 | 装 `integration[test]` 与 `agent-runtime[test]` → `npm ci` → 装 chromium → `check_all.py --driver playwright`（内部按同样的顺序跑六项检查，含受控假响应） |
+| 服务 | Java 监听 `8081` 并使用 H2，Python 监听 `8000`，Web 监听 `5173` |
+| 步骤 | 安装 Python 和 Web 依赖与 Chromium，运行 `check_all.py --driver playwright --web-with-stub --controlled-model` |
 | 门禁 | 全链路检查步骤或浏览器安装步骤不是 success → 末尾门禁步骤失败；不允许 SKIP 算通过 |
 | 证据 | `runs/stack/`（服务日志、`check_web` 截图）上传为 `stack-evidence` 工件；五段式失败块在各步骤输出里 |
 | 配置 | 只用环境变量注入 CI 专用值（`CP_*`），不在仓库里放密钥；缺必填项时 `stack_config` 直接失败 |
 
-本轮只在本地做了 `start_stack` 的 Java 段与 `--plan` 的复核，**CI 没有复跑**。下面是修改前的预期，未逐条复核，以 CI 真跑为准：
-`planning` 停在 `DEGRADED`（C 的 W1 骨架拒答）、`web_api_down` 与 `web_unknown` 判 `BLOCKED`（需要停掉 Python／需要受控假响应）。
-`record`/`audit` 原先写的「停在 `DEGRADED`（Java 未落地）」已过时：Java 已有实现，CI 若注入 `:8080` 会连不上 Java，需先改 workflow。
 
 ## 失败登记与转交
 
@@ -193,10 +190,10 @@ python integration/check_web.py --with-stub --driver playwright   # 用它在 Py
 
 | 服务 | 归属 | 实现清单（判断是否落地） | 启动命令 | 依据 |
 | --- | --- | --- | --- | --- |
-| mysql | B / 环境 | — | 不适用（`N/A`） | B 当前用 H2 文件库，`pom.xml` 无 MySQL 驱动、无 Flyway；B 引入 MySQL 后删掉 `stack_config.NOT_APPLICABLE` 中的 `mysql` 条目即恢复为必需服务（配置必填与 `start_stack` 的 N/A 标记都从这一处来）。CI 侧仍用 workflow 的 `services: mysql` |
+| mysql | B / 环境 | — | 不适用（`N/A`） | Java 使用 H2 文件库 |
 | java | B | `java-environment/pom.xml`（`mvnw` 已存在） | `./mvnw -B spring-boot:run`（Windows 为 `./mvnw.cmd`，相对模块目录解析；需 JDK 21+） | `java-environment/README.md` 已登记；就绪只判到 TCP `8081`，**不探 `/actuator/health`**（pom 未引入 actuator），行为级由主链路承担。启动子进程时把 `CP_SERVICE_KEY` 映射为 `COURSEPILOT_SERVICE_KEY` |
 | api | C | `agent-runtime/pyproject.toml` | `python -m uvicorn agent_runtime.api.app:app --port 8000` | `agent-runtime/README.md` 已登记（需先在该模块内 `pip install -e .[test]`） |
-| web | E | `web/package.json` | `npm run dev` | Vite 约定；待 E 的 `package.json` 确认后转正 |
+| web | E | `web/package.json` | `npm run dev` | Vite 开发服务器 |
 
 「未登记」不是跳过：脚本会把它判成 `BLOCKED` 并计入未就绪。启动命令只写已有书面依据的，不猜。
 
@@ -218,11 +215,7 @@ python integration/check_web.py --with-stub --driver playwright   # 用它在 Py
 | 缺口 | 影响 | 转交 |
 | --- | --- | --- |
 | `agent-runtime` 未提供健康端点（无 `/health`） | 组合启动的就绪判定只能到 TCP 层，行为级就绪由主链路检查的第一步（建会话必须 `201`）承担 | C |
-| `planning.openapi.json` 的 `listSessionRecords` 依赖 Java 侧 `listAcademicRecords` | 网关列表端点走 Java，未接线时只会 `503` | C / B |
 | `java-environment` 未引入 actuator，无 `/actuator/health` | 组合启动对 Java 只能判 TCP 层；行为级就绪由主链路第一步之后的 Java 调用承担 | B（如需健康端点再登记） |
-| `java-environment/README.md` 写有 `GET /api/v1/curriculum-snapshots`，但源码中无该映射（实测 `404 NOT_FOUND`） | 文档与代码不一致；本检查不依赖该端点 | B |
-| `.github/workflows/integration-checks.yml` 注入 `CP_JAVA_BASE_URL=http://127.0.0.1:8080` | 与 Java 实际端口 8081 不一致，CI 里 Java 会连不上 | workflow 维护者（本轮未改） |
-| 页面缺少稳定的步骤标识（`data-testid` 之类） | 浏览器检查目前只能断言挂载、失败提示与版式，无法逐步断言「第 N 问推进到第 N+1 问」 | E |
 
 ## 边界
 

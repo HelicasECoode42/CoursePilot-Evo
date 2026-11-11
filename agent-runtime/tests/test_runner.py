@@ -83,9 +83,9 @@ def test_run_returns_course_layer_recommendations_on_w2_fake_loop(
     answer = _runner().run(planning_request, _context(planning_request))
     assert answer.decision == "RECOMMENDATIONS"
     assert len(answer.recommendations) == 1
-    # 6 次 = getSchoolProgress（W2 返回 404）+ getAcademicRecord + listCourses
-    # + listTeacherCourseOptions + searchReviews（意图含 GPA 时查一门）+ validatePlan
-    # docs/04 第 3 节的 maxToolCalls=6。
+    # 6 次 = auditRequirements + getSchoolProgress（W2 返回 404）+ getAcademicRecord
+    # + listCourses + listTeacherCourseOptions + validatePlan，即 docs/04 第 3 节的
+    # maxToolCalls=6。searchReviews 有独立预算（Budget.max_review_calls），不计入。
     assert answer.usage.toolCalls == 6
     recommendation = answer.recommendations[0]
     assert recommendation.verification.verdict == "UNKNOWN"
@@ -151,7 +151,7 @@ def test_school_progress_enters_model_payload_without_replacing_audit_unknowns(
     class Model:
         messages = []
 
-        def generate(self, *, context, messages, tool_schemas):
+        def generate(self, *, context, messages):
             self.messages = messages
             return ModelReply(items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
 
@@ -168,9 +168,124 @@ def test_school_progress_enters_model_payload_without_replacing_audit_unknowns(
     assert payload["schoolProgress"]["availability"] == "AVAILABLE"
     assert payload["schoolProgress"]["progress"]["source"] == "CURRICULUM_FILE / UNVERIFIED"
     assert payload["schoolProgress"]["progress"]["nodes"][0]["remainingCredits"] == "15"
-    assert payload["academicRecordOutcomeUnknownCourseCodes"] == ["CS101"]
+    assert payload["academicRecordOutcomeUnknownCourseCodes"] == []
     assert any(issue.code == "FAKE_TOOL" for issue in answer.unknowns)
-    assert answer.usage.toolCalls == 6
+    assert answer.usage.toolCalls == 6  # 显式记录读取当前版本
+
+
+def test_school_report_gaps_and_school_passed_courses_shape_candidates(
+    planning_request: PlanningRequest,
+) -> None:
+    from agent_runtime.api.schemas.school_progress import SchoolProgressCourse
+
+    extra = [
+        Course(
+            courseCode="MATH301",
+            name="线性代数（演示）",
+            credits=Decimal("3.00"),
+            category="学科基础课",
+            sourceRefIds=["source:fake-w2"],
+        ),
+        Course(
+            courseCode="PHYS201",
+            name="大学物理（演示）",
+            credits=Decimal("3.00"),
+            category="学科基础课",
+            sourceRefIds=["source:fake-w2"],
+        ),
+    ]
+
+    class Tools(TypedFakeToolClient):
+        def call(self, tool, dto, context, *, params=None, idempotency_key=None):
+            if tool == "listCourses":
+                return [*super().call(tool, dto, context, params=params), *extra]
+            if tool == "getAcademicRecord":
+                current = super().call(tool, dto, context, params=params)
+                return current.model_copy(
+                    update={
+                        "revision": 2,
+                        "completedCourses": [
+                            CompletedCourse(
+                                courseCode="CS101",
+                                earnedCredits=Decimal("3"),
+                                outcome="PASSED",
+                                completedTerm="2025-2026-1",
+                            )
+                        ],
+                    }
+                )
+            if tool == "getSchoolProgress":
+                record = super().call(
+                    "getAcademicRecord", None, context, params={"recordId": "record:demo"}
+                )
+                return SchoolProgressImportResult(
+                    receipt=SchoolProgressReceipt(
+                        schoolProgressId="school:demo",
+                        contentHash="b" * 64,
+                        importedAt=datetime(2026, 10, 30, tzinfo=UTC),
+                        reused=True,
+                    ),
+                    snapshot=SchoolProgressSnapshot(
+                        format="coursepilot-shu-academic-progress",
+                        version=1,
+                        capturedAt=datetime(2026, 10, 29, tzinfo=UTC),
+                        source="browser adapter",
+                        nodes=[
+                            SchoolProgressNode(
+                                nodeId="node:core",
+                                parentId=None,
+                                schoolNodeId="10",
+                                leaf=True,
+                                name="学科基础课",
+                                requiredCredits=Decimal("40"),
+                                earnedCredits=Decimal("35"),
+                                remainingCredits=Decimal("5"),
+                            )
+                        ],
+                        courses=[
+                            SchoolProgressCourse(
+                                nodeId="node:core",
+                                courseCode="PHYS201",
+                                name="大学物理（演示）",
+                                credits=Decimal("3"),
+                                outcome="PASSED",
+                                completedYear=None,
+                                completedTerm=None,
+                                grade=None,
+                                makeup=None,
+                                retake=None,
+                                suggestedYear=None,
+                                suggestedTerm=None,
+                            )
+                        ],
+                    ),
+                    academicRecord=record,
+                )
+            return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
+
+    class Model:
+        messages = []
+
+        def generate(self, *, context, messages):
+            self.messages = messages
+            return ModelReply(items=None)
+
+    model = Model()
+    PlanningRunner(
+        tool_client=Tools(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=model,
+    ).run(planning_request, _context(planning_request))
+
+    payload = json.loads(model.messages[-1]["content"].split("AVAILABLE_FACTS:", 1)[-1])
+    assert payload["schoolReportGaps"] == [{"category": "学科基础课", "remainingCredits": "5"}]
+    candidates = {course["courseCode"] for course in payload["courses"]}
+    # Current-record statuses exclude CS101. A same-id old report still supplies
+    # gaps, but its stale PHYS201 status cannot suppress the current candidate.
+    assert "MATH301" in candidates
+    assert "PHYS201" in candidates
+    assert "CS101" not in candidates
+    assert payload["courses"][0]["courseCode"] == "MATH301"
 
 
 @pytest.mark.parametrize(
@@ -231,7 +346,7 @@ def test_mismatched_school_progress_is_not_added_to_model_facts(
     class Model:
         messages = []
 
-        def generate(self, *, context, messages, tool_schemas):
+        def generate(self, *, context, messages):
             self.messages = messages
             return ModelReply(items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
 
@@ -282,7 +397,7 @@ def test_taken_courses_are_excluded_and_cannot_be_returned(
     class RepeatingModel:
         messages = []
 
-        def generate(self, *, context, messages, tool_schemas):
+        def generate(self, *, context, messages):
             self.messages = messages
             return ModelReply(items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
 
@@ -307,8 +422,8 @@ def test_runner_passes_structured_intent_as_untrusted_model_data(
     class CapturingModel:
         messages = None
 
-        def generate(self, *, context, messages, tool_schemas):
-            del context, tool_schemas
+        def generate(self, *, context, messages):
+            del context
             type(self).messages = messages
             return ModelReply(items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
 
@@ -350,25 +465,134 @@ def test_runner_passes_structured_intent_as_untrusted_model_data(
     assert intent["careerDirectionIds"] == ["career:systems"]
 
 
-def test_fake_model_cannot_drop_must_teacher_and_return_recommendations(
+def test_must_teacher_is_restored_when_model_omits_teacher(
     planning_request: PlanningRequest,
 ) -> None:
+    # The model is asked to write only courseCode, so a null teacherKey on a MUST pin is
+    # filled from the request, not treated as a dropped teacher.
     planning_request.intent.motives = ["SPECIFIC_TEACHER"]
     planning_request.intent.priorityOrder = ["SPECIFIC_TEACHER"]
     planning_request.intent.pinnedTeacherCoursePairs = [
         TeacherPreference(courseCode="CS101", teacherKey="teacher:demo", mode="MUST")
     ]
     answer = _runner().run(planning_request, _context(planning_request))
+    assert answer.decision == "RECOMMENDATIONS"
+    cs101 = [
+        item
+        for recommendation in answer.recommendations
+        for item in recommendation.items
+        if item.courseCode == "CS101"
+    ]
+    assert cs101 and all(item.teacherKey == "teacher:demo" for item in cs101)
+    assert all(issue.code != "MUST_TEACHER_NOT_PRESERVED" for issue in answer.unknowns)
+
+
+def test_model_naming_another_teacher_for_must_pin_is_still_rejected(
+    planning_request: PlanningRequest,
+) -> None:
+    class OtherTeacherModel:
+        def generate(self, *, context, messages):
+            del context, messages
+            return ModelReply(
+                items=[PlanItem(courseCode="CS101", teacherKey="teacher:other", classId=None)]
+            )
+
+    planning_request.intent.motives = ["SPECIFIC_TEACHER"]
+    planning_request.intent.priorityOrder = ["SPECIFIC_TEACHER"]
+    planning_request.intent.pinnedTeacherCoursePairs = [
+        TeacherPreference(courseCode="CS101", teacherKey="teacher:demo", mode="MUST")
+    ]
+    answer = _runner(OtherTeacherModel()).run(planning_request, _context(planning_request))
     assert answer.decision == "UNABLE_TO_VERIFY"
     assert answer.recommendations == []
     assert any(issue.code == "MUST_TEACHER_NOT_PRESERVED" for issue in answer.unknowns)
-    assert any(issue.code == "FAKE_MODEL" for issue in answer.unknowns)
+
+
+def test_must_teacher_pin_forces_the_course_into_the_plan(
+    planning_request: PlanningRequest,
+) -> None:
+    # 「必须保留这位教师」是课程+教师都保留：模型没推荐这门课时也必须进方案，
+    # 否则模型漏选就会让整份回答降级为 UNABLE_TO_VERIFY（课表出不来）。
+    class NoCourseModel:
+        def generate(self, *, context, messages):
+            del context, messages
+            return ModelReply(items=[])
+
+    planning_request.intent.motives = ["SPECIFIC_TEACHER"]
+    planning_request.intent.priorityOrder = ["SPECIFIC_TEACHER"]
+    planning_request.intent.pinnedTeacherCoursePairs = [
+        TeacherPreference(courseCode="CS101", teacherKey="teacher:demo", mode="MUST")
+    ]
+    answer = _runner(NoCourseModel()).run(planning_request, _context(planning_request))
+
+    assert answer.decision == "RECOMMENDATIONS"
+    items = [item for recommendation in answer.recommendations for item in recommendation.items]
+    pinned = [item for item in items if item.courseCode == "CS101"]
+    assert pinned and all(item.teacherKey == "teacher:demo" for item in pinned)
+    assert all(issue.code != "MUST_TEACHER_NOT_PRESERVED" for issue in answer.unknowns)
+
+
+def test_must_teacher_pin_is_trusted_when_the_teacher_list_is_paginated_short(
+    planning_request: PlanningRequest,
+) -> None:
+    # 教师选项接口按页返回，本轮可能只取到第一页；学生显式钉的课程+教师不应因此
+    # 被判成「教师未知 / 未确认教授该课」。
+    class NoTeacherFacts(TypedFakeToolClient):
+        def call(self, tool, dto, context, *, params=None, idempotency_key=None):
+            if tool == "listTeacherCourseOptions":
+                return []
+            return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
+
+    class NoCourseModel:
+        def generate(self, *, context, messages):
+            del context, messages
+            return ModelReply(items=[])
+
+    planning_request.intent.motives = ["SPECIFIC_TEACHER"]
+    planning_request.intent.priorityOrder = ["SPECIFIC_TEACHER"]
+    planning_request.intent.pinnedTeacherCoursePairs = [
+        TeacherPreference(courseCode="CS101", teacherKey="teacher:demo", mode="MUST")
+    ]
+    runner = PlanningRunner(
+        tool_client=NoTeacherFacts(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=NoCourseModel(),
+    )
+    answer = runner.run(planning_request, _context(planning_request))
+
+    assert answer.decision == "RECOMMENDATIONS"
+    items = [item for recommendation in answer.recommendations for item in recommendation.items]
+    pinned = [item for item in items if item.courseCode == "CS101"]
+    assert pinned and all(item.teacherKey == "teacher:demo" for item in pinned)
+    codes = {issue.code for issue in answer.unknowns}
+    assert "UNKNOWN_TEACHER" not in codes
+    assert "TEACHER_COURSE_MISMATCH" not in codes
+
+
+def test_prefer_teacher_pin_does_not_force_the_course_into_the_plan(
+    planning_request: PlanningRequest,
+) -> None:
+    class NoCourseModel:
+        def generate(self, *, context, messages):
+            del context, messages
+            return ModelReply(items=[])
+
+    planning_request.intent.motives = ["SPECIFIC_TEACHER"]
+    planning_request.intent.priorityOrder = ["SPECIFIC_TEACHER"]
+    planning_request.intent.pinnedTeacherCoursePairs = [
+        TeacherPreference(courseCode="CS101", teacherKey="teacher:demo", mode="PREFER")
+    ]
+    answer = _runner(NoCourseModel()).run(planning_request, _context(planning_request))
+
+    # 优先考虑不是硬条件：没有候选时不强行塞课，但仍要给出可解释的结果。
+    assert answer.decision == "UNABLE_TO_VERIFY"
+    assert answer.recommendations == []
 
 
 def test_run_rejects_invented_course_ids(planning_request: PlanningRequest) -> None:
     class InventingModel:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             return ModelReply(items=[PlanItem(courseCode="CS999", teacherKey=None, classId=None)])
 
     planning_request.intent.motives = ["GPA"]
@@ -382,8 +606,8 @@ def test_run_does_not_retry_invalid_model_output(planning_request: PlanningReque
     class AlwaysInvalid:
         calls = 0
 
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             type(self).calls += 1
             raise ModelInvalidOutput("broken json")
 
@@ -396,8 +620,8 @@ def test_run_does_not_retry_invalid_model_output(planning_request: PlanningReque
 
 def test_run_charges_tokens_of_invalid_model_output(planning_request: PlanningRequest) -> None:
     class InvalidWithUsage:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             error = ModelInvalidOutput("broken json")
             error.input_tokens = 7
             error.output_tokens = 3
@@ -421,8 +645,8 @@ def test_run_does_not_repair_model_timeout(planning_request: PlanningRequest) ->
     class TimedOut:
         calls = 0
 
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             type(self).calls += 1
             raise ModelTimeout("模型请求超时")
 
@@ -435,8 +659,8 @@ def test_run_does_not_repair_model_timeout(planning_request: PlanningRequest) ->
 
 def test_run_records_provider_token_usage(planning_request: PlanningRequest) -> None:
     class CountingModel:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             return ModelReply(
                 items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)],
                 input_tokens=12,
@@ -543,19 +767,18 @@ def test_tradeoff_answer_resolves_gate_without_relaxing_constraints(
     assert answer.decision != "CLARIFY"
     assert planning_request.intent.pinnedTeacherCoursePairs[0].mode == "MUST"
     assert planning_request.intent.hardConstraints[0].kind == "BLOCK_SLOT"
-    assert answer.recommendations == [] or all(
-        item.courseCode == "CS101"
-        for recommendation in answer.recommendations
-        for item in recommendation.items
-    )
+    for recommendation in answer.recommendations:
+        for item in recommendation.items:
+            if item.courseCode == "CS101":
+                assert item.teacherKey == "teacher:demo"
 
 
 def test_empty_candidate_list_is_unable_to_verify(planning_request: PlanningRequest) -> None:
     class EmptyReply:
         calls = 0
 
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             type(self).calls += 1
             return ModelReply(items=[])
 
@@ -672,8 +895,8 @@ def test_fake_model_marker_does_not_rewrite_valid_verdict(
 
 def test_configured_model_has_no_fake_marker(planning_request: PlanningRequest) -> None:
     class ConfiguredModel:
-        def generate(self, *, context, messages, tool_schemas):
-            del context, messages, tool_schemas
+        def generate(self, *, context, messages):
+            del context, messages
             return ModelReply(items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
 
     planning_request.intent.motives = ["GPA"]
@@ -685,7 +908,7 @@ def test_configured_model_has_no_fake_marker(planning_request: PlanningRequest) 
 
 def test_model_reasons_and_exploration_are_returned(planning_request: PlanningRequest) -> None:
     class Model:
-        def generate(self, *, context, messages, tool_schemas):
+        def generate(self, *, context, messages):
             return ModelReply(
                 items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)],
                 course_rationales=[
@@ -725,7 +948,7 @@ def test_runner_generates_factual_rationale_for_every_recommended_course(
     planning_request: PlanningRequest,
 ) -> None:
     class Model:
-        def generate(self, *, context, messages, tool_schemas):
+        def generate(self, *, context, messages):
             return ModelReply(
                 items=[
                     PlanItem(courseCode="CS101", teacherKey=None, classId=None),
@@ -742,9 +965,35 @@ def test_runner_generates_factual_rationale_for_every_recommended_course(
     assert {rationale.courseCode for rationale in rationales} == {"CS101", "MATH201"}
     assert all(rationale.courseSourceRefIds == ["source:fake-w2"] for rationale in rationales)
     statuses = {rationale.courseCode: rationale.reviewBasisStatus for rationale in rationales}
-    assert statuses == {"CS101": "NO_RECORDS", "MATH201": "NOT_QUERIED"}
+    assert statuses == {"CS101": "NO_RECORDS", "MATH201": "NO_RECORDS"}
     assert all("课程目录列示" in rationale.reason for rationale in rationales)
     assert all(rationale.rationaleSource == "COURSE_FACTS" for rationale in rationales)
+
+
+def test_courses_beyond_review_budget_are_labelled_not_queried(
+    planning_request: PlanningRequest,
+) -> None:
+    class Model:
+        def generate(self, *, context, messages):
+            return ModelReply(
+                items=[
+                    PlanItem(courseCode="CS101", teacherKey=None, classId=None),
+                    PlanItem(courseCode="MATH201", teacherKey=None, classId=None),
+                ]
+            )
+
+    planning_request.intent.motives = ["CAREER"]
+    planning_request.intent.priorityOrder = ["CAREER"]
+    runner = PlanningRunner(
+        tool_client=_RecordingTools(),
+        harness=HarnessSnapshot(version="harness:v0", root=Path(".")),
+        model_adapter=Model(),
+        budget=Budget(max_review_calls=1),
+    )
+    answer = runner.run(planning_request, _context(planning_request))
+    rationales = answer.recommendations[0].courseRationales
+    statuses = {r.courseCode: r.reviewBasisStatus for r in rationales}
+    assert statuses == {"CS101": "NO_RECORDS", "MATH201": "NOT_QUERIED"}
 
 
 def test_runner_returns_server_derived_review_source_for_cited_evidence(
@@ -771,7 +1020,7 @@ def test_runner_returns_server_derived_review_source_for_cited_evidence(
             return super().call(tool, dto, context, params=params, idempotency_key=idempotency_key)
 
     class Model:
-        def generate(self, *, context, messages, tool_schemas):
+        def generate(self, *, context, messages):
             return ModelReply(
                 items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)],
                 course_rationales=[
@@ -809,7 +1058,7 @@ def test_course_rationale_accepts_old_payload_without_evidence_fields() -> None:
 
 def test_model_cannot_cite_unqueried_review(planning_request: PlanningRequest) -> None:
     class Model:
-        def generate(self, *, context, messages, tool_schemas):
+        def generate(self, *, context, messages):
             return ModelReply(
                 items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)],
                 course_rationales=[
@@ -854,8 +1103,8 @@ def test_context_policy_and_strategy_text_reach_the_model(
         def __init__(self) -> None:
             self.messages: list[dict[str, str]] | None = None
 
-        def generate(self, *, context, messages, tool_schemas):
-            del context, tool_schemas
+        def generate(self, *, context, messages):
+            del context
             self.messages = messages
             return ModelReply(items=[])
 
@@ -952,10 +1201,10 @@ class _CapturingModel:
     def __init__(self) -> None:
         self.facts: dict = {}
 
-    def generate(self, *, context, messages, tool_schemas):
+    def generate(self, *, context, messages):
         from agent_runtime.application.runner import FACTS_MESSAGE_PREFIX
 
-        del context, tool_schemas
+        del context
         for message in messages:
             content = message.get("content", "")
             if content.startswith(FACTS_MESSAGE_PREFIX):
@@ -982,6 +1231,11 @@ def test_facts_carry_course_name_credits_and_category(planning_request: Planning
         "name",
         "credits",
         "category",
+        "requirementNature",
+        "offeredThisTerm",
+        "sectionCount",
+        "teacherTexts",
+        "schoolGapRemainingCredits",
         "sourceRefIds",
     }
     assert courses[0]["name"], "课程名不能为空"
@@ -1058,7 +1312,7 @@ def test_selected_course_is_kept_when_model_does_not_return_it(
     planning_request: PlanningRequest,
 ) -> None:
     class Model:
-        def generate(self, *, context, messages, tool_schemas):
+        def generate(self, *, context, messages):
             return ModelReply(items=[PlanItem(courseCode="CS101", teacherKey=None, classId=None)])
 
     planning_request.intent.hardConstraints = [
@@ -1133,8 +1387,10 @@ def test_review_lookups_never_exceed_the_run_tool_budget(
     answer = _runner_with(tools, _CapturingModel()).run(
         planning_request, _context(planning_request)
     )
-    assert len(tools.tools) <= 6, f"工具调用 {len(tools.tools)} 次，超过 maxToolCalls=6"
-    assert answer.usage.toolCalls == len(tools.tools)
+    non_review = [name for name in tools.tools if name != "searchReviews"]
+    assert len(non_review) <= 6, f"工具调用 {len(non_review)} 次，超过 maxToolCalls=6"
+    assert answer.usage.toolCalls == len(non_review)
+    assert tools.tools.count("searchReviews") <= Budget().max_review_calls
 
 
 def test_explanation_does_not_claim_a_verdict_it_did_not_get(

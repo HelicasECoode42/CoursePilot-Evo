@@ -27,6 +27,10 @@ import {
   type ScheduleAction,
   type ScheduleStrength,
 } from "../domain/schedule-grid";
+import {
+  buildCourseFactIndex,
+  describeSelectedCourse,
+} from "../domain/course-names";
 import { usePlanningStore } from "../stores/planning";
 
 const store = usePlanningStore();
@@ -232,7 +236,11 @@ onBeforeUnmount(() => {
 function offeringOptionLabel(item: SnapshotSummary): string {
   const term = item.termId ?? "学期未注明";
   const source =
-    item.sourceValidation === "SYNTHETIC" ? "演示数据" : "班次快照";
+    item.sourceValidation === "SYNTHETIC"
+      ? "演示数据"
+      : item.sourceKind === "OFFICIAL_DOCUMENT"
+        ? "学校公布课表（待核验）"
+        : "班次快照";
   return `${term} · ${source}`;
 }
 
@@ -253,11 +261,14 @@ function curriculumOptionLabel(item: SnapshotSummary, index: number): string {
  * 画像里的课程只显示编号时，学生认不出是哪门。名字来自本会话里对话返回的课程
  * 卡片；没有对应卡片时只能退回编号，不能编造名字。
  */
+const courseFactIndex = computed(() =>
+  buildCourseFactIndex([
+    store.adviceMessages.flatMap((item) => item.answer?.courses ?? []),
+    store.schoolProgress?.snapshot.courses ?? [],
+  ]),
+);
 function courseLabel(code: string): string {
-  const named = store.adviceMessages
-    .flatMap((item) => item.answer?.courses ?? [])
-    .find((course) => course.courseCode === code);
-  return named ? `${named.name}（${code}）` : code;
+  return describeSelectedCourse(code, courseFactIndex.value.get(code) ?? null);
 }
 
 function scheduleSummary(keys: readonly string[]): string {
@@ -304,13 +315,13 @@ async function openRecords() {
       当前连接本地测试服务。培养资料来源以所选方案为准，模拟班次不代表下学期开课情况。
     </p>
     <p v-else class="notice" role="note">
-      当前是服务连接模式。会话只保存在本次页面内存中；刷新页面后需要重新开始。
+      当前是服务连接模式。会话与已填写的答案保存在本标签页中，刷新页面可以接着用；关闭标签页后需要重新开始。
     </p>
     <p v-if="store.errorMessage" class="notice notice--error" role="alert">
       {{ store.errorMessage }}
     </p>
     <p v-if="store.sessionStatus === 'expired'" class="microcopy" role="status">
-      已填写的目标暂存在本页内存中；建立新会话后可以继续，刷新页面会清除。
+      会话已过期或本地服务已重启，已填写的目标已清空。请重新开始，再继续填写。
     </p>
     <button
       class="button button--primary"

@@ -22,20 +22,25 @@ export interface TimetableSource {
 
 /** 格子里的一条：某门课的某一段时间。 */
 export interface TimetableEntry {
+  key: string;
   courseCode: string;
   classId: string;
   teacherText: string;
   meetingTextRaw: string;
   meeting: Meeting;
+  /** 这一段时间的教学周（来自结构化 weeks，不再解析原文）。 */
+  weeks: number[];
 }
 
-/** 已真正画进课表的班次（每门一条，用于下方的明细列表）。 */
-export interface PlacedCourse {
-  courseCode: string;
-  classId: string;
-  teacherText: string;
-  meetingTextRaw: string;
-  weeksText: string;
+/** 课表的周次视图：全学期，或只看前八周 / 后八周（按周次与之有交集的时段显示）。 */
+export type WeekView = "ALL" | "FIRST_8" | "LAST_8";
+export const WEEK_VIEW_RANGES: Record<WeekView, [number, number] | null> = {
+  ALL: null,
+  FIRST_8: [1, 8],
+  LAST_8: [9, 16],
+};
+export interface TimetableOptions {
+  weekView?: WeekView;
 }
 
 /** 没有画进课表的原因，直接展示给学生。 */
@@ -48,7 +53,8 @@ export interface TimetableGap {
 export interface TimetableView {
   /** key 为 slotKey(星期, 节次)。同一格多门课时全部保留，不覆盖。 */
   cells: Map<string, TimetableEntry[]>;
-  placed: PlacedCourse[];
+  placedCount: number;
+  overlapCells: Set<string>;
   gaps: TimetableGap[];
 }
 
@@ -133,6 +139,33 @@ export function weeksText(weeks: readonly number[]): string {
     .join("、")}周`;
 }
 
+/** 格子里的短周次：「1-8周」「1-8、10周」。没有周次时返回空字符串。 */
+export function compactWeeksText(weeks: readonly number[]): string {
+  if (weeks.length === 0) return "";
+  const sorted = [...new Set(weeks)].sort((a, b) => a - b);
+  const runs: number[][] = [];
+  for (const week of sorted) {
+    const last = runs[runs.length - 1];
+    if (last && last[last.length - 1] === week - 1) last.push(week);
+    else runs.push([week]);
+  }
+  return `${runs
+    .map((run) =>
+      run.length >= 2 ? `${run[0]}-${run[run.length - 1]}` : `${run[0]}`,
+    )
+    .join("、")}周`;
+}
+
+/** 时段的周次与所选周次视图是否有交集。全学期时总是 true。 */
+export function meetingInWeekView(
+  weeks: readonly number[],
+  view: WeekView,
+): boolean {
+  const range = WEEK_VIEW_RANGES[view];
+  if (range === null) return true;
+  return weeks.some((week) => week >= range[0] && week <= range[1]);
+}
+
 /**
  * 把上课时段写成人话，如「周一 第1-2节 · 第1–16周」，多段用「；」连接。
  * 不直接输出 meetingTextRaw（里面是 {第1-16周} 之类的原始写法）。
@@ -158,11 +191,46 @@ export function meetingsText(meetings: readonly Meeting[]): string {
     : readable.join("；");
 }
 
+/**
+ * 课程行里的短时间：「周二7-8 周三5-6 · 9-16周」。周次相同时只写一次；不同时逐段标注。
+ * 不可读的时段不画，末尾注明「另有时段无法确认」，与 meetingsText 的门禁一致。
+ */
+export function shortMeetingsText(meetings: readonly Meeting[]): string {
+  const readable = meetings.filter(
+    (meeting) => meetingProblem(meeting) === null,
+  );
+  const hasUnreadable = readable.length !== meetings.length;
+  if (readable.length === 0) return "时间未能确认";
+  const parts = readable.map((meeting) => {
+    const day = WEEKDAY_NAMES[meeting.dayOfWeek - 1];
+    const sections =
+      meeting.sectionStart === meeting.sectionEnd
+        ? `${meeting.sectionStart}`
+        : `${meeting.sectionStart}-${meeting.sectionEnd}`;
+    return {
+      head: `${day}${sections}`,
+      weeks: compactWeeksText(meeting.weeks),
+    };
+  });
+  const sameWeeks = parts.every((part) => part.weeks === parts[0].weeks);
+  const text = sameWeeks
+    ? `${parts.map((part) => part.head).join(" ")} · ${parts[0].weeks}`
+    : parts.map((part) => `${part.head}（${part.weeks}）`).join(" ");
+  return hasUnreadable ? `${text}；另有时段无法确认` : text;
+}
+
+/**
+ * 把课表画出来。reasons 为课程号 → 方案里 Java 给出的未排入原因（如 SECTION_NOT_ASSIGNED 的原因原文）；
+ * 有原因时未纳入课表的说明用它，没有时才退回通用说明。
+ */
 export function buildTimetable(
   sources: readonly TimetableSource[],
+  reasons: Readonly<Record<string, string>> = {},
+  options: TimetableOptions = {},
 ): TimetableView {
+  const weekView = options.weekView ?? "ALL";
   const cells = new Map<string, TimetableEntry[]>();
-  const placed: PlacedCourse[] = [];
+  let placedCount = 0;
   const gaps: TimetableGap[] = [];
 
   for (const source of sources) {
@@ -172,11 +240,12 @@ export function buildTimetable(
 
     if (offering === null || classId === null) {
       const reason =
-        source.missing === "NOT_SELECTED"
+        reasons[courseCode] ??
+        (source.missing === "NOT_SELECTED"
           ? "还没有选定班次，时间未知"
           : source.missing === "NOT_FOUND"
             ? "班次不在当前班次资料里"
-            : "这门课的时间没能从班次资料中读到";
+            : "这门课的时间没能从班次资料中读到");
       gaps.push({
         courseCode,
         classId,
@@ -195,8 +264,8 @@ export function buildTimetable(
       continue;
     }
 
-    const placedWeeks: number[] = [];
-    for (const meeting of offering.meetings) {
+    let placed = false;
+    for (const [index, meeting] of offering.meetings.entries()) {
       const problem = meetingProblem(meeting);
       if (problem !== null) {
         gaps.push({
@@ -206,13 +275,17 @@ export function buildTimetable(
         });
         continue;
       }
-      placedWeeks.push(...meeting.weeks);
+      placed = true;
+      // 周次视图只影响格子；明细和未排说明仍按整学期计算。
+      if (!meetingInWeekView(meeting.weeks, weekView)) continue;
       const entry: TimetableEntry = {
+        key: JSON.stringify([courseCode, classId, index]),
         courseCode,
         classId,
         teacherText: offering.teacherText,
         meetingTextRaw: offering.meetingTextRaw,
         meeting,
+        weeks: meeting.weeks,
       };
       for (
         let section = meeting.sectionStart;
@@ -224,16 +297,23 @@ export function buildTimetable(
       }
     }
 
-    if (placedWeeks.length > 0) {
-      placed.push({
-        courseCode,
-        classId,
-        teacherText: offering.teacherText,
-        meetingTextRaw: offering.meetingTextRaw,
-        weeksText: weeksText(placedWeeks),
-      });
-    }
+    if (placed) placedCount += 1;
   }
 
-  return { cells, placed, gaps };
+  const overlapCells = new Set<string>();
+  const range = WEEK_VIEW_RANGES[weekView];
+  for (const [key, entries] of cells) {
+    if (entries.length < 2) continue;
+    const classByWeek = new Map<number, string>();
+    for (const { classId, weeks } of entries) {
+      for (const week of weeks) {
+        if (range && (week < range[0] || week > range[1])) continue;
+        const previous = classByWeek.get(week);
+        if (previous !== undefined && previous !== classId)
+          overlapCells.add(key);
+        classByWeek.set(week, classId);
+      }
+    }
+  }
+  return { cells, placedCount, overlapCells, gaps };
 }

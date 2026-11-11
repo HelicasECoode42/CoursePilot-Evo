@@ -147,4 +147,23 @@ describe("CourseSearchPicker", () => {
     await flushPromises();
     expect(wrapper.findAll(".course-picker__choice")).toHaveLength(0);
   });
+
+  it("discards a response from a previous curriculum", async () => {
+    let resolve!: (page: Awaited<ReturnType<typeof api.listCourses>>) => void;
+    vi.mocked(api.listCourses).mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const wrapper = mountPicker();
+    await wrapper.get("#pick").setValue("数据");
+    await waitForDebounce();
+    expect(api.listCourses).toHaveBeenCalledOnce();
+    await wrapper.setProps({ curriculumSnapshotId: "curriculum-new" });
+    resolve({ items: [dataStructures], nextCursor: "old-page" });
+    await flushPromises();
+    expect(wrapper.findAll(".course-picker__choice")).toHaveLength(0);
+    expect(wrapper.text()).not.toContain("加载更多结果");
+    wrapper.unmount();
+  });
 });

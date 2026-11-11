@@ -16,7 +16,7 @@
 export type BridgeOutcome =
   | { kind: "ignored" }
   | { kind: "ready"; message: string }
-  | { kind: "saved"; message: string }
+  | { kind: "saved" }
   | { kind: "failed"; message: string };
 
 export type BridgeDeps = {
@@ -41,6 +41,22 @@ function messageType(data: unknown): string | null {
   if (typeof data !== "object" || data === null) return null;
   const type = (data as { type?: unknown }).type;
   return typeof type === "string" ? type : null;
+}
+
+/**
+ * 保存失败时给学生看的话。会话过期（HTTP 401，常见于服务重启后）单独说清楚，
+ * 免得学生以为是文件或网络的问题，而不知道要重新开始。
+ */
+export function schoolImportErrorMessage(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { status?: unknown }).status === 401
+  )
+    return "会话已过期，请重新开始后再导入。";
+  return error instanceof Error && error.message
+    ? error.message
+    : "未能保存学校学业进度，请重试。";
 }
 
 export function createSchoolProgressBridge(
@@ -95,18 +111,12 @@ export function createSchoolProgressBridge(
           await deps.save((data as { payload?: unknown }).payload);
           deps.post({ type: "CP_IMPORT_ACCEPTED", requestId, ok: true });
           pending = "";
-          return {
-            kind: "saved",
-            message: "学校学业进度已保存，课程明细已更新到学业记录。",
-          };
+          return { kind: "saved" };
         } catch (error) {
           deps.post({ type: "CP_IMPORT_ACCEPTED", requestId, ok: false });
           return {
             kind: "failed",
-            message:
-              error instanceof Error && error.message
-                ? error.message
-                : "未能保存学校学业进度，请重试。",
+            message: schoolImportErrorMessage(error),
           };
         }
       })();

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from agent_runtime.api.schemas import PlanningContext
+
 
 @dataclass(frozen=True)
 class ExecutionContext:
@@ -21,3 +23,4 @@ class ExecutionContext:
     temperature: float
     deadline: datetime
     harness_version: str
+    planning_context: PlanningContext | None = None

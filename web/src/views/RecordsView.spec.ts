@@ -444,3 +444,207 @@ describe("按年级生成的空结果", () => {
     expect(wrapper.text()).toContain("还没有选定培养方案");
   });
 });
+
+describe("学业资料 · 获得学分", () => {
+  it("非通过状态禁用获得学分输入，切换为非通过时清空已有学分", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = usePlanningStore();
+    store.$patch({
+      sessionStatus: "ready",
+      sessionId: "session-test",
+      selectedCurriculumId: "curr-test",
+      selectedRecordId: "rec-test",
+      recordsStatus: "ready",
+      records: [
+        {
+          academicRecordId: "rec-test",
+          revision: 1,
+          curriculumSnapshotId: "curr-test",
+          completedCourses: [
+            {
+              courseCode: "CS101",
+              earnedCredits: 3,
+              outcome: "PASSED",
+              completedTerm: null,
+            },
+          ],
+          transcriptComplete: false,
+          sourceKind: "USER_IMPORT",
+          createdAt: "2026-10-30T00:00:00Z",
+        },
+      ],
+    });
+    vi.spyOn(store, "loadRecords").mockResolvedValue();
+    vi.spyOn(store, "loadSchoolProgress").mockResolvedValue();
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/records", component: RecordsView }],
+    });
+    await router.push("/records");
+    await router.isReady();
+    const wrapper = mount(RecordsView, {
+      global: { plugins: [pinia, router] },
+    });
+    await flushPromises();
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "修改已填写课程")!
+      .trigger("click");
+    const outcome = wrapper.get<HTMLSelectElement>("#outcome-0");
+    const credits = wrapper.get<HTMLInputElement>("#credits-0");
+    expect(credits.element.disabled).toBe(false);
+    await outcome.setValue("FAILED");
+    expect(credits.element.disabled).toBe(true);
+    expect(credits.element.value).toBe("");
+  });
+});
+
+describe("学业资料 · 学校报告后的课程名与核对摘要", () => {
+  it("记录和核对摘要用学校导入的课程名，并能一键去勾选「记录已完整」", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = usePlanningStore();
+    store.$patch({
+      sessionStatus: "ready",
+      sessionId: "session-test",
+      selectedCurriculumId: "curr-test",
+      recordsStatus: "ready",
+      selectedRecordId: "rec-school",
+      records: [
+        {
+          academicRecordId: "rec-school",
+          revision: 1,
+          curriculumSnapshotId: "curr-test",
+          completedCourses: [
+            {
+              courseCode: "2200R200",
+              earnedCredits: null,
+              outcome: "IN_PROGRESS",
+              completedTerm: null,
+            },
+            {
+              courseCode: "0200R012",
+              earnedCredits: 2,
+              outcome: "PASSED",
+              completedTerm: "2025-2026:1",
+            },
+          ],
+          transcriptComplete: false,
+          sourceKind: "USER_IMPORT",
+          createdAt: "2026-10-30T00:00:00Z",
+        },
+      ],
+      schoolProgress: {
+        receipt: {
+          schoolProgressId: "progress-1",
+          contentHash: "hash-1",
+          importedAt: "2026-10-30T00:00:00Z",
+          reused: false,
+        },
+        snapshot: {
+          format: "coursepilot-shu-academic-progress",
+          version: 1,
+          capturedAt: "2026-10-30T00:00:00Z",
+          source: "fixture",
+          nodes: [
+            {
+              nodeId: "n1",
+              parentId: null,
+              schoolNodeId: null,
+              leaf: true,
+              name: "",
+              requiredCredits: 2,
+              earnedCredits: 2,
+              remainingCredits: 0,
+            },
+          ],
+          courses: [
+            {
+              nodeId: "n1",
+              courseCode: "0200R012",
+              name: "形势与政策",
+              credits: 2,
+              outcome: "PASSED",
+              completedYear: null,
+              completedTerm: null,
+              grade: null,
+              makeup: null,
+              retake: null,
+              suggestedYear: null,
+              suggestedTerm: null,
+            },
+            {
+              nodeId: "n1",
+              courseCode: "2200R200",
+              name: "",
+              credits: null,
+              outcome: "IN_PROGRESS",
+              completedYear: null,
+              completedTerm: null,
+              grade: null,
+              makeup: null,
+              retake: null,
+              suggestedYear: null,
+              suggestedTerm: null,
+            },
+          ],
+        },
+        academicRecord: {},
+      } as never,
+      audit: {
+        curriculumSnapshotId: "curr-test",
+        academicRecordId: "rec-school",
+        recordRevision: 1,
+        transcriptComplete: false,
+        requirements: [],
+        suggestedCourseCodes: [],
+        unknowns: [
+          {
+            code: "PENDING_COURSE",
+            message: "课程 2200R200 在修或结果未知，通识 类别的缺口不能确定",
+            field: "completedCourses",
+            retryable: false,
+          },
+          {
+            code: "COURSE_NOT_IN_CATALOG",
+            message: "课程 9999X 不在课程库中，无法归类",
+            field: "completedCourses",
+            retryable: false,
+          },
+        ],
+      } as never,
+    });
+    vi.spyOn(store, "loadRecords").mockResolvedValue();
+    vi.spyOn(store, "loadSchoolProgress").mockResolvedValue();
+    vi.spyOn(api, "listCourses").mockResolvedValue({
+      items: [],
+      nextCursor: null,
+    });
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/records", component: RecordsView }],
+    });
+    await router.push("/records");
+    await router.isReady();
+    const wrapper = mount(RecordsView, {
+      global: { plugins: [pinia, router] },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain("形势与政策 · 0200R012");
+    expect(wrapper.text()).not.toContain("2200R200 在修");
+    expect(wrapper.text()).toContain("本地核对暂无法给出结论");
+    expect(wrapper.text()).toContain("9999X");
+    const cta = wrapper
+      .findAll("button")
+      .find((button) => button.text() === "核对无误后勾选「记录已完整」");
+    expect(cta).toBeDefined();
+    await cta!.trigger("click");
+    await flushPromises();
+    const checkbox = wrapper.get<HTMLInputElement>("#transcript-complete");
+    expect(checkbox.element.checked).toBe(false);
+    expect(document.activeElement).toBe(checkbox.element);
+    wrapper.unmount();
+  });
+});

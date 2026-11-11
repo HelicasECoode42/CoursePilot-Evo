@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0",
+  "verifierName": "核验人甲",
+  "uploaderName": "上传人乙",
+  "sampleSize": 60,
+  "errorCount": 1,
+  "sampleFileSha256": "ABC",
+  "note": "随机抽样 60 条，对照官方 PDF 原件"
+}

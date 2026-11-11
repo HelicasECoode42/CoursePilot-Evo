@@ -50,6 +50,23 @@ describe("fixture 数据符合 domain.schema.json", () => {
     }
   });
 
+  it("演示答案的课表来源元数据与引用的开课快照一致", async () => {
+    const snapshot = (await client.listOfferingSnapshots()).items[0]!;
+    const answer = await client.submitPlanning(
+      {
+        schemaVersion: "1.0",
+        curriculumSnapshotId: snapshot.snapshotId,
+        academicRecordId: client.fixtureAcademicRecordId(),
+      } as never,
+      "fixture-consistency",
+    );
+    expect(answer.planningContext).toMatchObject({
+      timetableReferenceSnapshotId: snapshot.snapshotId,
+      timetableReferenceTermId: snapshot.termId,
+      timetableSourceValidation: snapshot.sourceValidation,
+    });
+  });
+
   it("班次搜索结果同形", async () => {
     const found = await client.searchSessionOfferings(
       FIXTURE_PREVIOUS_PLAN_ID,

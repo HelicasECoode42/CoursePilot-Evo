@@ -2,7 +2,7 @@
 /**
  * 个人控制台。配置完之后的落地页，四块：
  *   ① 我的状态   —— 来自 Java 的学业核对，原样显示，不改写 UNKNOWN
- *   ② 问一问     —— 确定性的回答 + 职业方向；不编造，也不假装在和模型对话
+ *   ② 问一问     —— 课程规划对话与职业方向
  *   ③ 看开什么课 —— 真实培养方案的课程，按要求类别分组，展开才查评价
  *   ④ 开始选课   —— 进现有的规划流程，这一页不重做它
  *
@@ -14,11 +14,25 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../api";
 import type { CareerDirection, Course, ReviewNote } from "../contracts";
-import SchoolProgressTree from "../components/SchoolProgressTree.vue";
+import SchoolProgressSummary from "../components/SchoolProgressSummary.vue";
+import LearnedCourseGroups from "../components/LearnedCourseGroups.vue";
+import LocalAuditSummary from "../components/LocalAuditSummary.vue";
 import ReviewSummary from "../components/ReviewSummary.vue";
 import AdviceChat from "../components/AdviceChat.vue";
-import { groupAuditItems } from "../domain/academic-record";
+import SavedPlansPanel from "../components/SavedPlansPanel.vue";
+import {
+  auditSourceLabel,
+  groupAuditItems,
+  inProgressNote,
+  needsCompleteCheckbox,
+  recordSourceLabel,
+} from "../domain/academic-record";
 import { isCurriculumUsableForMode } from "../domain/planning-request";
+import { groupLearnedCourses, usableName } from "../domain/school-categories";
+import {
+  buildCourseFactIndex,
+  type CourseFactLookup,
+} from "../domain/course-names";
 import { usePlanningStore } from "../stores/planning";
 
 const store = usePlanningStore();
@@ -38,12 +52,6 @@ const sourceLabel = computed(
       SYNTHETIC: "虚构示例",
     })[store.selectedCurriculum?.sourceValidation ?? "UNVERIFIED"],
 );
-const outcomeLabels = {
-  PASSED: "已通过",
-  FAILED: "未通过",
-  IN_PROGRESS: "在读",
-  UNKNOWN: "状态待确认",
-};
 
 type Load = "idle" | "loading" | "ready" | "error";
 
@@ -114,14 +122,46 @@ const courseGroups = computed(() => {
 const courseCount = computed(
   () => new Set(courses.value.map((course) => course.courseCode)).size,
 );
-const importedCourseNames = computed(() => {
-  const names = new Map(
-    courses.value.map((course) => [course.courseCode, course.name]),
-  );
-  for (const course of store.schoolProgress?.snapshot.courses ?? [])
-    names.set(course.courseCode, course.name);
+/**
+ * 课程名查表：课程目录打底，学校报告里读到了名字的覆盖它。
+ * 空串不算名字，免得学校报告的空名把目录里的好名字盖掉。
+ */
+const courseNameIndex = computed(() => {
+  const names = new Map<string, string>();
+  for (const course of courses.value) {
+    const name = usableName(course.name);
+    if (name) names.set(course.courseCode, name);
+  }
+  for (const course of store.schoolProgress?.snapshot.courses ?? []) {
+    const name = usableName(course.name);
+    if (name) names.set(course.courseCode, name);
+  }
   return names;
 });
+const lookupCourseName = (courseCode: string): string | null =>
+  courseNameIndex.value.get(courseCode) ?? null;
+/** 课程名加学分，给对话里的已选、优先考虑列表用。课程目录优先，学校报告补充。 */
+const courseFactIndex = computed(() =>
+  buildCourseFactIndex([
+    courses.value,
+    store.schoolProgress?.snapshot.courses ?? [],
+  ]),
+);
+const lookupCourseFact: CourseFactLookup = (courseCode) =>
+  courseFactIndex.value.get(courseCode) ?? null;
+
+/** 「我学了什么」：按学校类别分组；学校报告没有归属的课程放「其他」。 */
+const learnedGroups = computed(() =>
+  groupLearnedCourses({
+    nodes: store.schoolProgress?.snapshot.nodes ?? [],
+    courses: store.schoolProgress?.snapshot.courses ?? [],
+    recordCourses: store.selectedRecord?.completedCourses ?? [],
+    lookupName: lookupCourseName,
+  }),
+);
+const learnedCount = computed(() =>
+  learnedGroups.value.reduce((sum, group) => sum + group.items.length, 0),
+);
 
 function formatCredits(value: number | null): string {
   if (value === null) return "学分未注明";
@@ -297,8 +337,10 @@ onUnmounted(() => controller?.abort());
         <h1 id="dash-title" tabindex="-1">我的学业</h1>
         <p class="dashboard-subtitle">
           {{
-            store.selectedCurriculum?.displayName ||
-            "先连接学业资料，再开始规划"
+            store.selectedCurriculum
+              ? (usableName(store.selectedCurriculum.displayName) ??
+                "培养方案名称暂未提供")
+              : "先连接学业资料，再开始规划"
           }}
           <span v-if="store.selectedCurriculum" class="source-pill">{{
             sourceLabel
@@ -417,6 +459,31 @@ onUnmounted(() => controller?.abort());
             我学了什么
           </button>
         </div>
+        <div v-if="store.records.length > 0" class="dash-records">
+          <h3 class="sub-label">本次会话的学业记录</h3>
+          <ul class="dash-record-list" aria-label="学业记录来源">
+            <li
+              v-for="(record, index) in store.records"
+              :key="record.academicRecordId"
+              :data-source="record.sourceKind"
+            >
+              <strong>学业记录 {{ index + 1 }}</strong>
+              <span>
+                {{ record.completedCourses.length }} 门课程 ·
+                {{
+                  recordSourceLabel(
+                    record.sourceKind,
+                    record.academicRecordId ===
+                      store.schoolProgress?.academicRecord.academicRecordId,
+                  )
+                }}
+                ·
+                {{ record.transcriptComplete ? "已填完整" : "尚未确认填全" }}
+              </span>
+              <RouterLink to="/records">查看或修改</RouterLink>
+            </li>
+          </ul>
+        </div>
         <div v-if="!store.selectedCurriculum" class="empty-state">
           <template v-if="usableCurricula.length"
             ><h3>先选定你的培养方案</h3>
@@ -445,9 +512,13 @@ onUnmounted(() => controller?.abort());
           >
         </div>
         <template v-else-if="store.schoolProgress">
-          <SchoolProgressTree :nodes="store.schoolProgress.snapshot.nodes" />
+          <SchoolProgressSummary
+            :nodes="store.schoolProgress.snapshot.nodes"
+            :courses="store.schoolProgress.snapshot.courses"
+            :name-lookup="lookupCourseName"
+          />
           <details class="record-help">
-            <summary>本地培养方案核对与资料来源</summary>
+            <summary>本地培养方案核对（默认收起）</summary>
             <p>
               {{
                 sourceLabel
@@ -458,17 +529,33 @@ onUnmounted(() => controller?.abort());
                 >查看资料并核对</RouterLink
               >
             </p>
-            <ul v-else class="dash-audit">
-              <li v-for="group in auditGroups" :key="group.key">
-                <strong>{{ group.label }}</strong>
-                <ul>
-                  <li v-for="item in group.items" :key="item.requirementId">
-                    {{ item.category ?? "类别未注明" }} ·
-                    {{ formatGap(item.gapCredits) }}
-                  </li>
-                </ul>
-              </li>
-            </ul>
+            <template v-else>
+              <LocalAuditSummary
+                :audit="store.audit"
+                :lookup-name="lookupCourseName"
+              />
+              <p
+                v-if="inProgressNote(store.audit.requirements)"
+                class="microcopy"
+              >
+                {{ inProgressNote(store.audit.requirements) }}
+              </p>
+              <p v-if="needsCompleteCheckbox(store.audit)" class="microcopy">
+                核对无误后勾选「记录已完整」，无法确认的项目才会变成可确认的结论。<RouterLink
+                  class="cta-link"
+                  :to="{ path: '/records', query: { focus: 'complete' } }"
+                  >去勾选「记录已完整」</RouterLink
+                >
+              </p>
+              <p
+                v-else-if="
+                  store.audit.transcriptCompleteSource === 'SCHOOL_IMPORT_FULL'
+                "
+                class="microcopy"
+              >
+                学校导入已读全，按完整记录核对。
+              </p>
+            </template>
           </details>
         </template>
         <template v-else-if="store.audit">
@@ -482,6 +569,12 @@ onUnmounted(() => controller?.abort());
                 <li v-for="item in group.items" :key="item.requirementId">
                   {{ item.category ?? "类别未注明" }} ·
                   {{ formatGap(item.gapCredits) }}
+                  <span class="audit-source"
+                    >（{{ auditSourceLabel(item) }}）</span
+                  >
+                  <span v-if="item.inProgressCredits" class="microcopy">
+                    · 另有 {{ item.inProgressCredits }} 学分在读
+                  </span>
                 </li>
               </ul>
             </li>
@@ -505,25 +598,12 @@ onUnmounted(() => controller?.abort());
           <p v-if="!store.selectedRecord">本次会话还没有学业记录。</p>
           <template v-else
             ><p class="microcopy">
-              已读取
-              {{ store.selectedRecord.completedCourses.length }}
-              条记录；在读课程尚未计入已获学分。
+              共
+              {{ learnedCount }}
+              门课程，按学校类别分组；在读课程尚未计入已获学分。
             </p>
-            <ul class="dash-learned">
-              <li
-                v-for="(done, index) in store.selectedRecord.completedCourses"
-                :key="`${done.courseCode}-${index}`"
-              >
-                <span>{{
-                  importedCourseNames.get(done.courseCode) || done.courseCode
-                }}</span
-                ><span
-                  >{{ outcomeLabels[done.outcome] }} ·
-                  {{ formatCredits(done.earnedCredits) }}</span
-                >
-              </li>
-            </ul></template
-          >
+            <LearnedCourseGroups :groups="learnedGroups"
+          /></template>
         </div>
       </section>
       <section
@@ -536,7 +616,7 @@ onUnmounted(() => controller?.abort());
             <h2 id="dash-courses">培养方案中的课程</h2>
             <p class="microcopy">
               {{ courseCount }} 门课程 ·
-              按类别浏览，点开查看历史评价。目录不代表下学期开课清单。
+              按类别浏览，点开查看历史评价。评价资料只覆盖部分课程，没有记录会明确写出来；目录不代表下学期开课清单。
             </p>
           </div>
         </div>
@@ -622,7 +702,7 @@ onUnmounted(() => controller?.abort());
                     "
                     class="microcopy"
                   >
-                    暂无评价记录。
+                    暂无评价记录：这门课还没有导入评价资料，不代表没人评价。
                   </p>
                   <template v-else
                     ><p
@@ -690,7 +770,7 @@ onUnmounted(() => controller?.abort());
             <p v-if="item.courseCodes.length" class="microcopy">
               相关课程：{{
                 item.courseCodes
-                  .map((code) => importedCourseNames.get(code) || code)
+                  .map((code) => lookupCourseName(code) ?? code)
                   .join("、")
               }}
             </p>
@@ -705,7 +785,7 @@ onUnmounted(() => controller?.abort());
             可以先讨论课程与方向；确认采用的兴趣或课程会进入本次规划草稿。完整引导仍会逐步确认目标、偏好和时间。
           </p>
         </div>
-        <AdviceChat />
+        <AdviceChat :lookup-course="lookupCourseFact" />
         <div class="plan-start__actions">
           <RouterLink class="button button--primary" to="/plan/questions/goals"
             >继续完整需求引导 →</RouterLink
@@ -718,6 +798,7 @@ onUnmounted(() => controller?.abort());
         </div>
       </section>
     </template>
+    <SavedPlansPanel />
   </section>
 </template>
 
@@ -846,7 +927,6 @@ onUnmounted(() => controller?.abort());
 }
 .dash-audit,
 .dash-audit ul,
-.dash-learned,
 .dash-courses,
 .dash-directions {
   list-style: none;
@@ -861,17 +941,15 @@ onUnmounted(() => controller?.abort());
   font-size: 0.85rem;
   margin-top: 0.3rem;
 }
-.dash-learned li {
+.dash-record-list li {
   display: flex;
-  justify-content: space-between;
-  gap: 0.8rem;
-  border-bottom: 1px solid var(--line);
-  padding: 0.6rem 0;
-  font-size: 0.85rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.8rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line, #e5e7eb);
 }
-.dash-learned li > span:last-child {
-  color: var(--soft);
-}
+
 .dash-answer {
   background: var(--wash);
   border-radius: 12px;
@@ -955,37 +1033,6 @@ onUnmounted(() => controller?.abort());
   background: var(--wash);
   border: 1px solid var(--line);
 }
-.dash-ask-label {
-  display: block;
-  margin-top: 1.25rem;
-  font-size: 0.85rem;
-}
-.dash-ask-input {
-  display: block;
-  width: 100%;
-  min-height: 88px;
-  padding: 0.85rem;
-  margin-top: 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  resize: vertical;
-}
-.dash-samples {
-  display: flex;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-  margin-block: 0.8rem 1.2rem;
-}
-.dash-sample {
-  padding: 0.4rem 0.65rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  font-size: 0.75rem;
-  color: var(--soft);
-  text-align: left;
-}
 .plan-start__actions {
   display: flex;
   flex-wrap: wrap;
@@ -1026,10 +1073,6 @@ onUnmounted(() => controller?.abort());
   }
   .dash-directions {
     grid-template-columns: 1fr;
-  }
-  .dash-learned li {
-    flex-direction: column;
-    gap: 0.2rem;
   }
 }
 </style>

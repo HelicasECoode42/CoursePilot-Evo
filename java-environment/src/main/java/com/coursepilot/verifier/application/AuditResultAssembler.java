@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.math.BigDecimal;
 
 /**
  * 把学业核对结果摆成契约的 AuditResult。
@@ -23,6 +24,12 @@ import java.util.Map;
  * 数据源是学业记录聚合 Transcript（经 AcademicLedger 折算），算法与 AuditEvaluator 共用。
  * 本类只负责按契约摆形状，逐条产出 AuditItem。C 模块按 contracts/java.openapi.json
  * 调用 POST /api/v1/requirements/audit，拿到的就是这个结构。
+ *
+ * 类别判定顺序：
+ *   1. 学校报告里有同名类别（精确名称匹配，且学分已读全）：直接采用学校的 required/earned/remaining，
+ *      source=SCHOOL_REPORT；remaining 为 0 即满足，不论具体课程。
+ *   2. 否则用本地课程折算（AcademicLedger），source=LOCAL。
+ *   学业记录完整性：手动声明完整，或学校导入读全（SchoolReport.fullyRead）。
  *
  * 仍然未知、统一记进 unknowns，不猜也不填假值：
  *   - Requirement 没有 courseCodes 与 sourceRefIds，courseCodes 只由已修记录反推，sourceRefIds 指向培养快照；
@@ -38,15 +45,18 @@ public class AuditResultAssembler {
     private final TranscriptRepository transcriptRepo;
     private final CurriculumCourseRepository curriculumCourses;
     private final CurriculumUnmodeledRuleRepository unmodeledRules;
+    private final SchoolReportLoader schoolReports;
 
     public AuditResultAssembler(RequirementRepository requirementRepo,
                                 TranscriptRepository transcriptRepo,
                                 CurriculumCourseRepository curriculumCourses,
-                                CurriculumUnmodeledRuleRepository unmodeledRules) {
+                                CurriculumUnmodeledRuleRepository unmodeledRules,
+                                SchoolReportLoader schoolReports) {
         this.requirementRepo = requirementRepo;
         this.transcriptRepo = transcriptRepo;
         this.curriculumCourses = curriculumCourses;
         this.unmodeledRules = unmodeledRules;
+        this.schoolReports = schoolReports;
     }
 
     public AuditDtos.AuditResult assemble(String curriculumSnapshotId, String academicRecordId) {
@@ -57,7 +67,12 @@ public class AuditResultAssembler {
         // 契约 recordRevision 最小为 1。没有学业记录时没有真实修订号，这里用 1 占位，
         // 并在 unknowns 里说明，消费方不能把它当成真实版本。
         int recordRevision = transcript == null ? 1 : transcript.getRevision();
-        boolean transcriptComplete = transcript != null && transcript.isTranscriptComplete();
+        // 学校报告按主体取最近一次导入；学业记录的完整性 = 手动声明 或 学校导入读全。
+        SchoolReport school = schoolReports.latest(academicRecordId, curriculumSnapshotId);
+        boolean transcriptComplete = school.completes(transcript);
+        AuditDtos.TranscriptCompleteSource completeSource = !transcriptComplete ? null
+            : school.fullyRead() ? AuditDtos.TranscriptCompleteSource.SCHOOL_IMPORT_FULL
+            : AuditDtos.TranscriptCompleteSource.MANUAL;
 
         List<AuditDtos.Issue> unknowns = new ArrayList<>();
         List<Requirement> requirements = requirementRepo.findByPlanId(curriculumSnapshotId);
@@ -67,7 +82,7 @@ public class AuditResultAssembler {
                 "培养方案 " + curriculumSnapshotId + " 没有类别要求，无法核对",
                 "curriculumSnapshotId", false));
             return new AuditDtos.AuditResult(curriculumSnapshotId, academicRecordId,
-                recordRevision, transcriptComplete, List.of(), List.of(), List.copyOf(unknowns));
+                recordRevision, transcriptComplete, List.of(), List.of(), List.copyOf(unknowns), completeSource);
         }
 
         Map<String, Course> snapshotCatalog = transcript == null ? Map.of()
@@ -82,8 +97,10 @@ public class AuditResultAssembler {
                 .collect(java.util.stream.Collectors.toMap(
                     cc -> cc.getCourse().getCourseCode(),
                     cc -> new Course(cc.getCourse().getCourseCode(), cc.getName(), cc.getCredits(), cc.getCategory())));
-        AcademicLedger ledger = AcademicLedger.of(transcript,
-            code -> java.util.Optional.ofNullable(snapshotCatalog.get(code)));
+        AcademicLedger ledger = AcademicLedger.of(transcript, transcriptComplete,
+            code -> java.util.Optional.ofNullable(snapshotCatalog.get(code)), school,
+            requirements.stream().map(Requirement::getCategory)
+                .collect(java.util.stream.Collectors.toSet()));
         unknowns.addAll(ledger.issues());
         // 未建模规则不参与核验，但显式带出，让人看见哪些规则没有被算进去。
         var unmodeled = unmodeledRules.findBySnapshot_SnapshotIdAndDispositionOrderBySourceRowAsc(
@@ -102,20 +119,41 @@ public class AuditResultAssembler {
 
         List<AuditDtos.AuditItem> items = new ArrayList<>();
         for (Requirement req : requirements) {
+            String category = req.getCategory();
+            var schoolCategory = school.category(category);
+            if (schoolCategory.isPresent()) {
+                // 学校报告同名类别已读全：采用学校口径，不再因本地课程缺漏判 UNKNOWN。
+                var sc = schoolCategory.get();
+                BigDecimal remaining = sc.remaining();
+                items.add(new AuditDtos.AuditItem(
+                    requirementId(req),
+                    category,
+                    ledger.courseCodes(category),
+                    sc.required().doubleValue(),
+                    sc.earned().doubleValue(),
+                    Math.max(0.0, remaining.doubleValue()),
+                    remaining.signum() <= 0 ? AuditDtos.State.SATISFIED : AuditDtos.State.UNSATISFIED,
+                    sourceRefIds(req, curriculumSnapshotId),
+                    AuditDtos.Source.SCHOOL_REPORT,
+                    ledger.inProgressCredits(category)));
+                continue;
+            }
             AuditDtos.State state = ledger.stateFor(req);
             // UNKNOWN 的要求不给确定缺口：null 表示无法确定（契约 gapCredits 可为 null）。
-            Double gap = state == AuditDtos.State.UNKNOWN
-                ? null
-                : Math.max(0.0, req.getRequiredCredits() - ledger.earned(req.getCategory()));
+            Double gap = state == AuditDtos.State.UNKNOWN ? null
+                : BigDecimal.valueOf(req.getRequiredCredits()).subtract(ledger.earnedDecimal(category))
+                    .max(BigDecimal.ZERO).doubleValue();
             items.add(new AuditDtos.AuditItem(
                 requirementId(req),
-                req.getCategory(),
-                ledger.courseCodes(req.getCategory()),
+                category,
+                ledger.courseCodes(category),
                 req.getRequiredCredits(),
-                ledger.earned(req.getCategory()),
+                ledger.earned(category),
                 gap,
                 state,
-                sourceRefIds(req, curriculumSnapshotId)));
+                sourceRefIds(req, curriculumSnapshotId),
+                AuditDtos.Source.LOCAL,
+                ledger.inProgressCredits(category)));
         }
 
         if (!transcriptComplete) {
@@ -131,7 +169,7 @@ public class AuditResultAssembler {
 
         return new AuditDtos.AuditResult(
             curriculumSnapshotId, academicRecordId, recordRevision, transcriptComplete,
-            items, List.of(), List.copyOf(unknowns));
+            items, List.of(), List.copyOf(unknowns), completeSource);
     }
 
     /**

@@ -20,6 +20,17 @@ class CourseFact:
     credits: str | None
     category: str
     source_ref_ids: tuple[str, ...] = ()
+    # Offered in the plan's offering snapshot: True/False after a check, None when no
+    # offering snapshot was given (not checked). Set by the runner from Java rows.
+    offered_this_term: bool | None = None
+    # Number of sections in the snapshot; None when only "offered" is known.
+    section_count: int | None = None
+    teacher_texts: tuple[str, ...] = ()
+    # 「必修」「选修」 from the category, or None when the category does not state it.
+    requirement_nature: str | None = None
+    # Remaining credits of this category in the school report (a string, as in the
+    # school snapshot), or None when the report has no gap for it.
+    school_gap_credits: str | None = None
 
 
 @dataclass(frozen=True)
@@ -33,6 +44,9 @@ class ReviewFact:
     dimensions: tuple[str, ...]
     excerpt: str
     source_ref_id: str
+    # Teacher key from the review record, used only to order sections by review
+    # coverage. Not an admission rule (the guard never reads it).
+    teacher_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +67,23 @@ class KnownFacts:
     course_facts: tuple[CourseFact, ...] = ()
     review_facts: tuple[ReviewFact, ...] = ()
     reviews_queried_for: frozenset[str] = frozenset()
+    # True when the runner checked offered-this-term for the candidates. Then only
+    # ``offered_course_codes`` may be shown to the model or recommended (pinned
+    # courses are kept by the runner and reported separately).
+    offering_checked: bool = False
+    offered_course_codes: frozenset[str] = frozenset()
+    # Eligible courses the curriculum states as required (学科基础课). Placed first in a
+    # plan when offered this term; see runner._required_courses.
+    required_course_codes: frozenset[str] = frozenset()
+
+    @property
+    def visible_course_facts(self) -> tuple[CourseFact, ...]:
+        """Course facts the model may choose from: offered ones when offerings were checked."""
+        if not self.offering_checked:
+            return self.course_facts
+        return tuple(
+            fact for fact in self.course_facts if fact.course_code in self.offered_course_codes
+        )
 
 
 class CandidateGuard:

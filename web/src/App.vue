@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "./api";
 import { startSchoolProgressBridge } from "./school-progress-wiring";
+import { offeringBanner } from "./domain/offering-selection";
 import { usePlanningStore } from "./stores/planning";
 
 // 学业进度的接收挂在应用级：原先只在 /records 里监听，学生停在别的页面时
@@ -13,6 +14,8 @@ const store = usePlanningStore();
 const widePage = computed(() =>
   ["/", "/me", "/plan/credits"].includes(route.path),
 );
+// 结果页要宽屏两栏（左课表、右课程），比其他宽页更宽，单独给一个类。
+const resultPage = computed(() => route.path === "/plan/result");
 const recordsTarget = computed(() =>
   store.sessionStatus === "ready" ? "/records" : "/setup",
 );
@@ -25,11 +28,15 @@ onUnmounted(() => {
   stopBridge = null;
 });
 
+// 横幅依据所选班次来源，不再只看全局模式：换成已核验或学校课表时要随之变化。
+const courseBanner = computed(() =>
+  offeringBanner(store.selectedOfferingSnapshot),
+);
 const modeLabel = computed(() =>
   api.mode === "fixture"
     ? "页面演示 · 虚构内容"
     : api.mode === "simulation"
-      ? "本地测试服务"
+      ? "演示环境 · 模拟课表"
       : "本机运行",
 );
 </script>
@@ -37,6 +44,17 @@ const modeLabel = computed(() =>
 <template>
   <div class="app-shell">
     <a class="skip-link" href="#main-content">跳到正文</a>
+    <!-- 课表来源横幅常驻顶部，滚动时也不消失；模拟数据与未核验课表都要说清楚。 -->
+    <div
+      v-if="courseBanner"
+      class="sim-banner"
+      :class="
+        courseBanner.tone === 'official' ? 'sim-banner--official' : undefined
+      "
+      role="status"
+    >
+      {{ courseBanner.text }}
+    </div>
     <header class="topbar">
       <RouterLink class="brand" to="/" aria-label="CoursePilot 首页">
         <span class="brand-mark" aria-hidden="true"></span>
@@ -72,7 +90,10 @@ const modeLabel = computed(() =>
     <main
       id="main-content"
       class="page-shell"
-      :class="{ 'page-shell--wide': widePage }"
+      :class="{
+        'page-shell--wide': widePage,
+        'page-shell--result': resultPage,
+      }"
       tabindex="-1"
     >
       <RouterView />

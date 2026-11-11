@@ -1,14 +1,8 @@
-# System 1：Java Environment / Truth / Verifier（部分实现）
+# System 1：Java Environment / Truth / Verifier
 
-Java 21、Spring Boot（已引入 Web、Spring Data JPA、Validation；源码中尚无 `@Valid`/`@NotNull` 等校验注解在用）、H2 文件库（`./data`）、JUnit 5（经 spring-boot-starter-test）。Apache POI 5.5.1 用于 XLSX 导入；尚未引入 MySQL 驱动或 Flyway。首版**目标**是处理通过自动校验门槛的培养计划和 `SYNTHETIC` 班次 fixture，提供课程/要求/学分/冲突算法/计划核验/偏好指标和 typed Tool API；面向学生没有真实班次时返回 UNKNOWN。这是模块范围，不是当前能力——实际完成到哪一步见下一段。按 `../docs/trd/a-data.md`、`../docs/trd/b-verifier.md` 与[实施方案](../docs/10-java-import-and-rules.md)开发，未来浏览器采集边界见 `../docs/09-browser-adapter.md`。
+Java 服务使用 Spring Boot、Spring Data JPA 和 H2，使用 Apache POI 导入培养计划 XLSX。接口包括培养快照、课程和班次查询、学业记录与学校进度导入、学业核对、计划核验、班次导入、教师选项和评价导入与查询。请求和响应以 `contracts/java.openapi.json` 为准。
 
-当前已实现：课程/班次查询（`GET /api/v1/courses`、`GET /api/v1/offerings`）、时间解析与冲突判断、学业核对
-（`POST /api/v1/requirements/audit`）、服务密钥与对象级授权。培养计划 XLSX 导入器可在显式开启的本地演示模式下
-通过 `POST /api/v1/curriculum-snapshots/import` 发布为 `SYNTHETIC/SYNTHETIC`，不支持真实来源发布。另有三个 `/api/v1/verification/*` 接口
-（`credit-gap`、`parse-time`、`conflicts`）已实现，但未在 `contracts/java.openapi.json` 中声明，属于契约外的既有接口。
-**尚未实现**：`POST /api/v1/plans/validate`、教师与课程评价实体、
-班次/评价导入、MySQL/Flyway（当前是 H2）。现有数据全是 `SYNTHETIC` 演示种子，
-没有真实教学计划或真实班次。
+培养计划支持本地演示模式下的 `SYNTHETIC` 导入，以及具有授权和来源记录的 `CURRICULUM_FILE` 导入。班次可用性和培养核验根据各自快照及来源返回，缺少对应事实时返回 `UNKNOWN`。
 
 ## 本地启动
 
@@ -71,6 +65,10 @@ curl -H "X-Service-Key: $COURSEPILOT_SERVICE_KEY" \
      -H 'X-Request-Id: req-1' \
      http://127.0.0.1:8081/api/v1/courses
 ```
+
+### 整学期班次导入
+
+`scripts/convert_timetable_pdf.py --all` 生成一份整学期 JSON，每份最多 7,000 条班次，通过 `POST /api/v1/offerings/import` 发布为一个快照。若文件超过 Java 默认的 2 MiB 请求体上限，启动服务时按文件大小设置 `COURSEPILOT_MAX_JSON_BODY_BYTES`。
 
 ### 本地私有教师评价导入
 

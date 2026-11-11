@@ -75,6 +75,8 @@ const coursesWithoutTeacher = computed(() =>
 );
 /** 教师资料是 UNKNOWN（快照缺失或非当前）：空列表不能说成「没有可比较的教师」。 */
 const optionsUnconfirmed = ref(false);
+/** 结果来自未核验的本学期开课表：只说明，不算错误。 */
+const offeringUnverified = ref(false);
 const expandedKey = ref<string | null>(null);
 const reviewStates = ref<Record<string, ReviewState>>({});
 /**
@@ -173,6 +175,8 @@ function setStrength(option: TeacherCourseOption, mode: TeacherMode) {
     savePicks(picks.value.filter((pick) => !samePair(pick)));
     return;
   }
+  // 历史资料或所选快照里没有班次的选项不能新增，但已选中的仍可在上面取消。
+  if (!canPick(option)) return;
   store.setTeacherPickDisplayName(
     option.courseCode,
     option.teacherKey,
@@ -202,9 +206,50 @@ function failureMessage(error: unknown): string {
 }
 
 function classCountText(option: TeacherCourseOption): string {
-  return option.classIds.length > 0
-    ? `${option.classIds.length} 个班次`
-    : "暂无班次资料";
+  const count = currentSectionCount(option);
+  if (count > 0) return `${count} 个班次`;
+  return option.factSource === "OFFERING_SNAPSHOT"
+    ? "该快照里没有班次"
+    : "仅有历史资料";
+}
+
+/**
+ * 该教师选项是否落在「当前所选开课快照」里、且确实有班次。
+ *
+ * 教师能搜到（来自历史评价/绑定）不代表这门课现在可选：只有来自开课快照
+ * （OFFERING_SNAPSHOT）、快照就是当前选中的那份、且班次数 > 0，才允许设为
+ * 「必须保留 / 优先考虑」。否则选出来的 MUST 在规划里无法保留，会让整份规划失败。
+ */
+function currentSectionCount(option: TeacherCourseOption): number {
+  if (option.factSource !== "OFFERING_SNAPSHOT") return 0;
+  const snapshotId = option.offeringSnapshotId ?? null;
+  if (snapshotId === null) return 0;
+  const selected = store.selectedOfferingSnapshot?.snapshotId ?? null;
+  if (selected !== null && snapshotId !== selected) return 0;
+  return option.sectionCount ?? option.classIds.length;
+}
+
+/** 能不能把这个「课程+教师」用于教师偏好。 */
+function canPick(option: TeacherCourseOption): boolean {
+  return currentSectionCount(option) > 0;
+}
+
+/** 不能选时给学生看的原因：区分「历史资料」与「所选快照没班次」。 */
+function unpickableReason(option: TeacherCourseOption): string {
+  if (option.factSource !== "OFFERING_SNAPSHOT") {
+    return "仅有历史资料，所选开课表里没有这位教师的班次，不能设为必须保留或优先考虑。";
+  }
+  return "所选开课快照里没有这位教师的班次，不能设为必须保留或优先考虑。";
+}
+
+/**
+ * 开课表未核验时，本学期的开课情况是「未核验的本学期开课表」，而不是「未知」。
+ * 列表级 UNKNOWN 在这种情况下只是说明未核验，不当作错误。
+ */
+function availabilityText(option: TeacherCourseOption): string {
+  if (option.offeringSourceValidation === "UNVERIFIED")
+    return "本学期开课表（未核验）";
+  return AVAILABILITY_LABEL[option.availability];
 }
 
 async function searchOptions() {
@@ -237,6 +282,10 @@ async function searchOptions() {
       matchedCourses.push(...page.items);
       cursor = page.nextCursor;
     } while (cursor);
+    // TODO(开课快照)：契约 teacher-course-options（java.openapi.json 与 planning.openapi.json）
+    // 目前没有 offeringSnapshotId 或学期参数，这里无法把所选开课快照传过去。
+    // 契约支持后，应把 store.selectedOfferingSnapshot 的 snapshotId 一并传入，
+    // 当期是否开课才按同一份快照判断。
     const [byTeacher, byCourse] = await Promise.all([
       api.listTeacherCourseOptions(
         store.selectedCurriculumId,
@@ -281,15 +330,25 @@ async function searchOptions() {
     }
     options.value = [...merged.values()];
     courses.value = matchedCourses;
+    const allOptions = [
+      ...byTeacher.items,
+      ...byCourse.flatMap((result) => result.items),
+    ];
+    // 开课表未核验时列表状态为 UNKNOWN 是预期的，改用说明，不显示「无法确认」警告。
+    offeringUnverified.value = allOptions.some(
+      (option) => option.offeringSourceValidation === "UNVERIFIED",
+    );
     optionsUnconfirmed.value =
-      byTeacher.status === "UNKNOWN" ||
-      byCourse.some((result) => result.status === "UNKNOWN");
+      !offeringUnverified.value &&
+      (byTeacher.status === "UNKNOWN" ||
+        byCourse.some((result) => result.status === "UNKNOWN"));
     searchStatus.value = "ready";
   } catch (error) {
     if (seq !== searchSeq) return;
     options.value = [];
     courses.value = [];
     optionsUnconfirmed.value = false;
+    offeringUnverified.value = false;
     searchError.value = failureMessage(error);
     searchStatus.value = "error";
   }
@@ -360,6 +419,7 @@ async function loadReviews(option: TeacherCourseOption) {
     );
     if (reviewSeq.get(key) !== seq) return;
     // 只保留这门课、且是这位老师或未指明老师的评价，不混入别的老师。
+    // 未指明老师的记录带「依据有限」标记，不当作这位老师的评价。
     const own = result.items.filter(
       (note) =>
         note.courseCode === option.courseCode &&
@@ -548,6 +608,9 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
       </p>
 
       <template v-else-if="searchStatus === 'ready'">
+        <p v-if="offeringUnverified" class="notice" role="note">
+          本学期开课表尚未核验，下面的班次与教师仅供参考，不代表已确认开课。
+        </p>
         <p v-if="optionsUnconfirmed" class="notice notice--warning" role="note">
           下面的教师资料无法确认（快照缺失或不是当前版本），列表可能不完整。
         </p>
@@ -629,6 +692,7 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                 "
               >
                 <ReviewSummary
+                  title="课程整体评价（未绑定老师）"
                   :course-code="course.courseCode"
                   :notes="reviewStates[courseReviewKey(course)]!.notes"
                   :unconfirmed="
@@ -663,8 +727,11 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                 · {{ option.teacherDisplayName }}
               </strong>
               <small>
-                {{ AVAILABILITY_LABEL[option.availability] }} ·
+                {{ availabilityText(option) }} ·
                 {{ classCountText(option) }}
+              </small>
+              <small v-if="!canPick(option)" class="microcopy">
+                {{ unpickableReason(option) }}
               </small>
             </span>
 
@@ -677,6 +744,8 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                 type="button"
                 :aria-pressed="pickOf(option)?.mode === 'MUST'"
                 :aria-label="`${option.teacherDisplayName} ${MODE_LABEL.MUST}`"
+                :disabled="!canPick(option)"
+                :title="canPick(option) ? undefined : unpickableReason(option)"
                 @click="setStrength(option, 'MUST')"
               >
                 {{ MODE_LABEL.MUST }}
@@ -685,6 +754,8 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                 type="button"
                 :aria-pressed="pickOf(option)?.mode === 'PREFER'"
                 :aria-label="`${option.teacherDisplayName} ${MODE_LABEL.PREFER}`"
+                :disabled="!canPick(option)"
+                :title="canPick(option) ? undefined : unpickableReason(option)"
                 @click="setStrength(option, 'PREFER')"
               >
                 {{ MODE_LABEL.PREFER }}
@@ -799,6 +870,7 @@ function summarizeReviews(notes: ReviewNote[]): TeacherReviewOverview {
                     </p>
                   </div>
                   <ReviewSummary
+                    :title="`${option.teacherDisplayName} 的教师评价`"
                     :course-code="option.courseCode"
                     :notes="reviewStateOf(option)!.notes"
                     :unconfirmed="reviewStateOf(option)!.unconfirmed"

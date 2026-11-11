@@ -3,8 +3,7 @@
 CoursePilot-Evo 的 System 2 层：唯一的**生产/评测 Runner**、FastAPI 网关和可版本化运行
 Harness。硬事实全部来自 Java（System 1），本模块只负责理解目标、调用策略、候选、澄清与解释。
 
-> 当前是 **W2 类型化假循环**：DTO 契约、Runner 入口、意图/澄清/守卫、假模型候选、假 Java
-> `validatePlan`、Harness、session/planning。未配置模型密钥时走假模型，答案 `unknowns`
+> 网关可连接 Java 工具与配置的模型端点。未配置模型密钥时走假模型，答案 `unknowns`
 > 带 `FAKE_MODEL`。默认无 `CP_JAVA_BASE_URL` 时 planning 仍返回 503；本地演示可设
 > `CP_USE_FAKE_TOOLS=true`。
 
@@ -69,29 +68,50 @@ python -m uvicorn agent_runtime.api.app:app --port 8000
 
 ## 当前限制（如实）
 
+- 班次选定（`application/section_assignment.py`，docs/36）：规划给出课程后，Runner 按
+  `offeringSnapshotId` 对每门课调用一次 `listOfferings`（Java 只接受单个 `courseCode`，没有游标），
+  再在 Java 返回的结构化 `meetings` 上做确定性选班：MUST 教师硬过滤、PREFER 教师和必避/偏好时段
+  排序、评价覆盖次数次之、`classId` 稳定排序。时间冲突只按 Java 返回的 `meetings` 判断，不解析
+  `meetingTextRaw`，最终判决仍以 `validatePlan` 为准。`UNPARSED`/`INVALID` 班次不会被自动选中。
+  无无冲突组合时只留出最少的课程不选班次，并在 `unknowns` 里给出 `SECTION_NOT_ASSIGNED` 与原因。
+- 本学期开课核对（`application/offering_check.py`）：给定 `offeringSnapshotId` 时，只有在该快照中
+  有班次的课程才会进入模型候选和推荐。先用一次不带 `courseCode` 的 `listOfferings`（limit 100）
+  取整页：不满 100 行即为整个快照，直接判定全部候选；满页时只能确认页内出现的课程开课，其余候选
+  逐门查询，直到找到 `max_course_facts` 门开课课程或用完 `Budget.max_offering_precheck_calls`（10）。
+  学生选定的课程（PIN_COURSE）总是先核对；未开课的选定课程保留在方案中，并给出
+  `SECTION_NOT_ASSIGNED`「本学期没有开设这门课」。模型选出未核实开课的课程会被丢弃（`NOT_OFFERED_DROPPED`
+  或 `UNVERIFIED_OFFERING_DROPPED`）。核对次数不足时在 `unknowns` 写明 `OFFERING_NOT_CHECKED`，
+  不把「没查」说成「没开」。
+- 班次查询单独计数：`Budget.max_offering_calls`（默认 16，`harness/tool_policy.yaml` 中 listOfferings
+  同为 16）不占用 `maxToolCalls=6`；其中开课核对最多用 `max_offering_precheck_calls`（10），其余留给
+  已选班次的课程。RunManifest 契约中尚无该字段，运行报告不记录这一上限；`usage.toolCalls` 也不含班次
+  查询次数。超过上限的课程不选班次，并说明原因。
+- 评价查询同样单独计数：`Budget.max_review_calls`（默认 8，`harness/tool_policy.yaml` 中
+  searchReviews 同为 8）。Java 的 `searchReviews` 每次只接受一个课程代码，因此按课程逐次查询，
+  仅限模型可见的前 `max_course_facts` 门候选课程。超出额度的课程状态为 `NOT_QUERIED`，
+  页面应写「本次规划未查询评价」，不能写成「没有评价」。
+- 模型已给出 `classId` 的条目保持原样，不参与本次选班的冲突计算，仍由 `validatePlan` 核验。
 - `FakeModelAdapter` 只从工具返回的课程 id 里挑候选，不是真实模型；只要走到假模型，
   `PlanningAnswer.unknowns` 就有 `FAKE_MODEL`。核验器假工具固定 `UNKNOWN` + `COURSE_ONLY`，
   不能当成无冲突课表。工具课程集为空时返回 `UNABLE_TO_VERIFY`，不报模型输出非法。
 - 有目标时 Runner 走 提议 → Guard → `validatePlan` → 编译；候选 id 不在工具集合则
-  `EVIDENCE_MISMATCH`/`UNKNOWN_COURSE`，非法模型 JSON 只修复一次。
+  `EVIDENCE_MISMATCH`/`UNKNOWN_COURSE`，非法模型 JSON 终止本次请求。
 - `ToolClient` 已按 `java.openapi.json` 发 typed HTTP（`X-Service-Key` /
   `X-Subject-Id` / `X-Request-Id`，GET 列表读 `data.items`）。未配置
   `CP_JAVA_BASE_URL` 且未开假工具时仍是 `TOOL_UNAVAILABLE`(503)。
 - 配置了 `CP_MODEL_BASE_URL` 与 `CP_MODEL_API_KEY` 时走 OpenAI 兼容
   `/chat/completions`；密钥只放本机 `.env`。只配地址、密钥为空时仍用假模型，并留下
   `FAKE_MODEL`。地址和密钥都在、但模型名仍是占位符时，进程启动失败。上游 429 是
-  `MODEL_RATE_LIMITED`，5xx 是 `MODEL_UNAVAILABLE`，都不当成非法输出。
-- 会话与幂等是内存实现。相同键执行中返回 `409 REQUEST_IN_PROGRESS`；失败会释放占位以便重试。
-- `planning.openapi.json` 的 12 个端点全部有对应路由；走 Java 的端点未配置 `CP_JAVA_BASE_URL`
-  时返回 `TOOL_UNAVAILABLE`(503)，不冒充无冲突。`listSessionRecords` 对应的 Java 列表工具
-  （`listAcademicRecords`）尚待模块 B 在 `java.openapi.json` 补齐。
+  `MODEL_RATE_LIMITED`，其他上游 HTTP 拒绝是 `MODEL_UNAVAILABLE`，其中只有上游 5xx 可重试。
+- 会话与幂等是内存实现。相同键执行中返回 `409 REQUEST_IN_PROGRESS`。规划与对话在已有模型用量时保留终态失败供同键重放。
+- 会话学业记录列表转发 Java 的 `listAcademicRecords`。走 Java 的端点未配置 `CP_JAVA_BASE_URL`
+  时返回 `TOOL_UNAVAILABLE`（503）。
 - 会话内搜班次 `GET /api/v1/session-offerings` 和换一门课 `POST /api/v1/session-plans/replace`
   已写进 `planning.openapi.json`（随 #28 合入），并有 `CourseOffering` 正反例。
-  它们调 `listOfferings` 与 `validatePlan`，但 **`POST /api/v1/plans/validate` 在 Java 侧
-  还没有实现**，所以真实环境下换班次一律失败（接口不存在）。方案没有班次快照时，
+  它们调用 Java 的 `listOfferings` 与 `validatePlan`。方案没有班次快照时，
   搜索返回 `200`、封套 `UNKNOWN`、`items` 为空，不会当成客户端把字段填错；替换仍不编造
   `PlanValidation`。Java 不可用仍是 503，不会写成 `VALID`。
-- 预算默认值（8000/2000 tokens、6 tools、3 model calls、45 s）由环境变量组装成一份
+- 预算默认值（8000/4000 tokens、6 tools、3 model calls、45 s）由环境变量组装成一份
   `Budget`，manifest 记录同一份，未做性能实测。`harness/tool_policy.yaml` 的次数和
   `context_policy.yaml` 的条数会实际限制**规划运行**（会话内换班次的搜索/替换不经过预算计数）。
   超出 per-tool 上限是整次运行以 503 `BUDGET_EXCEEDED` 结束，不是跳过这一次调用；

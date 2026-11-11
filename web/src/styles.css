@@ -136,6 +136,27 @@ select:focus-visible {
   line-height: 1.4;
 }
 
+/* 模拟模式横幅：固定在顶部，明确告诉学生课表是模拟数据 */
+.sim-banner {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  padding: 6px 12px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b3f00;
+  background: #ffe9b8;
+  border-bottom: 1px solid #e0b86a;
+}
+
+/* 学校公布课表（仍待核验）：蓝色，与模拟数据的橙色区分开。 */
+.sim-banner--official {
+  color: #1d4a6b;
+  background: #e3eef8;
+  border-bottom-color: #9bbcd8;
+}
+
 .mode-badge--demo {
   border-color: #e8d9bc;
   color: #875817;
@@ -153,6 +174,12 @@ select:focus-visible {
   width: min(1040px, calc(100% - 64px));
   margin-top: 52px;
 }
+/* 结果页：比其他宽页更宽（最多 1200px），给课表与课程两栏留位置。 */
+.page-shell--result {
+  width: min(1200px, calc(100% - 64px));
+  margin-top: 40px;
+}
+
 .page-shell:focus {
   outline: none;
 }
@@ -244,11 +271,6 @@ h1:focus {
 .notice--error {
   color: #8b3c31;
   background: #fff4f2;
-}
-
-.notice--success {
-  color: #365a49;
-  background: var(--wash);
 }
 
 .choice-grid {
@@ -687,10 +709,6 @@ fieldset {
   gap: 12px;
 }
 
-.teacher-search > .button {
-  justify-self: start;
-}
-
 .teacher-search-actions {
   display: flex;
   flex-wrap: wrap;
@@ -737,12 +755,13 @@ fieldset {
     margin-top: 28px;
   }
 
-  .brand {
-    font-size: 18px;
+  .page-shell--result {
+    width: calc(100% - 40px);
+    margin-top: 22px;
   }
 
-  .brand .small {
-    display: none;
+  .brand {
+    font-size: 18px;
   }
 
   .page-shell {

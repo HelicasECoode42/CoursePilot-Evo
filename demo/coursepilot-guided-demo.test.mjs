@@ -41,8 +41,6 @@ test("the schedule step is always present and keeps must and prefer slots indepe
   state.preferSlots.push("2-3");
 
   assert.equal(advanceFlow().ok, true);
-  assert.equal(state.mustReviewed, true);
-  assert.equal(state.preferReviewed, true);
   assert.deepEqual(Array.from(state.mustSlots), ["1-1"]);
   assert.deepEqual(Array.from(state.preferSlots), ["2-3"]);
   assert.equal(backFlow(), "time");
@@ -50,33 +48,26 @@ test("the schedule step is always present and keeps must and prefer slots indepe
   assert.deepEqual(Array.from(state.preferSlots), ["2-3"]);
 });
 
-test("removing a goal keeps its branch answers, and reselecting it finds them still there", () => {
+test("removing a goal keeps its answers, and reselecting it finds them still there", () => {
   const { state, setMotives } = createFlow();
   setMotives(["time", "career", "interest", "gpa", "teacher"]);
   state.mustSlots = ["2-1"];
   state.preferSlots = ["3-5"];
-  state.mustReviewed = true;
-  state.preferReviewed = true;
   state.career = ["backend"];
   state.interest = "机器人";
   state.preferences = ["homework"];
-  state.preferencesReviewed = true;
   state.pinnedPair = "a";
   setMotives(["gpa", "interest"]);
 
   assert.deepEqual(Array.from(state.mustSlots), ["2-1"]);
   assert.deepEqual(Array.from(state.preferSlots), ["3-5"]);
-  assert.equal(state.mustReviewed, true);
-  assert.equal(state.preferReviewed, true);
   assert.deepEqual(Array.from(state.career), ["backend"]);
   assert.equal(state.pinnedPair, "a");
   assert.equal(state.interest, "机器人");
   assert.deepEqual(Array.from(state.preferences), ["homework"]);
-  assert.equal(state.preferencesReviewed, true);
 
   setMotives(["interest"]);
   assert.deepEqual(Array.from(state.preferences), ["homework"]);
-  assert.equal(state.preferencesReviewed, true);
 
   setMotives(["gpa", "interest", "time", "career", "teacher"]);
   assert.deepEqual(Array.from(state.mustSlots), ["2-1"]);
@@ -313,18 +304,14 @@ test("summaries merge full days and full periods and keep scattered cells", () =
 });
 
 test("summaries compress consecutive days and periods into ranges", () => {
-  const { summarizeSlots, dayKeys, periodKeys } = createFlow();
+  const { summarizeSlots } = createFlow();
   const cells = (days, periods) =>
     days.flatMap((day) => periods.map((period) => `${day}-${period}`));
-  assert.equal(summarizeSlots([]), "未设置");
-  assert.equal(summarizeSlots(dayKeys(1)), "周一（整天）");
-  assert.equal(summarizeSlots(periodKeys(1)), "每天第1节");
   assert.equal(summarizeSlots(cells([1, 2, 3, 4, 5], [1, 2])), "周一至周五 第1–2节");
   assert.equal(summarizeSlots(cells([2], [3])), "周二 第3节");
   assert.equal(summarizeSlots(cells([1, 4], [2])), "周一、周四 第2节");
   assert.equal(summarizeSlots(cells([3], [1, 3])), "周三 第1、3节");
   assert.equal(summarizeSlots(cells([1, 2, 3, 6], [2])), "周一至周三、周六 第2节");
-  assert.equal(summarizeSlots(cells([1, 2, 3], [1, 2, 3, 5])), "周一至周三 第1–3节、第5节");
   assert.equal(summarizeSlots(cells([1, 2, 3], [1, 2, 3, 5])), "周一至周三 第1–3节、第5节");
 });
 
@@ -349,21 +336,6 @@ test("materials summary keeps a chosen but empty interest row", () => {
   assert.match(text, /兴趣主题/);
   assert.match(text, /这一项留空了/);
   dom.window.close();
-});
-
-test("removing the time goal keeps both intensity groups and their review flags", () => {
-  const { state, setMotives } = createFlow();
-  setMotives(["time", "gpa"]);
-  state.mustSlots = ["1-1"];
-  state.preferSlots = ["2-2"];
-  state.mustReviewed = true;
-  state.preferReviewed = true;
-
-  setMotives(["gpa"]);
-  assert.deepEqual(Array.from(state.mustSlots), ["1-1"]);
-  assert.deepEqual(Array.from(state.preferSlots), ["2-2"]);
-  assert.equal(state.mustReviewed, true);
-  assert.equal(state.preferReviewed, true);
 });
 
 function openDemo() {

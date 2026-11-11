@@ -46,7 +46,11 @@ export interface SnapshotSummary {
   snapshotId: string;
   kind: "CURRICULUM" | "OFFERING";
   state: "PUBLISHED" | "REJECTED";
-  sourceKind: "CURRICULUM_FILE" | "BROWSER_SNAPSHOT" | "SYNTHETIC";
+  sourceKind:
+    | "CURRICULUM_FILE"
+    | "BROWSER_SNAPSHOT"
+    | "OFFICIAL_DOCUMENT"
+    | "SYNTHETIC";
   termId: string | null;
   createdAt: string;
   sourceValidation: "VERIFIED" | "UNVERIFIED" | "SYNTHETIC";
@@ -134,6 +138,10 @@ export interface AuditItem {
   gapCredits: number | null;
   state: AuditState;
   sourceRefIds: string[];
+  /** LOCAL 为本地课程折算；SCHOOL_REPORT 为学分取自学校报告同名类别。缺省视为 LOCAL。 */
+  source?: "LOCAL" | "SCHOOL_REPORT";
+  /** 在读课程学分，不计入 earnedCredits；学分未知时为 null，缺省表示未提供。 */
+  inProgressCredits?: number | null;
 }
 
 export interface AuditResult {
@@ -141,6 +149,8 @@ export interface AuditResult {
   academicRecordId: string;
   recordRevision: number;
   transcriptComplete: boolean;
+  /** transcriptComplete 为 true 时的依据；为 false 时为 null。 */
+  transcriptCompleteSource?: "SCHOOL_IMPORT_FULL" | "MANUAL" | null;
   requirements: AuditItem[];
   suggestedCourseCodes: string[];
   unknowns: Issue[];
@@ -155,6 +165,14 @@ export interface PlanItem {
 export type PlanVerdict = "VALID" | "INVALID" | "UNKNOWN";
 export type PlanScope = "COURSE_ONLY" | "REAL_TIMETABLE" | "SIMULATION";
 
+/** 分项：TIMETABLE 本学期课表核验，CURRICULUM 毕业要求核对。verdict 取值同总判决。 */
+export interface PlanSection {
+  scope: "TIMETABLE" | "CURRICULUM";
+  verdict: PlanVerdict;
+  violations: Issue[];
+  unknownChecks: Issue[];
+}
+
 /** 核验器判决。页面原样展示，不自行改写，也不从 violations 为空推断通过。 */
 export interface PlanValidation {
   verifierResultId: string;
@@ -167,6 +185,8 @@ export interface PlanValidation {
   unknownChecks: Issue[];
   performedChecks: string[];
   sourceRefIds: string[];
+  /** Java 始终返回两项；fixture 尚未补齐前可缺省，页面尚未展示分项（待 UI 任务）。 */
+  sections?: PlanSection[];
 }
 
 export interface QuestionChoice {
@@ -268,6 +288,17 @@ export type PlanningDecision =
   | "CLARIFY"
   | "UNABLE_TO_VERIFY";
 
+/**
+ * 方案所指的学期与课表参考。targetTerm 恒为 NEXT_SEMESTER；课表参考为方案所用开课快照，
+ * 快照未知时三个参考字段均为 null，页面应明说学期未知，不能猜。
+ */
+export interface PlanningContext {
+  targetTerm: "NEXT_SEMESTER";
+  timetableReferenceSnapshotId: string | null;
+  timetableReferenceTermId: string | null;
+  timetableSourceValidation: "VERIFIED" | "UNVERIFIED" | "SYNTHETIC" | null;
+}
+
 export interface PlanningAnswer {
   taskId: string;
   traceId: string;
@@ -277,6 +308,7 @@ export interface PlanningAnswer {
   clarification: Question | null;
   unknowns: Issue[];
   usage: Usage;
+  planningContext?: PlanningContext | null;
 }
 
 /** `GET /api/v1/academic-records` 的 data：items 为空数组表示本会话尚无记录。 */
@@ -363,6 +395,12 @@ export interface TeacherCourseOption {
   availability: "CURRENT_VERIFIED" | "HISTORICAL_ONLY" | "UNKNOWN";
   reviewNoteIds: string[];
   classIds: string[];
+  /** 可选新增：以下字段旧数据可能缺省。 */
+  courseName?: string | null;
+  sectionCount?: number | null;
+  offeringSnapshotId?: string | null;
+  offeringSourceValidation?: "VERIFIED" | "UNVERIFIED" | "SYNTHETIC" | null;
+  factSource?: "TEACHER_BINDING" | "OFFERING_SNAPSHOT" | null;
 }
 
 /**
@@ -412,10 +450,24 @@ export interface RunReport {
 }
 
 /** `GET /api/v1/session-offerings` 的 data。items 为空数组是正常业务状态。 */
+/** Java 对单个候选班次与学生硬时间约束（必避时段）的核对结果。只映射 Java 的判决，不做时间计算。 */
+export type MustAvoidVerdict =
+  | "CONFLICT"
+  | "CLEAR_UNVERIFIED"
+  | "CLEAR"
+  | "UNKNOWN";
+
+export interface MustAvoidCheck {
+  classId: string;
+  verdict: MustAvoidVerdict;
+}
+
 export interface SessionOfferingList {
   previousPlanId: string;
   courseCode: string;
   items: CourseOffering[];
+  /** 方案有硬时间约束时，每个候选班次各有一条；没有硬约束时为空数组（并不代表已核对）。 */
+  mustAvoidChecks: MustAvoidCheck[];
 }
 
 /** `POST /api/v1/session-plans/replace` 的请求体。selectedClassId 必须来自搜索结果。 */
@@ -440,6 +492,13 @@ export interface SessionPlanReplacement {
 export interface SessionPlanEditInput {
   previousPlanId: string;
   courseCode: string;
+}
+
+/** `POST /api/v1/session-plans/add-course` 的请求体。classId 缺省时只加课，不选班次。 */
+export interface SessionPlanCourseAddInput {
+  previousPlanId: string;
+  courseCode: string;
+  classId?: string | null;
 }
 
 export interface SessionPlanEditResult {

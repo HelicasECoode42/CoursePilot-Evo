@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { AuditItem, CompletedCourse } from "../contracts";
+import type { AuditItem, AuditResult, CompletedCourse } from "../contracts";
 import {
+  auditSourceLabel,
   buildRecordInput,
   describeCompleteness,
   duplicateCourseCodes,
   groupAuditItems,
+  inProgressNote,
+  inProgressSummary,
+  needsCompleteCheckbox,
+  recordSourceLabel,
 } from "./academic-record";
 
 function item(requirementId: string, state: AuditItem["state"]): AuditItem {
@@ -134,5 +139,128 @@ describe("buildRecordInput", () => {
     ];
     const input = buildRecordInput("curriculum-1", courses, true);
     expect(input.completedCourses).not.toBe(courses);
+  });
+});
+
+describe("recordSourceLabel", () => {
+  it("手动补录（USER_IMPORT）标为手动补录，不叫虚构数据", () => {
+    expect(recordSourceLabel("USER_IMPORT", false)).toBe("手动补录");
+  });
+
+  it("学校进度导入的记录单独说明", () => {
+    expect(recordSourceLabel("USER_IMPORT", true)).toBe("学校进度导入");
+  });
+
+  it("只有 SYNTHETIC 才是虚构数据", () => {
+    expect(recordSourceLabel("SYNTHETIC", false)).toBe("虚构数据");
+    expect(recordSourceLabel("SYNTHETIC", true)).toBe("虚构数据");
+  });
+});
+
+/** 形状与 Java AuditResult 一致（虚构数值）：来源、在读学分和完整性依据都来自学校报告同步。 */
+const syncedAudit: AuditResult = {
+  curriculumSnapshotId: "curr-fake",
+  academicRecordId: "rec-fake",
+  recordRevision: 2,
+  transcriptComplete: true,
+  transcriptCompleteSource: "SCHOOL_IMPORT_FULL",
+  requirements: [
+    {
+      requirementId: "req-a",
+      category: "学科基础课",
+      courseCodes: [],
+      requiredCredits: 40,
+      earnedCredits: 6,
+      gapCredits: 34,
+      state: "UNSATISFIED",
+      sourceRefIds: ["ref-a"],
+      source: "SCHOOL_REPORT",
+      inProgressCredits: 0,
+    },
+    {
+      requirementId: "req-b",
+      category: "专业选修课",
+      courseCodes: ["FAKE-EL-01"],
+      requiredCredits: 20,
+      earnedCredits: 3,
+      gapCredits: 17,
+      state: "UNSATISFIED",
+      sourceRefIds: ["ref-b"],
+      source: "SCHOOL_REPORT",
+      inProgressCredits: 3,
+    },
+    {
+      requirementId: "req-c",
+      category: "通识课",
+      courseCodes: [],
+      requiredCredits: 10,
+      earnedCredits: 10,
+      gapCredits: 0,
+      state: "SATISFIED",
+      sourceRefIds: ["ref-c"],
+      source: "LOCAL",
+      inProgressCredits: 0,
+    },
+  ],
+  suggestedCourseCodes: [],
+  unknowns: [],
+};
+
+describe("学校报告同步后的核对展示", () => {
+  it("来源标签区分学校报告与本地核对，缺省按本地", () => {
+    expect(auditSourceLabel({ source: "SCHOOL_REPORT" })).toBe("按学校报告");
+    expect(auditSourceLabel({ source: "LOCAL" })).toBe("本地核对");
+    expect(auditSourceLabel({})).toBe("本地核对");
+  });
+
+  it("在读学分单独汇总，不并入已获学分，并以分计算避免小数误差", () => {
+    expect(inProgressSummary(syncedAudit.requirements)).toEqual({
+      credits: 3,
+      unknownCount: 0,
+    });
+    expect(
+      inProgressSummary([
+        { inProgressCredits: 0.1 },
+        { inProgressCredits: 0.2 },
+        { inProgressCredits: null },
+      ]),
+    ).toEqual({ credits: 0.3, unknownCount: 1 });
+  });
+
+  it("有在读学分时给出一句说明，没有时不占行", () => {
+    expect(inProgressNote(syncedAudit.requirements)).toBe(
+      "另有 3 学分在读，尚未计入已获学分",
+    );
+    expect(
+      inProgressNote([{ inProgressCredits: 0 }, { inProgressCredits: 0 }]),
+    ).toBeNull();
+    expect(inProgressNote([{ inProgressCredits: null }])).toBe(
+      "部分类别的在读学分待确认",
+    );
+  });
+
+  it("学校导入已读全时说明按完整记录核对，且不再要求手动勾选", () => {
+    expect(describeCompleteness(syncedAudit)).toBe(
+      "学校导入已读全，按完整记录核对。",
+    );
+    expect(needsCompleteCheckbox(syncedAudit)).toBe(false);
+  });
+
+  it("手动声明或未声明完整时仍保留勾选入口", () => {
+    const manual: AuditResult = {
+      ...syncedAudit,
+      transcriptComplete: true,
+      transcriptCompleteSource: "MANUAL",
+    };
+    expect(describeCompleteness(manual)).toBe("已声明记录完整。");
+    expect(needsCompleteCheckbox(manual)).toBe(false);
+
+    const undeclared: AuditResult = {
+      ...syncedAudit,
+      transcriptComplete: false,
+      transcriptCompleteSource: null,
+    };
+    expect(needsCompleteCheckbox(undeclared)).toBe(true);
+    expect(describeCompleteness(undeclared)).toContain("未声明完整");
   });
 });

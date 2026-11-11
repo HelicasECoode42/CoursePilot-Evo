@@ -10,6 +10,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -42,8 +43,7 @@ public class ReviewImportController {
         @RequestHeader(value = "X-Admin-Key", required = false) String presentedKey,
         @RequestBody JsonNode body) {
         subjects.require(subjectId);
-        if (adminKey == null || adminKey.isBlank() || presentedKey == null ||
-            !MessageDigest.isEqual(adminKey.getBytes(StandardCharsets.UTF_8), presentedKey.getBytes(StandardCharsets.UTF_8))) {
+        if (!adminKeyOk(presentedKey)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Envelope.error(requestId, "ADMIN_KEY_INVALID", "管理员密钥缺失或无效", null, false));
         }
         try {
@@ -92,6 +92,42 @@ public class ReviewImportController {
             return ResponseEntity.badRequest().body(Envelope.error(requestId, "INVALID_REVIEW_IMPORT", "评价导入格式不合法", null, false));
         }
     }
+    /**
+     * 管理员删除已导入的评价（按 reviewNoteId，最多 200 条）。
+     * 用于替换旧版本拆分前的粘连评价：upsert 无法删除旧 ID，因此需要显式退役。
+     * 只删除列出的 ID；不存在的 ID 忽略，返回实际删除条数。
+     */
+    @DeleteMapping("/import")
+    @Transactional
+    public ResponseEntity<Envelope<?>> retireImportedReviews(@RequestHeader("X-Request-Id") String requestId,
+        @RequestHeader("X-Subject-Id") String subjectId,
+        @RequestHeader(value = "X-Admin-Key", required = false) String presentedKey,
+        @RequestBody JsonNode body) {
+        subjects.require(subjectId);
+        if (!adminKeyOk(presentedKey)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Envelope.error(requestId, "ADMIN_KEY_INVALID", "管理员密钥缺失或无效", null, false));
+        }
+        try {
+            if (!ID.matcher(requestId).matches() || !body.isObject() || body.size() != 2 ||
+                !"1.0".equals(body.path("schemaVersion").asText()) || !body.path("reviewNoteIds").isArray() ||
+                body.path("reviewNoteIds").size() < 1 || body.path("reviewNoteIds").size() > 200) throw new IllegalArgumentException();
+            Set<String> ids = new LinkedHashSet<>();
+            for (JsonNode n : body.path("reviewNoteIds")) {
+                if (!n.isTextual() || !ID.matcher(n.asText()).matches() || !ids.add(n.asText())) throw new IllegalArgumentException();
+            }
+            List<ReviewNote> found = repository.findAllById(ids);
+            repository.deleteAll(found);
+            return ResponseEntity.ok(Envelope.ok(requestId, new RetireResult(found.size())));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body(Envelope.error(requestId, "INVALID_REVIEW_RETIRE", "评价删除请求不合法", null, false));
+        }
+    }
+
+    private boolean adminKeyOk(String presentedKey) {
+        return adminKey != null && !adminKey.isBlank() && presentedKey != null &&
+            MessageDigest.isEqual(adminKey.getBytes(StandardCharsets.UTF_8), presentedKey.getBytes(StandardCharsets.UTF_8));
+    }
+
     private static String id(JsonNode node, String field, boolean nullable) {
         JsonNode value = node.get(field);
         if (nullable && value.isNull()) return null;
@@ -99,4 +135,5 @@ public class ReviewImportController {
         return value.asText();
     }
     public record ImportResult(int importedCount) {}
+    public record RetireResult(int deletedCount) {}
 }

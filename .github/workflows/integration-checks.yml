@@ -22,28 +22,8 @@ jobs:
   stack-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    services:
-      mysql:
-        image: mysql:8.4
-        env:
-          MYSQL_ROOT_PASSWORD: ci-root-not-a-secret
-          MYSQL_DATABASE: coursepilot
-          MYSQL_USER: coursepilot
-          MYSQL_PASSWORD: ci-password-not-a-secret
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
     env:
       # 仅用于让统一配置入口通过校验、让判定可比；不是任何真实密钥（真实值只放本机 data/private/stack.env）。
-      CP_MYSQL_HOST: 127.0.0.1
-      CP_MYSQL_PORT: "3306"
-      CP_MYSQL_DB: coursepilot
-      CP_MYSQL_USER: coursepilot
-      CP_MYSQL_PASSWORD: ci-password-not-a-secret
       CP_SERVICE_KEY: ci-service-key-not-a-secret
       # Java 实际监听 8081（java-environment/src/main/resources/application.properties）
       CP_JAVA_BASE_URL: http://127.0.0.1:8081

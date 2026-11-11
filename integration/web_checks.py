@@ -551,7 +551,7 @@ def check_shell(driver: PageDriver, url: str) -> StepResult:
     )
 
 
-def check_api_down(driver: PageDriver, url: str, api_reachable: bool, stub_active: bool = False) -> StepResult:
+def check_api_down(driver: PageDriver, url: str, api_reachable: bool) -> StepResult:
     step = "web_api_down"
     expect = "Python 不可达时页面给出错误与重试入口，不白屏、不切换演示数据"
     gate = needs_browser(driver, step, expect, "页面行为只能在真浏览器里判")
@@ -863,7 +863,7 @@ def run_web_checks(
         check_document(driver, url),
         check_bundle(url),
         check_shell(driver, url),
-        check_api_down(driver, url, api_reachable, stub_active=with_stub and not api_reachable),
+        check_api_down(driver, url, api_reachable),
         check_unknown(driver, url, stub_url),
         check_stub_path(driver, url, stub_path_url)
         if with_stub

@@ -1,6 +1,6 @@
 # CoursePilot E1 学生页面
 
-学生页面使用 Vue 3、Vite、TypeScript、Vue Router 和 Pinia。主流程为首页 → 学业连接与导入 → 我的学业（进度、课程评价、AI 对话）→ 完整需求引导 → 学分选课 → 方案与调整。引导保留目标、考核偏好、兴趣与方向、教师、时间及优先级确认；目标至少选择一项，其余偏好可留空。答案和匿名会话保存在 Pinia 内存中，刷新后不恢复。
+学生页面使用 Vue 3、Vite、TypeScript、Vue Router 和 Pinia。主流程为首页 → 学业连接与导入 → 我的学业（进度、课程评价、AI 对话）→ 完整需求引导 → 学分选课 → 方案与调整。引导保留目标、考核偏好、兴趣与方向、教师、时间及优先级确认；目标至少选择一项，其余偏好可留空。
 
 ## 启动
 
@@ -45,10 +45,10 @@ VITE_COURSEPILOT_MODE=simulation npm run dev
 
 打开 `http://127.0.0.1:5173`，选择目标，在资料页填写虚构课程（例如 `CS101`、3 学分），返回问答页提交规划。此模式连接本地 Java 和 Python，使用虚构培养方案；未配置真实模型时结果会标明假模型。临时数据库在 Java 停止后清空。
 
-- **真实服务模式**是默认模式。可用 `VITE_API_BASE_URL` 指定 Python 服务地址，未设置时为 `http://127.0.0.1:8000`。启动示例：
+- **真实服务模式**是默认模式。浏览器默认请求同源 `/api`，Vite 转发至 `http://127.0.0.1:8000`。可通过 `COURSEPILOT_API_PROXY` 配置代理目标。开发时也可用 `VITE_API_BASE_URL` 直接指定已允许跨源访问的 Python 地址。生产预览只允许同源连接。默认启动：
 
   ```bash
-  VITE_COURSEPILOT_MODE=http VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev
+  npm run dev
   ```
 
   页面只经唯一 API client 调用 Python。网络失败、超时或响应不符合契约时显示错误和重试入口，不会切换成演示数据。
@@ -61,7 +61,7 @@ VITE_COURSEPILOT_MODE=simulation npm run dev
 
   它使用固定的虚构培养方案、学业记录和规划结果，不调用后端服务。
 
-匿名 bearer 只存于当前页面内存，不进入 URL、`localStorage`、`sessionStorage` 或应用日志。页面按 `expiresAt` 安排过期清理；真实服务端返回 401 或会话过期时，会中止在途请求、清除会话凭据和培养方案上下文并提示重新开始。已填写的选课目标暂留在当前页面内存，新会话建立后可继续；刷新页面会清空会话与答案。
+匿名会话凭据、规划草稿和当前结果保存在本标签页的 `sessionStorage`。刷新后，页面先恢复本地状态，再向服务端确认令牌。页面按 `expiresAt` 处理到期，收到 401 时也会结束旧会话。
 
 ## 当前交付边界
 

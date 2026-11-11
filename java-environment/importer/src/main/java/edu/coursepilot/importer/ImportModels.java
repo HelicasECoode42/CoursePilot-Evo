@@ -103,7 +103,8 @@ public final class ImportModels {
   }
 
   /**
-   * 工作簿「备注」区段的一条规则或待核问题，原文保留。 disposition：UNMODELED = 未建模，带入核验 unknown；EXCLUDED = 按负责人要求排除（原表课程行）。
+   * 工作簿「备注」区段的一条规则或待核问题，原文保留。 disposition：UNMODELED = 未建模，带入毕业要求分项的 unknown；EXCLUDED =
+   * 按负责人要求排除（原表课程行）；INFORMATIONAL = 纯说明文字（任意选修说明、课程标记图例），不是约束，不计入 unknown。
    */
   public record UnmodeledRule(
       String sheet,
@@ -116,7 +117,8 @@ public final class ImportModels {
       Disposition disposition) {
     public enum Disposition {
       UNMODELED,
-      EXCLUDED
+      EXCLUDED,
+      INFORMATIONAL
     }
   }
 

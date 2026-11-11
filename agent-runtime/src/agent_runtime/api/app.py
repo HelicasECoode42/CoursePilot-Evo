@@ -20,6 +20,7 @@ from agent_runtime.api.routes import (
     academic_records,
     advice_chat,
     gateway,
+    offering_summary,
     plan_replacement,
     planning,
     reports,
@@ -143,6 +144,7 @@ def create_app(
     app.include_router(plan_replacement.router)
     app.include_router(academic_records.router)
     app.include_router(school_progress.router)
+    app.include_router(offering_summary.router)
     app.include_router(gateway.router)
     app.include_router(reports.router)
     return app

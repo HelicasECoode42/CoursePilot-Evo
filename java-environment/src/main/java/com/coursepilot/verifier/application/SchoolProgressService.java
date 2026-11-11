@@ -66,7 +66,11 @@ public class SchoolProgressService {
         String contentHash = hash(input.curriculumSnapshotId(), input.snapshot());
         var previous = snapshots.findBySubjectIdAndContentHash(subjectId, contentHash);
         if (previous.isPresent()) {
-            SchoolProgressDtos.ImportResult reused = result(previous.get(), true);
+            // A content-identical import may be old, while the transcript may have since
+            // advanced through another import. Return the current record DTO with the reused
+            // source snapshot so the caller never receives an obsolete revision.
+            RecordDtos.AcademicRecord currentRecord = records.findFor(subjectId).orElse(null);
+            SchoolProgressDtos.ImportResult reused = result(previous.get(), true, currentRecord);
             saveIdempotency(subjectId, scopedKey, requestDigest, reused);
             return reused;
         }
@@ -93,8 +97,10 @@ public class SchoolProgressService {
                     course.courseCode(), null, RecordDtos.Outcome.UNKNOWN, term));
             }
         }
+        // 学校导入读全（每门课状态已知、每个类别已读到）时，学业记录按完整处理（docs/27 之前写死为 false）。
+        boolean fullyRead = SchoolReport.from(input.snapshot()).fullyRead();
         var inputRecord = new RecordDtos.AcademicRecordInput("1.0", input.curriculumSnapshotId(),
-            new ArrayList<>(uniqueCourses.values()), false, "USER_IMPORT");
+            new ArrayList<>(uniqueCourses.values()), fullyRead, "USER_IMPORT");
         RecordDtos.AcademicRecord academicRecord = records.submit(subjectId,
             key == null ? null : "school-record:" + hashText(key), inputRecord);
         Instant importedAt = Instant.now();
@@ -205,9 +211,16 @@ public class SchoolProgressService {
     }
 
     private SchoolProgressDtos.ImportResult result(SchoolProgressSnapshot entity, boolean reused) {
+        return result(entity, reused, null);
+    }
+
+    private SchoolProgressDtos.ImportResult result(SchoolProgressSnapshot entity, boolean reused,
+                                                     RecordDtos.AcademicRecord recordOverride) {
         try {
             var snapshot = mapper.readValue(entity.getSnapshotJson(), SchoolProgressDtos.Snapshot.class);
-            var record = mapper.readValue(entity.getAcademicRecordJson(), RecordDtos.AcademicRecord.class);
+            var record = recordOverride == null
+                ? mapper.readValue(entity.getAcademicRecordJson(), RecordDtos.AcademicRecord.class)
+                : recordOverride;
             return new SchoolProgressDtos.ImportResult(new SchoolProgressDtos.Receipt(
                 entity.getSchoolProgressId(), entity.getContentHash(), entity.getImportedAt(), reused),
                 snapshot, record);
