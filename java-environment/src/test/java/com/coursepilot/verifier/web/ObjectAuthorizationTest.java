@@ -75,6 +75,22 @@ class ObjectAuthorizationTest {
     }
 
     @Test
+    @DisplayName("时间解析端点返回完整解析结果并受服务密钥保护")
+    void timeParserEndpointReturnsParsedMeetings() throws Exception {
+        mvc.perform(post("/api/v1/verification/parse-time")
+                .header(KEY, "test-key")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"meetingTextRaw\":\"周一第1-2节{第1-16周}\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("OK"))
+            .andExpect(jsonPath("$.data.meetings.length()").value(1))
+            .andExpect(jsonPath("$.data.meetings[0].dayOfWeek").value(1))
+            .andExpect(jsonPath("$.data.meetings[0].startSection").value(1))
+            .andExpect(jsonPath("$.data.meetings[0].endSection").value(2))
+            .andExpect(jsonPath("$.data.meetings[0].weeks.length()").value(16));
+    }
+
+    @Test
     @DisplayName("学业记录列表不再接受 studentId 参数，传了也只按 X-Subject-Id 定范围")
     void studentIdParamIsIgnored() throws Exception {
         // 原越权写法：带上别人的学号。现在参数无效，范围由主体头决定。

@@ -55,7 +55,7 @@ flowchart LR
 
 ## 5. 上课时间和浏览器插件
 
-本机插件匹配 `https://jwxt.shu.edu.cn/jwglxt/xsxk/*`，`@grant none`，改写 `window.jQuery.post` 观察选课页响应。**只有用户能访问匹配页面、页面确实发出相应请求并返回数据时**，插件才可能读到教学班；现在未实测，不能把它称作稳定官方 API。原脚本还含 `initXz(); yd.click()`，不可原样当只读采集器。以后若得到合法样例，独立开发只读 Browser Adapter，由浏览器利用当前登录态导出最小 JSON；后端不模拟登录、不保存 Cookie/Token。详见[浏览器适配说明](09-browser-adapter.md)。
+本机插件匹配 `https://jwxt.shu.edu.cn/jwglxt/xsxk/*`，`@grant none`，改写 `window.jQuery.post` 观察选课页响应。**只有用户能访问匹配页面、页面确实发出相应请求并返回数据时**，插件才可能读到教学班；现在未实测，不能把它称作稳定官方 API。原脚本还含 `initXz(); yd.click()`，不可原样当只读采集器。以后若得到合法样例，独立开发只读 Browser Adapter，由浏览器利用当前登录态导出最小 JSON；后端不模拟登录、不保存 Cookie/Token。详见浏览器适配说明。
 
 首版用明确标为 `SYNTHETIC` 的样例，例如 `星期三第3-4节{1-16周(单)}`，归一成 `Meeting(day, sections, weeks)`。两个教学班在星期、节次、周次三维同时相交才冲突。未知格式保留原文并返回 `UNKNOWN_TIME_FORMAT`，不能判“无冲突”。这验证算法，不证明当期开课。
 

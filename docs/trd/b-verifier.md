@@ -1,6 +1,6 @@
 # B 模块：Java 数据与规则核验（业务说明与 TRD）
 
-负责人：**mira-xu**。先读[团队总览](../15-team-baseline-and-batches.md)，再读本页业务功能，实施时查下半页接口与规则。当前已有可运行实现：课程/班次查询、学业核对、时间解析与冲突判断、服务密钥与对象级授权，54 个测试通过。契约 15 个操作实现了 5 个，其中只有 `auditRequirements` 端到端可用——`listCourses`/`listOfferings` 出参不合契约，两个学业记录端点恒返回 UNKNOWN；排期见[本期任务](../19-delivery-plan.md)。
+负责人：**mira-xu**。先读团队总览，再读本页业务功能，实施时查下半页接口与规则。当前已有可运行实现：课程/班次查询、学业核对、时间解析与冲突判断、服务密钥与对象级授权，54 个测试通过。契约 15 个操作实现了 5 个，其中只有 `auditRequirements` 端到端可用——`listCourses`/`listOfferings` 出参不合契约，两个学业记录端点恒返回 UNKNOWN；排期见[本期任务](../19-delivery-plan.md)。
 
 ## 先理解你要交出的完整模块
 
@@ -48,7 +48,7 @@ JiangYiLin-Q121 提供规范化资料和核对基线；goat-yang 提供候选和
 
 ### 1. 需求追溯与唯一写入
 
-班次输入可参考 [SHUOSC 历史样本](../09-browser-adapter.md)。B1/B3 与 A 核对来源类型、标识关联、校历和容量策略后再接入；`teacherId` 不能直接作为本项目 `teacherKey`，时间原文中的备注与缺周次不能被忽略。历史格式测试与当期真实核验分开。
+班次输入可参考 SHUOSC 历史样本。B1/B3 与 A 核对来源类型、标识关联、校历和容量策略后再接入；`teacherId` 不能直接作为本项目 `teacherKey`，时间原文中的备注与缺周次不能被忽略。历史格式测试与当期真实核验分开。
 
 方案工作区的班次替换复用 `GET /api/v1/offerings` 查询课程在指定学期快照下的多个班次，并复用 `POST /api/v1/plans/validate` 对替换后的完整 `PlanItem[]` 进行核验。Python 是 Web 唯一入口；B 不增加浏览器直连路径。每个返回班次必须保留 `classId`、原始时间/解析状态、来源及所属快照。Java 必须把变更后的整份方案与其余班次和 `hardConstraints` 一起核验；单个班次自身无冲突不代表放入整份方案后无冲突。无真实、同学期且通过资格检查的 offering snapshot 时返回 UNKNOWN。
 
@@ -164,7 +164,7 @@ sequenceDiagram
 
 ### 契约变更与完成标准
 
-字段以 [contracts](../../contracts/README.md) 为真源，行为以 [公共契约](../04-infrastructure-workflow.md) 为准。提交提供者/消费者 DTO、正反例和受影响测试；Schema 破坏性变更升版本，不能边跑 Benchmark 边改。调试和提交要求见 [工程规范](../16-engineering-and-debugging.md)。
+字段以 [contracts](../../contracts/README.md) 为真源，行为以 公共契约 为准。提交提供者/消费者 DTO、正反例和受影响测试；Schema 破坏性变更升版本，不能边跑 Benchmark 边改。调试和提交要求见 工程规范。
 
 任务完成至少包含：实现目录、输入/输出、正常和失败证据、限制；fixture 不算真实接入，HTML 不算生产前端，手工改 Prompt 不算 RSI。每次 PR 使用仓库模板自查，接口 PR 由相邻模块复核。
 
