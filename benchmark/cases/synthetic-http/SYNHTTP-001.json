@@ -1,0 +1,9 @@
+{
+  "caseId": "SYNHTTP-001",
+  "groupId": "SYNTHETIC",
+  "split": "smoke",
+  "provenance": "SYNTHETIC_FICTION",
+  "curriculumSnapshotId": "PLAN_CS_2025",
+  "userQuery": "仅用虚构课程记录检查培养要求审计 HTTP 接线。",
+  "inputFixtureRef": "fixtures/SYNHTTP-001.json"
+}
