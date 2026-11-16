@@ -82,7 +82,7 @@ jobs:
       # CI 只用 SYNTHETIC 种子（AGENTS.md：REAL 不能用 synthetic，反之同样不许混）。
       - name: 证据留存（五段式失败块、服务日志与截图）
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: stack-evidence
           # pids.json 里是 runner 上的绝对路径与 argv，排查用不到，却会暴露目录结构。
